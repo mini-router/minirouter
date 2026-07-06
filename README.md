@@ -50,7 +50,8 @@ prefix rule is documented in `CONTRIBUTOIN.md`, and the submit-ready model bundl
 `submissions/final_model/` when a run is ready to evaluate or publish.
 
 The repository also includes a GitHub Actions PR automation workflow. It labels PRs by path,
-tags miner submission PRs, and forwards accepted submissions to the validator queue.
+tags miner submission PRs, packages `submissions/final_model/`, and forwards accepted submissions
+to the validator queue.
 No separate GitHub bot is required for that flow.
 
 ## Model pool
@@ -215,3 +216,4 @@ Repository setup:
 - set `GITHUB_WEBHOOK_SECRET` in the validator `secrets.env`
 - set `MINIROUTER_WEBHOOK_SECRET` as a GitHub Actions secret with the same value
 - optionally set `BACKEND_WEBHOOK_URL` as a repository variable if the backend URL changes
+- the workflow posts submission archives to `POST /webhooks/github/submission`

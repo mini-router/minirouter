@@ -3,10 +3,11 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -91,6 +92,10 @@ def _safe_team_name(request: Request, explicit: str | None = None) -> str | None
     return request.headers.get("x-team-name") or request.query_params.get("team_name")
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def get_settings(request: Request) -> Settings:
     return request.app.state.settings
 
@@ -129,6 +134,15 @@ def _verify_github_signature(raw_body: bytes, signature: str | None, secret: str
     provided = signature.removeprefix("sha256=")
     if not hmac.compare_digest(expected, provided):
         raise HTTPException(status_code=401, detail="invalid github signature")
+
+
+def _verify_shared_secret(provided: str | None, secret: str) -> None:
+    if not secret or secret == "replace-me":
+        return
+    if not provided:
+        raise HTTPException(status_code=401, detail="missing webhook secret")
+    if not hmac.compare_digest(provided, secret):
+        raise HTTPException(status_code=401, detail="invalid webhook secret")
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -220,6 +234,49 @@ async def github_webhook(request: Request, settings: Settings = Depends(get_sett
             head_sha=head_sha,
             team_name=team_name,
         )
+        session.commit()
+        return SubmissionCreateResponse(submission=_submission_to_schema(submission), evaluation=None)
+    except HTTPException:
+        session.rollback()
+        raise
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        session.close()
+
+
+@router.post("/webhooks/github/submission", response_model=SubmissionCreateResponse)
+async def github_submission_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    repo_full_name: str = Form(...),
+    pr_number: int = Form(...),
+    head_sha: str | None = Form(None),
+    team_name: str | None = Form(None),
+    settings: Settings = Depends(get_settings),
+) -> SubmissionCreateResponse:
+    _verify_shared_secret(request.headers.get("x-minirouter-webhook-secret"), settings.github_webhook_secret)
+    session = get_session(request)
+    try:
+        submission = create_pr_submission(
+            session,
+            settings,
+            repo_full_name=repo_full_name,
+            pr_number=pr_number,
+            head_sha=head_sha,
+            team_name=team_name,
+        )
+        artifact = store_upload(file, settings, submission.id)
+        submission.artifact_name = artifact.name
+        submission.artifact_path = str(artifact.path)
+        submission.artifact_sha256 = artifact.sha256
+        submission.checkpoint_path = str(artifact.checkpoint_path) if artifact.checkpoint_path else None
+        submission.benchmark = settings.eval_benchmark
+        submission.status = "queued"
+        submission.latest_score = None
+        submission.best_run_id = None
+        submission.updated_at = _utcnow()
         session.commit()
         return SubmissionCreateResponse(submission=_submission_to_schema(submission), evaluation=None)
     except HTTPException:

@@ -19,14 +19,19 @@ jobs:
   label_and_queue:
     runs-on: ubuntu-latest
     steps:
-      - name: Label PR and queue submissions
+      - name: Checkout PR contents
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          persist-credentials: false
+
+      - name: Label PR and classify submission
+        id: classify
         uses: actions/github-script@v7
-        env:
-          BACKEND_WEBHOOK_URL: ${{ vars.BACKEND_WEBHOOK_URL }}
-          MINIROUTER_WEBHOOK_SECRET: ${{ secrets.MINIROUTER_WEBHOOK_SECRET }}
         with:
           script: |
-            const crypto = require('crypto')
             const owner = context.repo.owner
             const repo = context.repo.repo
             const pr = context.payload.pull_request
@@ -127,48 +132,46 @@ jobs:
             }
 
             const shouldQueue = labels.has('miner') && labels.has('submission')
+            core.setOutput('should_queue', String(shouldQueue))
+            core.setOutput('repo_full_name', `${owner}/${repo}`)
+            core.setOutput('pr_number', String(pr.number))
+            core.setOutput('head_sha', pr.head.sha)
+            core.setOutput('team_name', pr.user?.login || 'github-actions')
+
             if (!shouldQueue) {
               core.info(`Labels applied: ${[...labels].join(', ') || 'none'}`)
-              return
             }
 
-            const webhookUrl = process.env.BACKEND_WEBHOOK_URL || 'https://minirouter.work.gd/webhooks/github'
-            const webhookSecret = process.env.MINIROUTER_WEBHOOK_SECRET
-            if (!webhookSecret) {
-              throw new Error('MINIROUTER_WEBHOOK_SECRET is not configured')
-            }
+      - name: Verify submission bundle
+        if: steps.classify.outputs.should_queue == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d pr/submissions/final_model
+          test -f pr/submissions/final_model/best_theta.npy
 
-            const payload = {
-              action: context.payload.action,
-              repository: { full_name: `${owner}/${repo}` },
-              pull_request: {
-                number: pr.number,
-                head: {
-                  sha: pr.head.sha,
-                  ref: pr.head.ref,
-                },
-              },
-              sender: {
-                login: pr.user?.login || 'github-actions',
-              },
-            }
+      - name: Package submission bundle
+        if: steps.classify.outputs.should_queue == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -czf submission.tar.gz -C pr submissions/final_model
 
-            const body = JSON.stringify(payload)
-            const signature =
-              'sha256=' + crypto.createHmac('sha256', webhookSecret).update(body).digest('hex')
-
-            const response = await fetch(webhookUrl, {
-              method: 'POST',
-              headers: {
-                'content-type': 'application/json',
-                'x-hub-signature-256': signature,
-              },
-              body,
-            })
-
-            if (!response.ok) {
-              const text = await response.text()
-              throw new Error(`Backend webhook failed (${response.status}): ${text}`)
-            }
-
-            core.info(`Queued submission for ${owner}/${repo}#${pr.number}`)
+      - name: Upload submission to backend
+        if: steps.classify.outputs.should_queue == 'true'
+        shell: bash
+        env:
+          BACKEND_WEBHOOK_URL: ${{ vars.BACKEND_WEBHOOK_URL }}
+          MINIROUTER_WEBHOOK_SECRET: ${{ secrets.MINIROUTER_WEBHOOK_SECRET }}
+        run: |
+          set -euo pipefail
+          : "${MINIROUTER_WEBHOOK_SECRET:?}"
+          backend_url="${BACKEND_WEBHOOK_URL:-https://minirouter.work.gd/webhooks/github/submission}"
+          curl -fsS \
+            -H "X-MiniRouter-Webhook-Secret: ${MINIROUTER_WEBHOOK_SECRET}" \
+            -F "file=@submission.tar.gz;type=application/gzip" \
+            -F "repo_full_name=${{ steps.classify.outputs.repo_full_name }}" \
+            -F "pr_number=${{ steps.classify.outputs.pr_number }}" \
+            -F "head_sha=${{ steps.classify.outputs.head_sha }}" \
+            -F "team_name=${{ steps.classify.outputs.team_name }}" \
+            "${backend_url}"
