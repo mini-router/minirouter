@@ -27,7 +27,14 @@ function formatMetricValue(value: unknown) {
   if (value == null) {
     return '—'
   }
+  if (typeof value === 'object') {
+    return JSON.stringify(value, null, 2)
+  }
   return String(value)
+}
+
+function isStructuredMetric(value: unknown) {
+  return typeof value === 'object' && value !== null
 }
 
 export default function Submission() {
@@ -183,29 +190,20 @@ export default function Submission() {
                             <div className="text-xs uppercase tracking-[0.22em] text-text-dim">
                               {key}
                             </div>
-                            <div className="mt-2 font-mono text-sm text-text">
-                              {formatMetricValue(value)}
-                            </div>
+                            {isStructuredMetric(value) ? (
+                              <pre className="mt-2 max-h-44 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-text">
+                                {formatMetricValue(value)}
+                              </pre>
+                            ) : (
+                              <div className="mt-2 font-mono text-sm text-text">
+                                {formatMetricValue(value)}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
                     </div>
                   )}
-
-                  <div className="mt-6 grid gap-4 xl:grid-cols-2">
-                    <div>
-                      <div className="meta-label">Command</div>
-                      <pre className="mt-3 overflow-x-auto rounded-2xl border border-white/8 bg-surface-900/80 p-4 text-xs leading-6 text-text">
-                        {bestEvaluation.command || '—'}
-                      </pre>
-                    </div>
-                    <div>
-                      <div className="meta-label">Results path</div>
-                      <pre className="mt-3 overflow-x-auto rounded-2xl border border-white/8 bg-surface-900/80 p-4 text-xs leading-6 text-text">
-                        {bestEvaluation.results_path || '—'}
-                      </pre>
-                    </div>
-                  </div>
 
                   {bestEvaluation.error && (
                     <div className="mt-6 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-100">
@@ -252,7 +250,6 @@ export default function Submission() {
                             ['Started', formatDate(evaluation.started_at)],
                             ['Finished', formatDate(evaluation.finished_at)],
                             ['Created', formatDate(evaluation.created_at)],
-                            ['Results', evaluation.results_path || '—'],
                           ].map(([label, value]) => (
                             <div key={label} className="rounded-xl border border-white/8 bg-surface-900/70 p-3">
                               <div className="text-xs uppercase tracking-[0.22em] text-text-dim">
@@ -264,14 +261,25 @@ export default function Submission() {
                         </div>
 
                         {Object.keys(evaluation.metrics).length > 0 && (
-                          <div className="mt-4 flex flex-wrap gap-2">
+                          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                             {Object.entries(evaluation.metrics).map(([key, value]) => (
-                              <span
+                              <div
                                 key={key}
-                                className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-text-dim"
+                                className="rounded-xl border border-white/8 bg-surface-900/70 p-3"
                               >
-                                {key}: {formatMetricValue(value)}
-                              </span>
+                                <div className="text-xs uppercase tracking-[0.22em] text-text-dim">
+                                  {key}
+                                </div>
+                                {isStructuredMetric(value) ? (
+                                  <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-text">
+                                    {formatMetricValue(value)}
+                                  </pre>
+                                ) : (
+                                  <div className="mt-2 font-mono text-sm text-text">
+                                    {formatMetricValue(value)}
+                                  </div>
+                                )}
+                              </div>
                             ))}
                           </div>
                         )}
