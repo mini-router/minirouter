@@ -1,0 +1,2529 @@
+{
+  "benchmark": "mmlu",
+  "k": 3,
+  "level": "L0",
+  "seed": 0,
+  "aborted": false,
+  "tasks": [
+    {
+      "id": "mmlu-334",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-54",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          0,
+          0,
+          0
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-5845",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          0
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-13820",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-7753",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-3221",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          0,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-12461",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-4806",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          0,
+          1,
+          0
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-5813",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          0,
+          0,
+          0
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-4483",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          0
+        ],
+        "glm-5p2": [
+          0,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-7621",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-12664",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-5892",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          0,
+          0
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-5634",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-12440",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-2135",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-10691",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          0
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-2107",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          0,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-5053",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          0
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-4686",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-9323",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-4030",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          0,
+          0,
+          0
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-1718",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-6416",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-7881",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-915",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          0,
+          0,
+          0
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-13758",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-7846",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-13637",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-4293",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          0,
+          0,
+          0
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-5082",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-1287",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-8059",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-9424",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-7005",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          0,
+          1,
+          0
+        ],
+        "glm-5p2": [
+          1,
+          0,
+          0
+        ],
+        "kimi-k2p6": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-10482",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          0,
+          0,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-3704",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          0,
+          0,
+          0
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-9311",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-4652",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-9679",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-8372",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-6961",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          0,
+          0,
+          0
+        ],
+        "kimi-k2p6": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-13439",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          0,
+          0
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-4310",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-1943",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          0,
+          0
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-11473",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          0,
+          0,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-1711",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-11537",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-5277",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          0,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-7877",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-989",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-4011",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          0,
+          0
+        ],
+        "kimi-k2p6": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-39",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-10594",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-8719",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-6509",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-1770",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          0,
+          0,
+          0
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-1656",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-5975",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          0
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-7701",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-213",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-7976",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-7255",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-3924",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-10592",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          0,
+          0,
+          0
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-11601",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-4090",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-4772",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-10752",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          0,
+          0,
+          0
+        ],
+        "glm-5p2": [
+          0,
+          0,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-4949",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-86",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          0
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-9088",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-842",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-9633",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-5732",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-6521",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-577",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-4403",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-64",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          0
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-11847",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-1838",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-10410",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          0,
+          0,
+          0
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-710",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          0,
+          1,
+          0
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-6376",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          0,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-4649",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-5047",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-7706",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-12585",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-13348",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-6005",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-4395",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-2279",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          0,
+          0,
+          0
+        ],
+        "glm-5p2": [
+          0,
+          0,
+          0
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-8995",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-9764",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-4846",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          0,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-2130",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-9722",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-566",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          0,
+          0,
+          0
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-2688",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-9421",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          0,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-318",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-13549",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-4840",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          0
+        ],
+        "glm-5p2": [
+          0,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-7606",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-8077",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-592",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          0
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-4520",
+      "answer": "D",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          0,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-5707",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          0
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-10970",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          0
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-7488",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-530",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-3816",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-4209",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-6236",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          0,
+          0,
+          0
+        ],
+        "glm-5p2": [
+          0,
+          0,
+          0
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-11315",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-11047",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          0,
+          1,
+          0
+        ],
+        "kimi-k2p6": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-5869",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          0
+        ],
+        "glm-5p2": [
+          0,
+          0,
+          0
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-5356",
+      "answer": "B",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "mmlu-4038",
+      "answer": "C",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "mmlu-2486",
+      "answer": "A",
+      "per_model": {
+        "deepseek-v4-pro": [
+          1,
+          1,
+          1
+        ],
+        "glm-5p2": [
+          1,
+          1,
+          1
+        ],
+        "kimi-k2p6": [
+          1,
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}

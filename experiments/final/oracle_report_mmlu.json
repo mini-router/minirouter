@@ -1,0 +1,80 @@
+{
+  "benchmark": "mmlu",
+  "level": "L0",
+  "k": 3,
+  "crossfit_reliable": false,
+  "n_queries": 120,
+  "models": [
+    "deepseek-v4-pro",
+    "glm-5p2",
+    "kimi-k2p6"
+  ],
+  "per_model_accuracy": {
+    "deepseek-v4-pro": 0.938888888888889,
+    "glm-5p2": 0.7944444444444446,
+    "kimi-k2p6": 0.5194444444444443
+  },
+  "point_estimates": {
+    "best_single": 0.938888888888889,
+    "best_single_model": "deepseek-v4-pro",
+    "routing_oracle": 0.9392499999999999,
+    "routing_oracle_naive_biased": 0.9722222222222221,
+    "winners_curse_bias": 0.03297222222222218,
+    "clairvoyant_any_NOT_ACHIEVABLE": 0.9802469135802468,
+    "routing_headroom": 0.0,
+    "unroutable_noise": 0.04099691358024693,
+    "disagreement_rate": 0.5
+  },
+  "threshold_sensitivity_p>=0.5": {
+    "routing_oracle": 0.975,
+    "best_single": 0.95,
+    "routing_headroom": 0.025000000000000022
+  },
+  "bootstrap_ci_95": {
+    "best_single": {
+      "point": 0.938888888888889,
+      "ci_lo": 0.8944444444444445,
+      "ci_hi": 0.9722222222222223
+    },
+    "routing_oracle": {
+      "point": 0.9389444444444442,
+      "ci_lo": 0.8946375000000001,
+      "ci_hi": 0.9729
+    },
+    "clairvoyant_any": {
+      "point": 0.9802469135802468,
+      "ci_lo": 0.9606404320987654,
+      "ci_hi": 0.994753086419753
+    },
+    "routing_headroom": {
+      "point": 0.0,
+      "ci_lo": 0.0,
+      "ci_hi": 0.0
+    },
+    "unroutable_noise": {
+      "point": 0.0413024691358026,
+      "ci_lo": 0.01703981481481512,
+      "ci_hi": 0.07435339506172832
+    },
+    "routing_headroom_thresh": {
+      "point": 0.025000000000000022,
+      "ci_lo": 0.0,
+      "ci_hi": 0.05833333333333335
+    }
+  },
+  "notes": {
+    "clairvoyant_any": "optimistic upper bound, NOT achievable by a single-pick router; measures noise not opportunity",
+    "routing_oracle": "winner's-curse-debiased via split-half cross-fit; this is the honest routing ceiling",
+    "verdict_source": "read the verdict off CIs, never the point estimates"
+  },
+  "verdict": {
+    "label": "INCONCLUSIVE",
+    "headroom_basis": "threshold (cross-fit unreliable at K<5)",
+    "headroom_ci_95": [
+      0.0,
+      0.05833333333333335
+    ],
+    "router_gap_closed": null,
+    "message": "[K<5: cross-fit oracle was data-starved and floored at best_single; verdict uses the split-free threshold headroom] Headroom CI straddles 0 but upper bound > 0.02: cannot rule routing in or out. Widen the reachability level (L1/L2) or collect more samples."
+  }
+}

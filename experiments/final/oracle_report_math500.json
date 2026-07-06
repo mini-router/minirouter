@@ -1,0 +1,91 @@
+{
+  "benchmark": "math500",
+  "level": "L0",
+  "k": 5,
+  "crossfit_reliable": true,
+  "n_queries": 120,
+  "models": [
+    "deepseek-v4-pro",
+    "glm-5p2",
+    "kimi-k2p6"
+  ],
+  "per_model_accuracy": {
+    "deepseek-v4-pro": 0.7833333333333332,
+    "glm-5p2": 0.8083333333333335,
+    "kimi-k2p6": 0.7333333333333331
+  },
+  "point_estimates": {
+    "best_single": 0.8083333333333335,
+    "best_single_model": "glm-5p2",
+    "routing_oracle": 0.8554444444444443,
+    "routing_oracle_naive_biased": 0.9,
+    "winners_curse_bias": 0.04455555555555568,
+    "clairvoyant_any_NOT_ACHIEVABLE": 0.9099333333333334,
+    "routing_headroom": 0.04812499999999986,
+    "unroutable_noise": 0.05448888888888903,
+    "disagreement_rate": 0.2916666666666667
+  },
+  "threshold_sensitivity_p>=0.5": {
+    "routing_oracle": 0.9166666666666666,
+    "best_single": 0.825,
+    "routing_headroom": 0.09166666666666667
+  },
+  "bootstrap_ci_95": {
+    "best_single": {
+      "point": 0.8083333333333335,
+      "ci_lo": 0.7516666666666667,
+      "ci_hi": 0.8716666666666665
+    },
+    "routing_oracle": {
+      "point": 0.8570277777777778,
+      "ci_lo": 0.8011354166666669,
+      "ci_hi": 0.9027888888888888
+    },
+    "clairvoyant_any": {
+      "point": 0.9099333333333334,
+      "ci_lo": 0.8607316666666667,
+      "ci_hi": 0.9542016666666667
+    },
+    "routing_headroom": {
+      "point": 0.05036111111111097,
+      "ci_lo": 0.004689583333333336,
+      "ci_hi": 0.08486388888888903
+    },
+    "unroutable_noise": {
+      "point": 0.05290555555555554,
+      "ci_lo": 0.03692083333333342,
+      "ci_hi": 0.07370236111111131
+    },
+    "routing_headroom_thresh": {
+      "point": 0.09166666666666667,
+      "ci_lo": 0.04166666666666663,
+      "ci_hi": 0.125
+    }
+  },
+  "notes": {
+    "clairvoyant_any": "optimistic upper bound, NOT achievable by a single-pick router; measures noise not opportunity",
+    "routing_oracle": "winner's-curse-debiased via split-half cross-fit; this is the honest routing ceiling",
+    "verdict_source": "read the verdict off CIs, never the point estimates"
+  },
+  "trinity": {
+    "accuracy": 0.9166666666666666,
+    "router_gap_closed": 2.2995283018868,
+    "mcnemar_vs_best_single": {
+      "b_only_a": 15,
+      "c_only_b": 3,
+      "n_discordant": 18,
+      "p_exact": 0.007537841796875,
+      "chi2_cc": 6.722222222222222
+    }
+  },
+  "verdict": {
+    "label": "NEAR_CEILING",
+    "headroom_basis": "cross-fit",
+    "headroom_ci_95": [
+      0.004689583333333336,
+      0.08486388888888903
+    ],
+    "router_gap_closed": 2.2995283018868,
+    "message": "Real headroom exists and the router already captures most of it. Gains require a better pool, not more router tuning."
+  }
+}

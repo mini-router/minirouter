@@ -1,0 +1,888 @@
+{
+  "benchmark": "math500",
+  "conductor_model": "deepseek-v4-pro",
+  "pool": [
+    "deepseek-v4-pro",
+    "glm-5p2",
+    "kimi-k2p6"
+  ],
+  "n_tasks": 120,
+  "reps": 1,
+  "max_depth": 0,
+  "accuracy": 0.9166666666666666,
+  "parse_rate": 0.975,
+  "aborted": false,
+  "cost": {
+    "spend_usd": 1.0975,
+    "llm_calls": 445,
+    "runs": 120,
+    "prompt_tokens": 185148,
+    "completion_tokens": 222796,
+    "cap_usd": 5.0,
+    "aborted": false,
+    "per_model": {
+      "<conductor>": {
+        "prompt_tokens": 38224,
+        "completion_tokens": 18987,
+        "usd": 0.1326
+      },
+      "deepseek-v4-pro": {
+        "prompt_tokens": 146360,
+        "completion_tokens": 203474,
+        "usd": 0.9628
+      },
+      "glm-5p2": {
+        "prompt_tokens": 443,
+        "completion_tokens": 271,
+        "usd": 0.0018
+      },
+      "kimi-k2p6": {
+        "prompt_tokens": 121,
+        "completion_tokens": 64,
+        "usd": 0.0004
+      }
+    }
+  },
+  "per_task": {
+    "math500-370": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-56": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-366": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-130": {
+      "acc": 0.0,
+      "reps_correct": [
+        0
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-201": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-231": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-459": {
+      "acc": 0.0,
+      "reps_correct": [
+        0
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-419": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-431": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-326": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-26": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-118": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-493": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-17": {
+      "acc": 0.0,
+      "reps_correct": [
+        0
+      ],
+      "parse_rate": 0.0
+    },
+    "math500-367": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-333": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-311": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-24": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-247": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-153": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-44": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-108": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-420": {
+      "acc": 0.0,
+      "reps_correct": [
+        0
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-199": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-150": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-274": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-285": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-196": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-405": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-481": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-62": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-58": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-164": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-452": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-98": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-393": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-436": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-492": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-415": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-295": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-127": {
+      "acc": 0.0,
+      "reps_correct": [
+        0
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-404": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-277": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-64": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-116": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-433": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-256": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-307": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-27": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-188": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-343": {
+      "acc": 0.0,
+      "reps_correct": [
+        0
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-84": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-134": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-67": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-177": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-417": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-100": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-270": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-317": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-68": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-129": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-1": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-28": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-438": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-160": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-390": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-451": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-210": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-109": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-413": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-354": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-264": {
+      "acc": 0.0,
+      "reps_correct": [
+        0
+      ],
+      "parse_rate": 0.0
+    },
+    "math500-139": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-291": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-137": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-174": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-105": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-225": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-355": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-15": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-490": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-332": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-469": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-279": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-391": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-168": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-429": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-187": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-262": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-251": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-289": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-496": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-192": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-142": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-22": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-383": {
+      "acc": 0.0,
+      "reps_correct": [
+        0
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-306": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-167": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-339": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-377": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-359": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-14": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-103": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-292": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-136": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-331": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-165": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-237": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-288": {
+      "acc": 0.0,
+      "reps_correct": [
+        0
+      ],
+      "parse_rate": 0.0
+    },
+    "math500-321": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-203": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-146": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-375": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-157": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-450": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-184": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-369": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-131": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-235": {
+      "acc": 1.0,
+      "reps_correct": [
+        1
+      ],
+      "parse_rate": 1.0
+    },
+    "math500-444": {
+      "acc": 0.0,
+      "reps_correct": [
+        0
+      ],
+      "parse_rate": 1.0
+    }
+  }
+}

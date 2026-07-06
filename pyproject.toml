@@ -1,0 +1,35 @@
+[project]
+name = "trinity-coordinator"
+version = "0.0.1"
+description = "Open-source replication of TRINITY: An Evolved LLM Coordinator (Xu et al., ICLR 2026)"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.3",
+    "transformers>=4.44",
+    "accelerate>=0.33",
+    "cma>=3.3",               # CMA-ES; we use the separable variant (CMAOptions 'CMA_diagonal')
+    "numpy>=1.26",
+    "httpx>=0.27",            # async Fireworks client
+    "tenacity>=8.3",          # retry/backoff for API calls
+    "pyyaml>=6.0",
+    "tqdm>=4.66",
+    "datasets>=2.20",         # benchmark loaders
+    "rich>=13.7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.5", "mypy>=1.10"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/trinity"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

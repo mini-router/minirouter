@@ -1,0 +1,44 @@
+# Benchmark suite for evolving and evaluating the coordinator.
+# Exact datasets/splits/versions are confirmed against docs/SPEC.md. [provisional]
+
+# Tasks used to compute fitness during sep-CMA-ES evolution (in-distribution).
+train:
+  - name: livecodebench
+    loader: "benchmarks.livecodebench"
+    split: "train"
+    version: null            # confirm LCB release/window in SPEC [provisional]
+    max_items: 256
+  - name: math
+    loader: "benchmarks.math"
+    split: "train"
+    max_items: 256
+  - name: reasoning
+    loader: "benchmarks.reasoning"
+    split: "train"
+    max_items: 256
+
+# Held-in evaluation (same distribution as train, disjoint items).
+eval:
+  - name: livecodebench
+    loader: "benchmarks.livecodebench"
+    split: "test"
+    metric: "pass@1"
+  - name: math
+    loader: "benchmarks.math"
+    split: "test"
+    metric: "accuracy"
+  - name: reasoning
+    loader: "benchmarks.reasoning"
+    split: "test"
+    metric: "accuracy"
+
+# Out-of-distribution tasks to test generalization (never seen during evolution).
+ood:
+  - name: domain_knowledge
+    loader: "benchmarks.domain_knowledge"
+    split: "test"
+    metric: "accuracy"
+
+evaluation:
+  seeds: [0]
+  pass_k: 1
