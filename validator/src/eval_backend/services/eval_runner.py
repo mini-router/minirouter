@@ -261,13 +261,9 @@ class EvaluationResult:
 
 
 def evaluate_submission(session: Session, submission: Submission, settings: Settings) -> EvaluationResult:
-    if not submission.checkpoint_path:
-        raise ValueError(f"submission {submission.id} does not have a checkpoint to evaluate")
-
     local_workspace = _local_workspace(settings, submission.id)
     local_workspace.mkdir(parents=True, exist_ok=True)
     local_results_path = local_workspace / "results.json"
-    checkpoint_path = Path(submission.checkpoint_path).expanduser().resolve()
 
     run = EvaluationRun(
         submission_id=submission.id,
@@ -278,6 +274,24 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
     )
     session.add(run)
     session.flush()
+
+    if not submission.checkpoint_path:
+        error = f"submission {submission.id} does not have a checkpoint to evaluate"
+        run.status = "failed"
+        run.error = error
+        run.finished_at = _utcnow()
+        run.metrics_json = json.dumps({"missing_checkpoint": True}, ensure_ascii=False, sort_keys=True)
+        submission.status = "failed"
+        session.flush()
+        return EvaluationResult(
+            run=run,
+            score=None,
+            metrics={"missing_checkpoint": True},
+            stdout="",
+            stderr=error,
+        )
+
+    checkpoint_path = Path(submission.checkpoint_path).expanduser().resolve()
 
     env = os.environ.copy()
     env["TRINITY_SECRETS_FILE"] = settings.trinity_secrets_file
