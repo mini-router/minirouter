@@ -1,14 +1,17 @@
-# TinyRouter
+# MiniRouter
 
-We built a small **coordinator** that, for every question, decides two things: **which** of three
-open-source LLMs should answer it, and **what role** that model should play (Thinker, Worker, or
-Verifier). The coordinator is deliberately tiny and cheap. A frozen **0.6B** encoder reads the
-question into a single vector, and a **~10K-parameter** head turns that vector into the routing
-decision. It is trained by **separable CMA-ES**, a derivative-free evolution strategy, against a simple
-right/wrong reward. The coordinator never solves the question itself; it only learns who to ask.
+MiniRouter is the SN74 miner workspace for the Gittensor LLM routing competition. The goal is not
+to build one giant model, but to learn a better router: for each question, decide **which** model
+should answer and **what role** it should play. Miners can improve the trainer, the evaluation
+pipeline, the model pool, or the web app that publishes results.
+
+The core router is deliberately tiny and cheap. A frozen **0.6B** encoder reads the question into a
+single vector, and a **~10K-parameter** head turns that vector into the routing decision. It is
+trained by **separable CMA-ES**, a derivative-free evolution strategy, against a simple right/wrong
+reward. The coordinator never solves the question itself; it only learns who to ask.
 
 The method follows TRINITY (Xu et al., ICLR 2026, [arXiv:2512.04695](https://arxiv.org/abs/2512.04695)),
-rebuilt from scratch with an all open-source model pool served through Fireworks AI.
+rebuilt from scratch with an open model pool and the miner-facing competition tooling in this repo.
 
 ## What we did
 
@@ -25,6 +28,23 @@ rebuilt from scratch with an all open-source model pool served through Fireworks
 - Implemented and tested two upgrades from that diagnostic (supervised warm-start of the head, shaped
   training fitness) and measured them on the task with real headroom.
 - Tracked every dollar of API spend and logged each result.
+
+## Repository map
+
+- `src/trinity/` - training, evaluation, routing, and reward code
+- `configs/` - benchmark and model-pool configuration
+- `benchmarks/` - benchmark loaders and task definitions
+- `scripts/` - local and remote training/eval entry points
+- `experiments/` - run outputs and saved training artifacts
+- `submissions/` - submit-ready bundles for the evaluation backend
+- `web/` - public competition site and leaderboard frontend
+- `docs/` - research notes, results, and implementation notes
+
+## Miner workflow
+
+Miners should work in their own branch, keep changes scoped, and open PRs for review. The branch
+prefix rule is documented in `CONTRIBUTOIN.md`, and the submit-ready model bundle should stay in
+`submissions/final_model/` when a run is ready to evaluate or publish.
 
 ## Model pool
 
