@@ -18,6 +18,21 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-06 — Validator backend moved into repo and eval deduplicated  #decision #repro
+**Context:** the standalone `minirouter-evaluation-service` needed to live inside this repo so
+submission intake, leaderboard storage, and checkpoint evaluation can ship together.
+**Expected:** the copied backend should keep its API surface, but the actual benchmark logic should
+stay in `src/trinity/eval.py` instead of being duplicated in a second evaluator module.
+**Actual:** the service code now lives under `validator/src/eval_backend/`; the old
+`services/evaluator.py` name was replaced with `services/eval_runner.py`, and the runner shells out
+to `python -m trinity.eval` from the copied `minirouter` checkout.
+**Root cause:** the previous repo split made the deployment story harder and left the evaluation
+logic duplicated across projects.
+**Fix / decision:** keep the validator as a separate subproject inside `minirouter`, but make
+`trinity.eval` the single evaluation implementation.
+**Follow-up:** wire the validator service into deployment and confirm it can evaluate a submission
+against the local or remote GPU path without any path overrides.
+
 ## 2026-07-06 — OpenRouter null-content response crashed eval  #mistake #fix
 **Context:** local CPU eval on OpenRouter was hanging / crashing after the coordinator loaded.
 **Expected:** `run_trajectory()` should post-process every assistant reply and finish the trajectory.

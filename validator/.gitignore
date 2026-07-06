@@ -1,0 +1,12 @@
+.env
+secrets.env
+*.sqlite3
+*.db
+data/
+workspace/
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+dist/
+build/

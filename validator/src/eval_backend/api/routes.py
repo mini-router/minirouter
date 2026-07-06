@@ -1,0 +1,314 @@
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+from typing import Any
+from uuid import uuid4
+
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
+
+from ..core.config import Settings
+from ..models import EvaluationRun, Submission
+from ..schemas import (
+    EvaluationOut,
+    HealthResponse,
+    LeaderboardEntry,
+    LeaderboardResponse,
+    SubmissionCreateResponse,
+    SubmissionOut,
+)
+from ..services.eval_runner import evaluate_submission
+from ..services.github import create_pr_submission
+from ..services.storage import store_upload
+
+router = APIRouter()
+
+
+def _submission_to_schema(submission: Submission) -> SubmissionOut:
+    evaluations = [
+        EvaluationOut(
+            id=run.id,
+            submission_id=run.submission_id,
+            status=run.status,
+            score=run.score,
+            metrics=json.loads(run.metrics_json) if run.metrics_json else {},
+            command=run.command,
+            stdout=run.stdout,
+            stderr=run.stderr,
+            results_path=run.results_path,
+            error=run.error,
+            started_at=run.started_at,
+            finished_at=run.finished_at,
+            created_at=run.created_at,
+        )
+        for run in submission.evaluations
+    ]
+    return SubmissionOut(
+        id=submission.id,
+        source=submission.source,
+        team_name=submission.team_name,
+        repo_full_name=submission.repo_full_name,
+        pr_number=submission.pr_number,
+        head_sha=submission.head_sha,
+        artifact_name=submission.artifact_name,
+        artifact_path=submission.artifact_path,
+        artifact_sha256=submission.artifact_sha256,
+        checkpoint_path=submission.checkpoint_path,
+        benchmark=submission.benchmark,
+        status=submission.status,
+        latest_score=submission.latest_score,
+        best_run_id=submission.best_run_id,
+        created_at=submission.created_at,
+        updated_at=submission.updated_at,
+        evaluations=evaluations,
+    )
+
+
+def _evaluation_to_schema(run: EvaluationRun) -> EvaluationOut:
+    return EvaluationOut(
+        id=run.id,
+        submission_id=run.submission_id,
+        status=run.status,
+        score=run.score,
+        metrics=json.loads(run.metrics_json) if run.metrics_json else {},
+        command=run.command,
+        stdout=run.stdout,
+        stderr=run.stderr,
+        results_path=run.results_path,
+        error=run.error,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        created_at=run.created_at,
+    )
+
+
+def _safe_team_name(request: Request, explicit: str | None = None) -> str | None:
+    if explicit:
+        return explicit
+    return request.headers.get("x-team-name") or request.query_params.get("team_name")
+
+
+def get_settings(request: Request) -> Settings:
+    return request.app.state.settings
+
+
+def get_session(request: Request) -> Session:
+    return request.app.state.session_factory()
+
+
+def enqueue_evaluation(settings: Settings, session_factory, submission_id: str) -> None:
+    session = session_factory()
+    try:
+        submission = (
+            session.execute(
+                select(Submission)
+                .where(Submission.id == submission_id)
+                .options(selectinload(Submission.evaluations))
+            )
+            .scalars()
+            .one()
+        )
+        evaluate_submission(session, submission, settings)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def _verify_github_signature(raw_body: bytes, signature: str | None, secret: str) -> None:
+    if not secret or secret == "replace-me":
+        return
+    if not signature or not signature.startswith("sha256="):
+        raise HTTPException(status_code=401, detail="missing github signature")
+    expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    provided = signature.removeprefix("sha256=")
+    if not hmac.compare_digest(expected, provided):
+        raise HTTPException(status_code=401, detail="invalid github signature")
+
+
+@router.get("/health", response_model=HealthResponse)
+def health() -> HealthResponse:
+    return HealthResponse()
+
+
+@router.post("/submit", response_model=SubmissionCreateResponse)
+async def submit(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    team_name: str | None = None,
+    settings: Settings = Depends(get_settings),
+) -> SubmissionCreateResponse:
+    session = get_session(request)
+    try:
+        submission_id = str(uuid4())
+        artifact = store_upload(file, settings, submission_id)
+        submission = Submission(
+            id=submission_id,
+            source="upload",
+            team_name=_safe_team_name(request, team_name),
+            artifact_name=artifact.name,
+            artifact_path=str(artifact.path),
+            artifact_sha256=artifact.sha256,
+            checkpoint_path=str(artifact.checkpoint_path) if artifact.checkpoint_path else None,
+            benchmark=settings.eval_benchmark,
+            status="queued",
+        )
+        session.add(submission)
+        session.flush()
+        session.commit()
+
+        if settings.sync_eval_on_submit:
+            session.refresh(submission)
+            evaluate_submission(session, submission, settings)
+            session.commit()
+        else:
+            background_tasks.add_task(
+                enqueue_evaluation,
+                settings,
+                request.app.state.session_factory,
+                submission.id,
+            )
+
+        session.refresh(submission)
+        evaluation = None
+        if submission.best_run_id:
+            run = session.get(EvaluationRun, submission.best_run_id)
+            if run is not None:
+                evaluation = _evaluation_to_schema(run)
+        return SubmissionCreateResponse(
+            submission=_submission_to_schema(submission),
+            evaluation=evaluation,
+        )
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        session.close()
+
+
+@router.post("/webhooks/github", response_model=SubmissionCreateResponse)
+async def github_webhook(request: Request, settings: Settings = Depends(get_settings)) -> SubmissionCreateResponse:
+    raw_body = await request.body()
+    _verify_github_signature(
+        raw_body,
+        request.headers.get("x-hub-signature-256"),
+        settings.github_webhook_secret,
+    )
+    payload: dict[str, Any] = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    session = get_session(request)
+    try:
+        repository = payload.get("repository") or {}
+        repo_full_name = repository.get("full_name")
+        if repo_full_name and repo_full_name != settings.allowed_repo:
+            raise HTTPException(status_code=403, detail="repository not allowed")
+
+        pull_request = payload.get("pull_request") or {}
+        pr_number = pull_request.get("number")
+        head_sha = (pull_request.get("head") or {}).get("sha")
+        team_name = payload.get("sender", {}).get("login")
+        submission = create_pr_submission(
+            session,
+            settings,
+            repo_full_name=repo_full_name,
+            pr_number=pr_number,
+            head_sha=head_sha,
+            team_name=team_name,
+        )
+        session.commit()
+        return SubmissionCreateResponse(submission=_submission_to_schema(submission), evaluation=None)
+    except HTTPException:
+        session.rollback()
+        raise
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        session.close()
+
+
+@router.get("/api/submissions/{submission_id}", response_model=SubmissionOut)
+def get_submission(request: Request, submission_id: str) -> SubmissionOut:
+    session = get_session(request)
+    try:
+        submission = (
+            session.execute(
+                select(Submission)
+                .where(Submission.id == submission_id)
+                .options(selectinload(Submission.evaluations))
+            )
+            .scalars()
+            .one()
+        )
+        return _submission_to_schema(submission)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail="submission not found") from exc
+    finally:
+        session.close()
+
+
+@router.get("/api/evaluations/{evaluation_id}", response_model=EvaluationOut)
+def get_evaluation(request: Request, evaluation_id: int) -> EvaluationOut:
+    session = get_session(request)
+    try:
+        run = session.get(EvaluationRun, evaluation_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="evaluation not found")
+        return _evaluation_to_schema(run)
+    finally:
+        session.close()
+
+
+@router.get("/api/leaderboard", response_model=LeaderboardResponse)
+def leaderboard(request: Request, limit: int = 100) -> LeaderboardResponse:
+    session = get_session(request)
+    try:
+        stmt = (
+            select(Submission)
+            .where(Submission.status == "completed")
+            .order_by(Submission.latest_score.desc().nullslast(), Submission.created_at.asc())
+            .limit(max(1, min(limit, 500)))
+        )
+        items = session.execute(stmt).scalars().all()
+        board: list[LeaderboardEntry] = []
+        for idx, submission in enumerate(items, start=1):
+            metrics = {}
+            if submission.best_run_id:
+                run = session.get(EvaluationRun, submission.best_run_id)
+                if run and run.metrics_json:
+                    metrics = json.loads(run.metrics_json)
+            board.append(
+                LeaderboardEntry(
+                    rank=idx,
+                    submission_id=submission.id,
+                    team=submission.team_name or submission.repo_full_name or submission.id[:8],
+                    accuracy=submission.latest_score,
+                    gsm8k=_metric_value(metrics, "gsm8k"),
+                    mmlu=_metric_value(metrics, "mmlu"),
+                    math=_metric_value(metrics, "math"),
+                    humaneval=_metric_value(metrics, "humaneval"),
+                    bbh=_metric_value(metrics, "bbh"),
+                    params=_metric_int(metrics, "params"),
+                    submitted=submission.created_at,
+                    report=f"/api/submissions/{submission.id}",
+                    status=submission.status,
+                )
+            )
+        return LeaderboardResponse(items=board)
+    finally:
+        session.close()
+
+
+def _metric_value(metrics: dict[str, Any], key: str) -> float | None:
+    value = metrics.get(key)
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def _metric_int(metrics: dict[str, Any], key: str) -> int | None:
+    value = metrics.get(key)
+    return int(value) if isinstance(value, (int, float)) else None

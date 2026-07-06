@@ -37,6 +37,7 @@ rebuilt from scratch with an open model pool and the miner-facing competition to
 - `scripts/` - local and remote training/eval entry points
 - `experiments/` - run outputs and saved training artifacts
 - `submissions/` - submit-ready bundles for the evaluation backend
+- `validator/` - competition backend that ingests submissions and runs eval
 - `web/` - public competition site and leaderboard frontend
 - `docs/` - research notes, results, and implementation notes
 
