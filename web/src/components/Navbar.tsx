@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useEffect, useState } from 'react'
+import logoUrl from '../assets/mini-router.jpg'
 
 const links = [
   { to: '/', label: 'Home' },
@@ -22,7 +23,7 @@ export default function Navbar() {
       <div className="section-shell h-16 flex items-center justify-between gap-4">
         <Link to="/" className="flex items-center gap-3">
           <img
-            src="/mini-router.jpg"
+            src={logoUrl}
             alt="MiniRouter logo"
             className="h-9 w-9 rounded-xl border border-white/10 bg-white/5 object-cover"
           />
