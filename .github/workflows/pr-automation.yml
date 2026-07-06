@@ -23,7 +23,7 @@ jobs:
         uses: actions/github-script@v7
         env:
           BACKEND_WEBHOOK_URL: ${{ vars.BACKEND_WEBHOOK_URL }}
-          GITHUB_WEBHOOK_SECRET: ${{ secrets.GITHUB_WEBHOOK_SECRET }}
+          MINIROUTER_WEBHOOK_SECRET: ${{ secrets.MINIROUTER_WEBHOOK_SECRET }}
         with:
           script: |
             const crypto = require('crypto')
@@ -133,9 +133,9 @@ jobs:
             }
 
             const webhookUrl = process.env.BACKEND_WEBHOOK_URL || 'https://minirouter.work.gd/webhooks/github'
-            const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET
+            const webhookSecret = process.env.MINIROUTER_WEBHOOK_SECRET
             if (!webhookSecret) {
-              throw new Error('GITHUB_WEBHOOK_SECRET is not configured')
+              throw new Error('MINIROUTER_WEBHOOK_SECRET is not configured')
             }
 
             const payload = {

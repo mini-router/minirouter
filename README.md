@@ -213,5 +213,5 @@ It:
 Repository setup:
 
 - set `GITHUB_WEBHOOK_SECRET` in the validator `secrets.env`
-- set `GITHUB_WEBHOOK_SECRET` as a GitHub Actions secret with the same value
+- set `MINIROUTER_WEBHOOK_SECRET` as a GitHub Actions secret with the same value
 - optionally set `BACKEND_WEBHOOK_URL` as a repository variable if the backend URL changes
