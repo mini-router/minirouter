@@ -1,9 +1,11 @@
 # MiniRouter
 
-MiniRouter is the SN74 miner workspace for the Gittensor LLM routing competition. The goal is not
-to build one giant model, but to learn a better router: for each question, decide **which** model
-should answer and **what role** it should play. Miners can improve the trainer, the evaluation
-pipeline, the model pool, or the web app that publishes results.
+MiniRouter is the SN74 miner workspace for the Gittensor LLM routing competition. This repo was
+adapted from the original TinyRouter project at https://github.com/harrrshall/tinyrouter/ and then
+expanded into the competition workspace used here. The goal is not to build one giant model, but to
+learn a better router: for each question, decide **which** model should answer and **what role** it
+should play. Miners can improve the trainer, the evaluation pipeline, the model pool, or the web app
+that publishes results.
 
 The core router is deliberately tiny and cheap. A frozen **0.6B** encoder reads the question into a
 single vector, and a **~10K-parameter** head turns that vector into the routing decision. It is
@@ -152,19 +154,11 @@ claim that warm-start or shaping moved the number. The result is still below the
 upgrades are implemented and covered by 54 offline tests; whether they move the held-out score is
 unproven.
 
-## Cost
-
-Tracked exactly from the token ledgers at real Fireworks prices:
-
-- Core replication and rigorous eval: **$20.89** (deepseek $6.56, glm $6.70, kimi $7.64).
-- Oracle-ceiling diagnostic: **~$14**.
-- Warm-start + shaped-fitness experiment (label collection, retrain, eval): **$27.22**.
-
 ## Submitting a final model
 
 Use `submissions/final_model/` as the submit-ready bundle for your final checkpoint and metadata.
-Keep the trained checkpoint and the JSON files together in that folder before packaging it for the
-evaluation backend.
+Keep the trained checkpoint and the JSON files together in that folder, then open a PR from your
+required `sn74-<miner-name>` branch.
 
 Expected contents:
 
@@ -176,6 +170,10 @@ Expected contents:
 Typical workflow:
 
 ```bash
+git checkout main
+git pull upstream main
+git checkout -b sn74-your-github-username
+
 mkdir -p submissions/final_model
 cp experiments/math500/<run-name>/best_theta.npy submissions/final_model/
 cp experiments/math500/<run-name>/summary.json submissions/final_model/
@@ -190,7 +188,10 @@ python -m trinity.eval \
   --dtype float32 \
   --out submissions/final_model/eval.json
 
-tar -czf <team-name>_submission.tar.gz -C submissions final_model
+git add submissions/final_model
+git commit -m "Add final model bundle"
+git push origin sn74-your-github-username
 ```
 
-Submit the tarball to the evaluation backend or upload it through the competition site.
+Open a pull request from your branch. The validator and maintainer workflow will pick up the bundle
+from the PR, evaluate it, and record the result.
