@@ -1,6 +1,6 @@
 # MiniRouter
 
-MiniRouter is the SN74 miner workspace for the Gittensor LLM routing competition. This repo was
+MiniRouter is the **SN74** miner workspace for the **Gittensor** LLM routing competition. This repo was
 adapted from the original TinyRouter project at https://github.com/harrrshall/tinyrouter/ and then
 expanded into the competition workspace used here. The goal is not to build one giant model, but to
 learn a better router: for each question, decide **which** model should answer and **what role** it
