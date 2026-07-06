@@ -49,6 +49,10 @@ Miners should work in their own branch, keep changes scoped, and open PRs for re
 prefix rule is documented in `CONTRIBUTOIN.md`, and the submit-ready model bundle should stay in
 `submissions/final_model/` when a run is ready to evaluate or publish.
 
+The repository also includes a GitHub Actions PR automation workflow. It labels PRs by path,
+tags miner submission PRs, and forwards accepted submissions to the validator queue.
+No separate GitHub bot is required for that flow.
+
 ## Model pool
 
 | Slot | Model            | Strong at        |
@@ -195,3 +199,19 @@ git push origin sn74-your-github-username
 
 Open a pull request from your branch. The validator and maintainer workflow will pick up the bundle
 from the PR, evaluate it, and record the result.
+
+## PR automation
+
+The PR automation workflow lives in `.github/workflows/pr-automation.yml`.
+
+It:
+
+- adds labels such as `web`, `validator`, `train`, `eval`, `benchmark`, `docs`, `miner`, and `submission`
+- queues miner submission PRs in the validator backend
+- leaves evaluation and merge handling to the backend service
+
+Repository setup:
+
+- set `GITHUB_WEBHOOK_SECRET` in the validator `secrets.env`
+- set `GITHUB_WEBHOOK_SECRET` as a GitHub Actions secret with the same value
+- optionally set `BACKEND_WEBHOOK_URL` as a repository variable if the backend URL changes

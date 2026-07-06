@@ -42,8 +42,12 @@ DEFAULT_LOCAL_REPO_DIR = Path(__file__).resolve().parents[4]
 DEFAULT_ALLOWED_ORIGINS = ["http://localhost:5173"]
 DEFAULT_GITHUB_WEBHOOK_SECRET = "replace-me"
 DEFAULT_GITHUB_ACCESS_TOKEN = ""
+DEFAULT_GITHUB_POST_COMMENT_ON_EVAL = True
+DEFAULT_GITHUB_AUTO_MERGE_SUBMISSIONS = False
+DEFAULT_GITHUB_MERGE_METHOD = "merge"
 DEFAULT_ALLOWED_REPO = "mini-router/minirouter"
 DEFAULT_MINER_REPO_URL = "https://github.com/mini-router/minirouter"
+DEFAULT_PUBLIC_SITE_URL = "https://minirouter.work.gd"
 DEFAULT_TRINITY_REMOTE_DIR = "trinity"
 DEFAULT_TRINITY_REMOTE_WORKSPACE_ROOT = "~/trinity-eval-workspaces"
 DEFAULT_TRINITY_GPU_INDEX = 5
@@ -81,8 +85,12 @@ class Settings:
     allowed_origins: list[str] = field(default_factory=lambda: list(DEFAULT_ALLOWED_ORIGINS))
     github_webhook_secret: str = DEFAULT_GITHUB_WEBHOOK_SECRET
     github_access_token: str = DEFAULT_GITHUB_ACCESS_TOKEN
+    github_post_comment_on_eval: bool = DEFAULT_GITHUB_POST_COMMENT_ON_EVAL
+    github_auto_merge_submissions: bool = DEFAULT_GITHUB_AUTO_MERGE_SUBMISSIONS
+    github_merge_method: str = DEFAULT_GITHUB_MERGE_METHOD
     allowed_repo: str = DEFAULT_ALLOWED_REPO
     miner_repo_url: str = DEFAULT_MINER_REPO_URL
+    public_site_url: str = DEFAULT_PUBLIC_SITE_URL
     local_repo_dir: Path = field(default_factory=lambda: DEFAULT_LOCAL_REPO_DIR)
     trinity_remote_host: str = "trinity-gpu"
     trinity_remote_dir: str = DEFAULT_TRINITY_REMOTE_DIR
@@ -127,8 +135,14 @@ class Settings:
             allowed_origins=origins,
             github_webhook_secret=get("GITHUB_WEBHOOK_SECRET", DEFAULT_GITHUB_WEBHOOK_SECRET),
             github_access_token=get("GITHUB_ACCESS_TOKEN", DEFAULT_GITHUB_ACCESS_TOKEN),
+            github_post_comment_on_eval=get("GITHUB_POST_COMMENT_ON_EVAL", "true").lower()
+            in {"1", "true", "yes", "on"},
+            github_auto_merge_submissions=get("GITHUB_AUTO_MERGE_SUBMISSIONS", "false").lower()
+            in {"1", "true", "yes", "on"},
+            github_merge_method=get("GITHUB_MERGE_METHOD", DEFAULT_GITHUB_MERGE_METHOD),
             allowed_repo=get("ALLOWED_REPO", DEFAULT_ALLOWED_REPO),
             miner_repo_url=get("MINER_REPO_URL", DEFAULT_MINER_REPO_URL),
+            public_site_url=get("PUBLIC_SITE_URL", DEFAULT_PUBLIC_SITE_URL),
             local_repo_dir=Path(get("MINIROUTER_REPO_DIR", str(DEFAULT_LOCAL_REPO_DIR))),
             trinity_remote_host=get("TRINITY_GPU_HOST", "trinity-gpu"),
             trinity_remote_dir=get("TRINITY_REMOTE_DIR", DEFAULT_TRINITY_REMOTE_DIR),

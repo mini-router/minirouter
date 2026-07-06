@@ -12,6 +12,8 @@ validator, worker, and API live alongside the router code. Use the repo-root
 - stores submission metadata and artifact hashes in a database
 - runs a configurable evaluation command against a checkpoint
 - records evaluation runs and exposes leaderboard data for the public site
+- posts a formatted PR summary comment after evaluation
+- can auto-merge evaluated miner submission PRs when enabled
 
 ## Layout
 
@@ -69,5 +71,13 @@ python -m eval_backend.worker --loop
 ```
 
 For workflow smoke checks, set `EVAL_MAX_ITEMS=1` in the repo-root `secrets.env`.
+
+GitHub PR automation uses the repo-root `GITHUB_WEBHOOK_SECRET` plus the optional
+`GITHUB_ACCESS_TOKEN`. Set `PUBLIC_SITE_URL` if the public frontend moves to a different domain.
+The webhook intake is idempotent for repeated events on the same PR, and the worker evaluates one
+queued submission at a time.
+
+To enable automatic merge after evaluation, set `GITHUB_AUTO_MERGE_SUBMISSIONS=true`.
+To keep only the PR comment and skip auto-merge, leave it `false`.
 
 The public website can read `GET /api/leaderboard` and `GET /api/submissions/{id}`.

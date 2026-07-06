@@ -12,6 +12,7 @@ from .core.config import Settings
 from .db import Base, build_engine, build_session_factory
 from .models import Submission
 from .services.eval_runner import evaluate_submission
+from .services.github import publish_submission_result
 
 
 @contextmanager
@@ -28,7 +29,8 @@ def session_scope(session_factory) -> Iterator[Session]:
 
 
 def process_once(session_factory, settings: Settings) -> int:
-    with session_scope(session_factory) as session:
+    session = session_factory()
+    try:
         submission = (
             session.execute(
                 select(Submission).where(Submission.status == "queued").order_by(Submission.created_at.asc())
@@ -38,8 +40,22 @@ def process_once(session_factory, settings: Settings) -> int:
         )
         if submission is None:
             return 0
-        evaluate_submission(session, submission, settings)
-        return 1
+        result = evaluate_submission(session, submission, settings)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+    if submission.source == "github_pr":
+        try:
+            import asyncio
+
+            asyncio.run(publish_submission_result(settings, submission, result))
+        except Exception:
+            pass
+    return 1
 
 
 def main() -> None:

@@ -1,0 +1,174 @@
+name: PR automation
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - labeled
+      - unlabeled
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  label_and_queue:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Label PR and queue submissions
+        uses: actions/github-script@v7
+        env:
+          BACKEND_WEBHOOK_URL: ${{ vars.BACKEND_WEBHOOK_URL }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.GITHUB_WEBHOOK_SECRET }}
+        with:
+          script: |
+            const crypto = require('crypto')
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+            const pr = context.payload.pull_request
+
+            const labelSpecs = [
+              { name: 'web', color: '0ea5e9', description: 'Frontend changes' },
+              { name: 'validator', color: '8b5cf6', description: 'Validator backend changes' },
+              { name: 'train', color: '10b981', description: 'Training or routing changes' },
+              { name: 'eval', color: 'f59e0b', description: 'Evaluation changes' },
+              { name: 'benchmark', color: 'ef4444', description: 'Benchmark or config changes' },
+              { name: 'docs', color: '6b7280', description: 'Documentation changes' },
+              { name: 'miner', color: '14b8a6', description: 'Miner contribution PR' },
+              { name: 'submission', color: 'eab308', description: 'Final submission bundle' },
+            ]
+
+            async function ensureLabel(spec) {
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name: spec.name })
+              } catch (error) {
+                if (error.status !== 404) {
+                  throw error
+                }
+                await github.rest.issues.createLabel({
+                  owner,
+                  repo,
+                  name: spec.name,
+                  color: spec.color,
+                  description: spec.description,
+                })
+              }
+            }
+
+            for (const spec of labelSpecs) {
+              await ensureLabel(spec)
+            }
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number: pr.number,
+              per_page: 100,
+            })
+
+            const names = files.map((file) => file.filename)
+            const labels = new Set()
+            const any = (predicate) => names.some(predicate)
+
+            if (any((path) => path.startsWith('web/'))) {
+              labels.add('web')
+            }
+
+            if (any((path) => path.startsWith('validator/'))) {
+              labels.add('validator')
+              labels.add('eval')
+            }
+
+            if (any((path) => path.startsWith('src/'))) {
+              labels.add('train')
+            }
+
+            if (any((path) => path.startsWith('scripts/'))) {
+              labels.add('train')
+              labels.add('eval')
+            }
+
+            if (any((path) => path.startsWith('benchmarks/') || path.startsWith('configs/'))) {
+              labels.add('benchmark')
+            }
+
+            if (
+              any(
+                (path) =>
+                  path.startsWith('docs/') ||
+                  path === 'README.md' ||
+                  path === 'CONTRIBUTOIN.md' ||
+                  path === 'CONTRIBUTION.md'
+              )
+            ) {
+              labels.add('docs')
+            }
+
+            if (pr.head.ref.startsWith('sn74-')) {
+              labels.add('miner')
+            }
+
+            if (any((path) => path.startsWith('submissions/final_model/'))) {
+              labels.add('submission')
+              labels.add('miner')
+            }
+
+            if (labels.size > 0) {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: pr.number,
+                labels: [...labels],
+              })
+            }
+
+            const shouldQueue = labels.has('miner') && labels.has('submission')
+            if (!shouldQueue) {
+              core.info(`Labels applied: ${[...labels].join(', ') || 'none'}`)
+              return
+            }
+
+            const webhookUrl = process.env.BACKEND_WEBHOOK_URL || 'https://minirouter.work.gd/webhooks/github'
+            const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET
+            if (!webhookSecret) {
+              throw new Error('GITHUB_WEBHOOK_SECRET is not configured')
+            }
+
+            const payload = {
+              action: context.payload.action,
+              repository: { full_name: `${owner}/${repo}` },
+              pull_request: {
+                number: pr.number,
+                head: {
+                  sha: pr.head.sha,
+                  ref: pr.head.ref,
+                },
+              },
+              sender: {
+                login: pr.user?.login || 'github-actions',
+              },
+            }
+
+            const body = JSON.stringify(payload)
+            const signature =
+              'sha256=' + crypto.createHmac('sha256', webhookSecret).update(body).digest('hex')
+
+            const response = await fetch(webhookUrl, {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/json',
+                'x-hub-signature-256': signature,
+              },
+              body,
+            })
+
+            if (!response.ok) {
+              const text = await response.text()
+              throw new Error(`Backend webhook failed (${response.status}): ${text}`)
+            }
+
+            core.info(`Queued submission for ${owner}/${repo}#${pr.number}`)
