@@ -1,0 +1,14 @@
+{
+  "benchmark": "math500",
+  "pool": [
+    "deepseek-v4-pro",
+    "glm-5p2",
+    "kimi-k2p6"
+  ],
+  "n_total": 13312,
+  "popsize": 2,
+  "m_cma": 1,
+  "generations": 1,
+  "best_fitness": 1.0,
+  "run_dir": "/home/ubuntu/codes/tmimmanuel/tiny-router-works/minirouter/experiments/math500/local-openrouter-mini"
+}
