@@ -1,6 +1,6 @@
 import { motion, type Variants } from 'framer-motion'
 import { Link } from 'react-router-dom'
-import { LEADERBOARD_DATA } from '../data/leaderboard'
+import { useLeaderboard } from '../hooks/useLeaderboard'
 
 const metrics = [
   { value: '10K', label: 'Head parameters' },
@@ -23,7 +23,8 @@ const itemVariants: Variants = {
 }
 
 export default function Hero() {
-  const topEntries = LEADERBOARD_DATA.slice(0, 3)
+  const { entries: leaderboard } = useLeaderboard(3)
+  const topEntries = leaderboard.slice(0, 3)
 
   return (
     <section className="section-band pt-28 md:pt-32">
@@ -102,7 +103,7 @@ export default function Hero() {
                   </div>
                   <div className="text-right">
                     <div className="text-lg font-semibold text-text font-mono">
-                      {(entry.accuracy * 100).toFixed(1)}%
+                      {entry.accuracy == null ? '—' : `${(entry.accuracy * 100).toFixed(1)}%`}
                     </div>
                     <div className="text-sm text-text-dim">accuracy</div>
                   </div>

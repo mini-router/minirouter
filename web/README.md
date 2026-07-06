@@ -2,6 +2,9 @@
 
 Competition site for the MiniRouter optimization challenge.
 
+The frontend reads its backend URL from `web/.env.production` at build time.
+Update `VITE_API_BASE_URL` there if the validator host changes.
+
 ## Local development
 
 ```bash
@@ -14,6 +17,17 @@ npm run dev
 ```bash
 npm run build
 ```
+
+## Backend connection
+
+The frontend talks to the validator API through `VITE_API_BASE_URL`.
+
+- production: `web/.env.production`
+- local development: `web/.env.development`
+
+The shipped default points at `https://minirouter.work.gd`, which is the public
+validator host. The GitHub Pages workflow picks up the production env file during
+build, so changing that file and pushing to `main` updates the deployed frontend.
 
 ## GitHub Pages
 

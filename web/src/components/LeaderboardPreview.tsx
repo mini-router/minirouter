@@ -1,8 +1,10 @@
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
-import { LEADERBOARD_DATA } from '../data/leaderboard'
+import { useLeaderboard } from '../hooks/useLeaderboard'
 
 export default function LeaderboardPreview() {
+  const { entries } = useLeaderboard(3)
+
   return (
     <section className="section-band">
       <div className="section-shell">
@@ -34,7 +36,7 @@ export default function LeaderboardPreview() {
               </tr>
             </thead>
             <tbody>
-              {LEADERBOARD_DATA.map((entry) => {
+              {entries.slice(0, 3).map((entry) => {
                 const rankClass =
                   entry.rank === 1
                     ? 'text-gold'
@@ -53,10 +55,10 @@ export default function LeaderboardPreview() {
                     </td>
                     <td className="p-4 font-medium text-text">{entry.team}</td>
                     <td className="p-4 text-right font-mono">
-                      {(entry.accuracy * 100).toFixed(1)}%
+                      {entry.accuracy == null ? '—' : `${(entry.accuracy * 100).toFixed(1)}%`}
                     </td>
                     <td className="p-4 text-right font-mono text-text-dim">
-                      {entry.params.toLocaleString()}
+                      {entry.params == null ? '—' : entry.params.toLocaleString()}
                     </td>
                     <td className="p-4 text-right text-text-dim">
                       {new Date(entry.submitted).toLocaleDateString('en-US', {

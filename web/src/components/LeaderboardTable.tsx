@@ -1,15 +1,14 @@
 import { useState, useMemo } from 'react'
 import { motion } from 'framer-motion'
-import { LEADERBOARD_DATA } from '../data/leaderboard'
+import { useLeaderboard } from '../hooks/useLeaderboard'
 
 export default function LeaderboardTable() {
   const [search, setSearch] = useState('')
+  const { entries, source, error } = useLeaderboard()
 
   const filtered = useMemo(() => {
-    return LEADERBOARD_DATA.filter((e) =>
-      e.team.toLowerCase().includes(search.toLowerCase())
-    )
-  }, [search])
+    return entries.filter((e) => e.team.toLowerCase().includes(search.toLowerCase()))
+  }, [entries, search])
 
   return (
     <div className="section-shell">
@@ -21,7 +20,13 @@ export default function LeaderboardTable() {
           </h2>
           <p className="mt-2 text-sm text-text-dim">
             {filtered.length} entries currently shown. Search narrows by team name.
+            {source === 'api' ? ' Live data is loaded from the backend.' : ' Showing bundled fallback data.'}
           </p>
+          {error && source !== 'api' && (
+            <p className="mt-2 text-xs text-text-dim">
+              Backend fetch failed, using fallback leaderboard.
+            </p>
+          )}
         </div>
         <div className="w-full max-w-md">
           <label className="meta-label mb-2 block" htmlFor="leaderboard-search">
@@ -85,16 +90,16 @@ export default function LeaderboardTable() {
                       </td>
                       <td className="p-4 font-medium text-text">{entry.team}</td>
                       <td className="p-4 text-right font-mono">
-                        {(entry.accuracy * 100).toFixed(1)}%
+                        {entry.accuracy == null ? '—' : `${(entry.accuracy * 100).toFixed(1)}%`}
                       </td>
                       <td className="p-4 text-right font-mono text-text-dim">
-                        {(entry.math * 100).toFixed(1)}%
+                        {entry.math == null ? '—' : `${(entry.math * 100).toFixed(1)}%`}
                       </td>
                       <td className="p-4 text-right font-mono text-text-dim">
-                        {(entry.mmlu * 100).toFixed(1)}%
+                        {entry.mmlu == null ? '—' : `${(entry.mmlu * 100).toFixed(1)}%`}
                       </td>
                       <td className="p-4 text-right font-mono text-text-dim">
-                        {entry.params.toLocaleString()}
+                        {entry.params == null ? '—' : entry.params.toLocaleString()}
                       </td>
                       <td className="p-4 text-right text-text-dim">
                         {new Date(entry.submitted).toLocaleDateString('en-US', {

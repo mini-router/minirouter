@@ -10,7 +10,8 @@ web/node_modules/
 web/dist/
 web/.vite/
 web/.env
-web/.env.*
+web/.env.local
+web/.env.*.local
 validator/data/
 validator/workspace/
 validator/.venv/
