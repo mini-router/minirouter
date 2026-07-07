@@ -6,6 +6,7 @@ __pycache__/
 *.pyc
 .venv/
 experiments/
+data/
 web/node_modules/
 web/dist/
 web/.vite/

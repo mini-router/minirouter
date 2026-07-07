@@ -3,14 +3,16 @@
 Backend service for PR intake, checkpoint evaluation, and leaderboard storage for the
 MiniRouter competition. This subtree is copied into the main `minirouter` repo so the
 validator, worker, and API live alongside the router code. Use the repo-root
-`secrets.env` for both the router and the validator.
+`secrets.env` for both the router and the validator. The validator backend
+requires Postgres, so `DATABASE_URL` must be a PostgreSQL connection string.
 
 ## What it does
 
 - accepts PR webhooks from the miner repo
 - accepts direct archive uploads from the frontend `/submit` form
 - stores submission metadata and artifact hashes in a database
-- runs a configurable evaluation command against a checkpoint
+- queues each submission in Postgres and lets the worker evaluate it
+- runs a configurable submission-only evaluation command against a checkpoint
 - records evaluation runs and exposes leaderboard data for the public site
 - posts a formatted PR summary comment after evaluation
 - can auto-merge evaluated miner submission PRs when enabled
@@ -39,7 +41,7 @@ Example command templates:
 
 ```bash
 cd {repo_dir} && source .venv/bin/activate && \
-PYTHONPATH=src python -m trinity.eval \
+PYTHONPATH=src python -m trinity.eval --submission-only \
   --benchmark {benchmark} \
   --provider {provider} \
   --models {models_config} \
@@ -58,8 +60,9 @@ For remote execution, set `TRINITY_GPU_HOST`, `TRINITY_REMOTE_DIR`, and
 `TRINITY_REMOTE_WORKSPACE_ROOT` to the SSH host alias, remote repo checkout, and
 remote temp workspace root. The remote box should have its own repo-root `secrets.env` too.
 
-The runner does not duplicate evaluation logic. It shells out to `python -m trinity.eval`
-from the copied `minirouter` repository, so the benchmark code stays in one place.
+The runner does not duplicate evaluation logic. It shells out to the submission-only
+`python -m trinity.eval` path from the copied `minirouter` repository, so the benchmark
+code stays in one place.
 
 ## Local run
 
@@ -68,6 +71,17 @@ python -m venv .venv
 .venv/bin/pip install -e .
 uvicorn eval_backend.main:app --reload
 python -m eval_backend.worker --loop
+```
+
+Run the API and the worker as separate processes. The API only stores queued
+submissions; the worker claims them and advances the progress fields.
+The submission API exposes the current phase, message, and item counters so the
+GitHub workflow can show live status while it waits.
+
+Example `DATABASE_URL`:
+
+```bash
+DATABASE_URL=postgresql+psycopg://minirouter:minirouter@127.0.0.1:5432/minirouter
 ```
 
 For workflow smoke checks, set `EVAL_MAX_ITEMS=1` in the repo-root `secrets.env`.

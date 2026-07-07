@@ -13,6 +13,10 @@ class EvaluationOut(BaseModel):
     submission_id: str
     status: str
     score: float | None = None
+    phase: str | None = None
+    message: str | None = None
+    progress_current: int | None = None
+    progress_total: int | None = None
     metrics: dict[str, Any] = Field(default_factory=dict)
     command: str | None = None
     stdout: str | None = None
@@ -41,6 +45,10 @@ class SubmissionOut(BaseModel):
     status: str
     latest_score: float | None = None
     best_run_id: int | None = None
+    current_phase: str | None = None
+    current_message: str | None = None
+    current_progress_current: int | None = None
+    current_progress_total: int | None = None
     created_at: datetime
     updated_at: datetime
     evaluations: list[EvaluationOut] = Field(default_factory=list)

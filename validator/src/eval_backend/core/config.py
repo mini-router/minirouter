@@ -35,14 +35,21 @@ def _first_existing(paths: Iterable[Path]) -> Path | None:
     return None
 
 
-DEFAULT_DATABASE_URL = "sqlite:///./data/eval_backend.db"
+def _resolve_repo_path(root: Path, raw: str) -> Path:
+    path = Path(raw).expanduser()
+    if path.is_absolute():
+        return path
+    return (root / path).resolve()
+
+
+DEFAULT_DATABASE_URL = "postgresql+psycopg://minirouter:minirouter@127.0.0.1:5432/minirouter"
 DEFAULT_ARTIFACT_ROOT = Path("./data/artifacts")
 DEFAULT_WORKSPACE_ROOT = Path("./data/workspaces")
 DEFAULT_LOCAL_REPO_DIR = Path(__file__).resolve().parents[4]
 DEFAULT_ALLOWED_ORIGINS = ["http://localhost:5173"]
 DEFAULT_GITHUB_WEBHOOK_SECRET = "replace-me"
 DEFAULT_GITHUB_ACCESS_TOKEN = ""
-DEFAULT_GITHUB_POST_COMMENT_ON_EVAL = True
+DEFAULT_GITHUB_POST_COMMENT_ON_EVAL = False
 DEFAULT_GITHUB_AUTO_MERGE_SUBMISSIONS = False
 DEFAULT_GITHUB_MERGE_METHOD = "merge"
 DEFAULT_ALLOWED_REPO = "mini-router/minirouter"
@@ -53,16 +60,16 @@ DEFAULT_TRINITY_REMOTE_WORKSPACE_ROOT = "~/trinity-eval-workspaces"
 DEFAULT_TRINITY_GPU_INDEX = 5
 DEFAULT_REMOTE_EVAL_COMMAND_TEMPLATE = (
     "PYTHONPATH=src "
-    "python -m trinity.eval "
+    "PYTHONUNBUFFERED=1 python -u -m trinity.eval --submission-only "
     "--benchmark {benchmark} --provider {provider} --models {models_config} "
-    "--device cuda:0 --dtype bfloat16 --max-items 20 "
+    "--device cuda:0 --dtype bfloat16 --max-items {max_items} "
     "--theta {checkpoint_path} --out {results_path}"
 )
 DEFAULT_LOCAL_EVAL_COMMAND_TEMPLATE = (
     "PYTHONPATH=src "
-    "python -m trinity.eval "
+    "PYTHONUNBUFFERED=1 python -u -m trinity.eval --submission-only "
     "--benchmark {benchmark} --provider {provider} --models {models_config} "
-    "--device cpu --dtype float32 --max-items 20 "
+    "--device cpu --dtype float32 --max-items {max_items} "
     "--theta {checkpoint_path} --out {results_path}"
 )
 DEFAULT_EVAL_PROVIDER = "openrouter"
@@ -130,8 +137,8 @@ class Settings:
 
         return cls(
             database_url=get("DATABASE_URL", DEFAULT_DATABASE_URL),
-            artifact_root=Path(get("ARTIFACT_ROOT", str(DEFAULT_ARTIFACT_ROOT))),
-            workspace_root=Path(get("WORKSPACE_ROOT", str(DEFAULT_WORKSPACE_ROOT))),
+            artifact_root=_resolve_repo_path(root, get("ARTIFACT_ROOT", str(DEFAULT_ARTIFACT_ROOT))),
+            workspace_root=_resolve_repo_path(root, get("WORKSPACE_ROOT", str(DEFAULT_WORKSPACE_ROOT))),
             allowed_origins=origins,
             github_webhook_secret=get("GITHUB_WEBHOOK_SECRET", DEFAULT_GITHUB_WEBHOOK_SECRET),
             github_access_token=get("GITHUB_ACCESS_TOKEN", DEFAULT_GITHUB_ACCESS_TOKEN),
@@ -143,7 +150,7 @@ class Settings:
             allowed_repo=get("ALLOWED_REPO", DEFAULT_ALLOWED_REPO),
             miner_repo_url=get("MINER_REPO_URL", DEFAULT_MINER_REPO_URL),
             public_site_url=get("PUBLIC_SITE_URL", DEFAULT_PUBLIC_SITE_URL),
-            local_repo_dir=Path(get("MINIROUTER_REPO_DIR", str(DEFAULT_LOCAL_REPO_DIR))),
+            local_repo_dir=_resolve_repo_path(root, get("MINIROUTER_REPO_DIR", str(DEFAULT_LOCAL_REPO_DIR))),
             trinity_remote_host=get("TRINITY_GPU_HOST", "trinity-gpu"),
             trinity_remote_dir=get("TRINITY_REMOTE_DIR", DEFAULT_TRINITY_REMOTE_DIR),
             trinity_remote_workspace_root=get(

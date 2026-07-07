@@ -201,10 +201,18 @@ jobs:
               }
 
               submission = await response.json()
+              const progressCurrent = submission.current_progress_current
+              const progressTotal = submission.current_progress_total
+              const progressText =
+                progressCurrent != null && progressTotal != null
+                  ? ` ${progressCurrent}/${progressTotal}`
+                  : ''
+              const phaseText = submission.current_phase || submission.status || 'unknown'
+              const messageText = submission.current_message ? ` - ${submission.current_message}` : ''
+              core.info(`Submission ${submissionId}: ${phaseText}${progressText}${messageText}`)
               if (submission.status === 'completed' || submission.status === 'failed') {
                 break
               }
-              core.info(`Submission ${submissionId} is ${submission.status}; waiting...`)
               await new Promise((resolve) => setTimeout(resolve, 20000))
             }
 
@@ -229,6 +237,8 @@ jobs:
             body += `Submission \`${submission.id}\` for **${submission.team_name || submission.repo_full_name || 'unknown'}** has status **${submission.status}**.\n\n`
             body += `| field | value |\n| --- | --- |\n`
             body += `| benchmark | \`${submission.benchmark}\` |\n`
+            body += `| phase | \`${submission.current_phase || 'n/a'}\` |\n`
+            body += `| progress | ${submission.current_progress_current ?? 'n/a'}/${submission.current_progress_total ?? 'n/a'} |\n`
             body += `| score | ${scoreText} |\n`
             body += `| evaluations | ${evaluations.length} |\n`
             body += `| report | [Open the report](${backendBase.replace(/\/+$/, '')}/#/submission/${submission.id}) |\n`

@@ -153,6 +153,8 @@ def build_submission_summary_markdown(
             f"on **{submission.benchmark}** failed during evaluation."
         )
 
+    progress_current = getattr(evaluation, "progress_current", None)
+    progress_total = getattr(evaluation, "progress_total", None)
     table = [
         "| field | value |",
         "| --- | --- |",
@@ -161,6 +163,8 @@ def build_submission_summary_markdown(
         f"| repo | `{submission.repo_full_name or 'n/a'}` |",
         f"| benchmark | `{submission.benchmark}` |",
         f"| status | `{evaluation.status}` |",
+        f"| phase | `{getattr(evaluation, 'phase', None) or 'n/a'}` |",
+        f"| progress | {progress_current if progress_current is not None else 'n/a'}/{progress_total if progress_total is not None else 'n/a'} |",
         f"| score | {score_text} |",
         f"| started | {evaluation.started_at.isoformat() if evaluation.started_at else 'n/a'} |",
         f"| finished | {evaluation.finished_at.isoformat() if evaluation.finished_at else 'n/a'} |",

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -29,12 +29,21 @@ router = APIRouter()
 
 
 def _submission_to_schema(submission: Submission) -> SubmissionOut:
+    ordered_evaluations = sorted(
+        submission.evaluations,
+        key=lambda run: (run.created_at or _utcnow(), run.id),
+    )
+    latest = ordered_evaluations[-1] if ordered_evaluations else None
     evaluations = [
         EvaluationOut(
             id=run.id,
             submission_id=run.submission_id,
             status=run.status,
             score=run.score,
+            phase=run.phase,
+            message=run.message,
+            progress_current=run.progress_current,
+            progress_total=run.progress_total,
             metrics=json.loads(run.metrics_json) if run.metrics_json else {},
             command=run.command,
             stdout=run.stdout,
@@ -62,6 +71,10 @@ def _submission_to_schema(submission: Submission) -> SubmissionOut:
         status=submission.status,
         latest_score=submission.latest_score,
         best_run_id=submission.best_run_id,
+        current_phase=latest.phase if latest else None,
+        current_message=latest.message if latest else None,
+        current_progress_current=latest.progress_current if latest else None,
+        current_progress_total=latest.progress_total if latest else None,
         created_at=submission.created_at,
         updated_at=submission.updated_at,
         evaluations=evaluations,
@@ -74,6 +87,10 @@ def _evaluation_to_schema(run: EvaluationRun) -> EvaluationOut:
         submission_id=run.submission_id,
         status=run.status,
         score=run.score,
+        phase=run.phase,
+        message=run.message,
+        progress_current=run.progress_current,
+        progress_total=run.progress_total,
         metrics=json.loads(run.metrics_json) if run.metrics_json else {},
         command=run.command,
         stdout=run.stdout,
@@ -104,27 +121,6 @@ def get_session(request: Request) -> Session:
     return request.app.state.session_factory()
 
 
-def enqueue_evaluation(settings: Settings, session_factory, submission_id: str) -> None:
-    session = session_factory()
-    try:
-        submission = (
-            session.execute(
-                select(Submission)
-                .where(Submission.id == submission_id)
-                .options(selectinload(Submission.evaluations))
-            )
-            .scalars()
-            .one()
-        )
-        evaluate_submission(session, submission, settings)
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
-
-
 def _verify_github_signature(raw_body: bytes, signature: str | None, secret: str) -> None:
     if not secret or secret == "replace-me":
         return
@@ -153,7 +149,6 @@ def health() -> HealthResponse:
 @router.post("/submit", response_model=SubmissionCreateResponse)
 async def submit(
     request: Request,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     team_name: str | None = None,
     repo_full_name: str | None = Form(None),
@@ -197,13 +192,6 @@ async def submit(
             session.refresh(submission)
             evaluate_submission(session, submission, settings)
             session.commit()
-        else:
-            background_tasks.add_task(
-                enqueue_evaluation,
-                settings,
-                request.app.state.session_factory,
-                submission.id,
-            )
 
         session.refresh(submission)
         evaluation = None

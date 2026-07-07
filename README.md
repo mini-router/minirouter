@@ -51,9 +51,12 @@ prefix rule is documented in `CONTRIBUTOIN.md`, and the submit-ready model bundl
 
 The repository also includes a GitHub Actions PR automation workflow. It labels PRs by path,
 tags miner submission PRs, packages `submissions/final_model/`, uploads the bundle through the
-public `/submit` endpoint, waits for evaluation, comments back the result, and then merges the PR
-when the run completes.
+public `/submit` endpoint, waits for the worker to advance the submission status, comments back the
+result, and then merges the PR when the run completes.
 No separate GitHub bot is required for that flow.
+
+The validator backend stores submissions and evaluation runs in Postgres. Set
+`DATABASE_URL` in the repo-root `secrets.env` before starting the API or worker.
 
 ## Model pool
 

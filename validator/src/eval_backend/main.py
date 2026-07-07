@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .api.routes import router
 from .core.config import Settings
-from .db import Base, build_engine, build_session_factory
+from .db import Base, build_engine, build_session_factory, ensure_schema
 
 
 @asynccontextmanager
@@ -16,6 +16,7 @@ async def lifespan(app: FastAPI):
     settings.ensure_dirs()
     engine = build_engine(settings)
     Base.metadata.create_all(bind=engine)
+    ensure_schema(engine)
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = build_session_factory(engine)

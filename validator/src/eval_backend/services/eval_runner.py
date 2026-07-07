@@ -2,8 +2,15 @@ from __future__ import annotations
 
 import json
 import os
+import errno
+import re
 import shlex
 import subprocess
+import select
+import time
+import logging
+import sys
+import pty
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +20,8 @@ from sqlalchemy.orm import Session
 
 from ..core.config import Settings
 from ..models import EvaluationRun, Submission
+
+logger = logging.getLogger("eval_backend.eval_runner")
 
 
 def _utcnow() -> datetime:
@@ -69,6 +78,182 @@ def _extract_score(metrics: dict[str, Any]) -> float | None:
                 if isinstance(nested_value, (int, float)):
                     return float(nested_value)
     return None
+
+
+_PROGRESS_START_RE = re.compile(r"^\[submission\] item (\d+)/(\d+) start(?: id=(.+))?$")
+_PROGRESS_DONE_RE = re.compile(
+    r"^\[submission\] item (\d+)/(\d+) done (pass|fail) score=([0-9.]+)"
+)
+_PROGRESS_INIT_RE = re.compile(r"^\[submission\] model initiated(?: (.+))?$")
+_PROGRESS_COMPLETE_RE = re.compile(r"^\[submission\] completed score=([0-9.]+)")
+
+
+def _touch_progress(
+    session: Session,
+    run: EvaluationRun,
+    submission: Submission,
+    *,
+    phase: str | None = None,
+    message: str | None = None,
+    current: int | None = None,
+    total: int | None = None,
+    status: str | None = None,
+) -> None:
+    if phase is not None:
+        run.phase = phase
+    if message is not None:
+        run.message = message
+    if current is not None:
+        run.progress_current = current
+    if total is not None:
+        run.progress_total = total
+    if status is not None:
+        run.status = status
+        submission.status = status
+    submission.updated_at = _utcnow()
+    session.flush()
+
+
+def _consume_progress_line(
+    line: str,
+    session: Session,
+    run: EvaluationRun,
+    submission: Submission,
+) -> None:
+    line = line.strip()
+    if not line:
+        return
+    logger.info("%s", line)
+
+    match = _PROGRESS_INIT_RE.match(line)
+    if match:
+        _touch_progress(
+            session,
+            run,
+            submission,
+            phase="model_initiated",
+            message=match.group(1) or "model initiated",
+        )
+        return
+
+    match = _PROGRESS_START_RE.match(line)
+    if match:
+        current = int(match.group(1))
+        total = int(match.group(2))
+        task_id = match.group(3) or ""
+        detail = f"item {current}/{total} running"
+        if task_id:
+            detail = f"{detail} ({task_id})"
+        _touch_progress(
+            session,
+            run,
+            submission,
+            phase="evaluation_running",
+            message=detail,
+            current=current,
+            total=total,
+        )
+        return
+
+    match = _PROGRESS_DONE_RE.match(line)
+    if match:
+        current = int(match.group(1))
+        total = int(match.group(2))
+        verdict = match.group(3)
+        score = match.group(4)
+        detail = f"item {current}/{total} {verdict} score={score}"
+        _touch_progress(
+            session,
+            run,
+            submission,
+            phase="evaluation_running",
+            message=detail,
+            current=current,
+            total=total,
+        )
+        return
+
+    match = _PROGRESS_COMPLETE_RE.match(line)
+    if match:
+        _touch_progress(
+            session,
+            run,
+            submission,
+            phase="completed",
+            message=f"completed score={match.group(1)}",
+        )
+
+
+def _run_bash_stream(
+    command: str,
+    cwd: Path,
+    timeout: int,
+    env: dict[str, str] | None = None,
+    *,
+    on_line=None,
+) -> tuple[int, str, str]:
+    master_fd, slave_fd = pty.openpty()
+    proc = subprocess.Popen(
+        ["bash", "-lc", command],
+        cwd=str(cwd),
+        env=env,
+        stdin=slave_fd,
+        stdout=slave_fd,
+        stderr=slave_fd,
+        close_fds=True,
+    )
+    os.close(slave_fd)
+    chunks: list[str] = []
+    line_buf = ""
+    started = time.monotonic()
+    try:
+        while True:
+            if timeout and time.monotonic() - started > timeout:
+                proc.kill()
+                raise subprocess.TimeoutExpired(cmd=command, timeout=timeout, output="".join(chunks))
+            ready, _, _ = select.select([master_fd], [], [], 1.0)
+            if ready:
+                try:
+                    raw = os.read(master_fd, 4096)
+                except OSError as exc:
+                    if exc.errno == errno.EIO:
+                        raw = b""
+                    else:
+                        raise
+                if raw:
+                    text = raw.decode("utf-8", errors="replace")
+                    chunks.append(text)
+                    sys.stdout.write(text)
+                    sys.stdout.flush()
+                    if on_line:
+                        line_buf += text
+                        while "\n" in line_buf:
+                            line, line_buf = line_buf.split("\n", 1)
+                            on_line(line)
+                elif proc.poll() is not None:
+                    break
+            if proc.poll() is not None and not ready:
+                break
+        try:
+            leftover = os.read(master_fd, 4096)
+        except OSError as exc:
+            if exc.errno == errno.EIO:
+                leftover = b""
+            else:
+                raise
+        if leftover:
+            text = leftover.decode("utf-8", errors="replace")
+            chunks.append(text)
+            sys.stdout.write(text)
+            sys.stdout.flush()
+            if on_line:
+                line_buf += text
+        if on_line and line_buf.strip():
+            on_line(line_buf)
+        rc = proc.wait()
+        return rc, "".join(chunks), ""
+    finally:
+        os.close(master_fd)
 
 
 def _format_command(
@@ -203,7 +388,9 @@ def _remote_attempt(
     local_results_path: Path,
     submission_id: str,
     env: dict[str, str],
-) -> tuple[str, subprocess.CompletedProcess[str], str, str]:
+    *,
+    on_line=None,
+) -> tuple[str, int, str, str]:
     host = settings.trinity_gpu_host
     remote_workspace = _remote_workspace(settings, submission_id)
     remote_checkpoint = remote_workspace / checkpoint_path.name
@@ -212,24 +399,66 @@ def _remote_attempt(
     remote_command = _build_remote_command(settings, remote_checkpoint, remote_results, remote_workspace)
     subprocess.run(["ssh", host, "mkdir", "-p", _remote_path(remote_workspace)], check=True)
     subprocess.run(["rsync", "-az", str(checkpoint_path), f"{host}:{_remote_path(remote_checkpoint)}"], check=True)
-    completed = subprocess.run(
-        ["ssh", host, "bash", "-lc", remote_command],
-        capture_output=True,
-        text=True,
-        timeout=settings.eval_timeout_seconds,
+    master_fd, slave_fd = pty.openpty()
+    proc = subprocess.Popen(
+        ["ssh", "-tt", host, "bash", "-lc", remote_command],
+        stdin=slave_fd,
+        stdout=slave_fd,
+        stderr=slave_fd,
+        close_fds=True,
         env=env,
-        check=False,
     )
-    subprocess.run(
-        [
-            "rsync",
-            "-az",
-            f"{host}:{_remote_path(remote_workspace)}/",
-            f"{_local_workspace(settings, submission_id)}/",
-        ],
-        check=True,
-    )
-    return remote_command, completed, completed.stdout or "", completed.stderr or ""
+    os.close(slave_fd)
+    lines: list[str] = []
+    line_buf = ""
+    started = time.monotonic()
+    try:
+        while True:
+            if settings.eval_timeout_seconds and time.monotonic() - started > settings.eval_timeout_seconds:
+                proc.kill()
+                raise subprocess.TimeoutExpired(
+                    cmd=["ssh", "-tt", host, "bash", "-lc", remote_command],
+                    timeout=settings.eval_timeout_seconds,
+                    output="".join(lines),
+                )
+            ready, _, _ = select.select([master_fd], [], [], 1.0)
+            if ready:
+                try:
+                    raw = os.read(master_fd, 4096)
+                except OSError as exc:
+                    if exc.errno == errno.EIO:
+                        raw = b""
+                    else:
+                        raise
+                if raw:
+                    text = raw.decode("utf-8", errors="replace")
+                    lines.append(text)
+                    sys.stdout.write(text)
+                    sys.stdout.flush()
+                    if on_line:
+                        line_buf += text
+                        while "\n" in line_buf:
+                            line, line_buf = line_buf.split("\n", 1)
+                            on_line(line)
+                elif proc.poll() is not None:
+                    break
+            if proc.poll() is not None and not ready:
+                break
+        if on_line and line_buf.strip():
+            on_line(line_buf)
+        rc = proc.wait()
+        subprocess.run(
+            [
+                "rsync",
+                "-az",
+                f"{host}:{_remote_path(remote_workspace)}/",
+                f"{_local_workspace(settings, submission_id)}/",
+            ],
+            check=True,
+        )
+        return remote_command, rc, "".join(lines), ""
+    finally:
+        os.close(master_fd)
 
 
 def _local_attempt(
@@ -238,17 +467,17 @@ def _local_attempt(
     local_results_path: Path,
     submission_id: str,
     env: dict[str, str],
-) -> tuple[str, subprocess.CompletedProcess[str], str, str]:
+) -> tuple[str, int, str, str]:
     local_workspace = _local_workspace(settings, submission_id)
     local_workspace.mkdir(parents=True, exist_ok=True)
     local_command = _build_local_command(settings, checkpoint_path, local_results_path, local_workspace)
-    completed = _run_bash(
+    rc, out, err = _run_bash_stream(
         local_command,
         cwd=Path(settings.local_repo_dir).expanduser().resolve(),
         timeout=settings.eval_timeout_seconds,
         env=env,
     )
-    return local_command, completed, completed.stdout or "", completed.stderr or ""
+    return local_command, rc, out, err
 
 
 @dataclass(slots=True)
@@ -268,16 +497,25 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
     run = EvaluationRun(
         submission_id=submission.id,
         status="running",
+        phase="processing",
+        message="worker claimed submission",
+        progress_current=0,
+        progress_total=settings.eval_max_items,
         started_at=_utcnow(),
         command="",
         results_path=str(local_results_path),
     )
     session.add(run)
     session.flush()
+    submission.status = "running"
+    submission.updated_at = _utcnow()
+    session.flush()
 
     if not submission.checkpoint_path:
         error = f"submission {submission.id} does not have a checkpoint to evaluate"
         run.status = "failed"
+        run.phase = "failed"
+        run.message = error
         run.error = error
         run.finished_at = _utcnow()
         run.metrics_json = json.dumps({"missing_checkpoint": True}, ensure_ascii=False, sort_keys=True)
@@ -311,33 +549,62 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
     attempts: list[str] = []
     if settings.eval_execution_mode != "local_cpu":
         try:
+            _touch_progress(
+                session,
+                run,
+                submission,
+                phase="remote_gpu",
+                message=f"launching remote gpu on {settings.trinity_gpu_host}",
+                current=0,
+                total=settings.eval_max_items,
+            )
             command, completed, out, err = _remote_attempt(
-                settings, checkpoint_path, local_results_path, submission.id, env
+                settings,
+                checkpoint_path,
+                local_results_path,
+                submission.id,
+                env,
+                on_line=lambda line: _consume_progress_line(line, session, run, submission),
             )
             attempts.append(command)
             stdout = out
             stderr = err
-            if completed.returncode != 0:
+            if completed != 0:
                 raise subprocess.CalledProcessError(
-                    completed.returncode, command, output=out, stderr=err
+                    completed, command, output=out, stderr=err
                 )
         except Exception as exc:
             remote_error = f"remote gpu attempt failed: {exc}"
 
     if remote_error or settings.eval_execution_mode == "local_cpu":
         try:
+            _touch_progress(
+                session,
+                run,
+                submission,
+                phase="local_cpu",
+                message="launching local cpu fallback",
+                current=0,
+                total=settings.eval_max_items,
+            )
             command, completed, out, err = _local_attempt(
-                settings, checkpoint_path, local_results_path, submission.id, env
+                settings,
+                checkpoint_path,
+                local_results_path,
+                submission.id,
+                env,
             )
             attempts.append(command)
             stdout = out
             stderr = err
-            if completed.returncode != 0:
+            if completed != 0:
                 raise subprocess.CalledProcessError(
-                    completed.returncode, command, output=out, stderr=err
+                    completed, command, output=out, stderr=err
                 )
         except Exception as exc:
             run.status = "failed"
+            run.phase = "failed"
+            run.message = "; ".join(part for part in [remote_error, str(exc)] if part) or "evaluation failed"
             run.error = "; ".join(part for part in [remote_error, str(exc)] if part)
             run.stdout = stdout
             run.stderr = stderr
@@ -350,6 +617,8 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
     metrics, score = _prepare_results(local_results_path, settings=settings)
 
     run.status = "completed"
+    run.phase = "completed"
+    run.message = f"completed score={score:.4f}" if score is not None else "completed"
     run.score = score
     run.metrics_json = json.dumps(metrics, ensure_ascii=False, sort_keys=True)
     run.stdout = stdout
@@ -359,6 +628,9 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
     submission.status = "completed"
     submission.latest_score = score
     submission.best_run_id = run.id
+    if run.progress_total is None:
+        run.progress_total = settings.eval_max_items
+    run.progress_current = run.progress_total
 
     session.flush()
     return EvaluationResult(run=run, score=score, metrics=metrics, stdout=stdout, stderr=stderr)

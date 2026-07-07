@@ -66,6 +66,30 @@ async def _score_policy(tasks, policy, pool, pool_models, *, sample, **run_kwarg
     return float(mean(R.score(t) for t in trajs))
 
 
+async def _score_submission_policy(tasks, policy, pool, pool_models, *, sample, **run_kwargs) -> float:
+    import httpx
+
+    async with httpx.AsyncClient() as cli:
+        trajs = []
+        total = len(tasks)
+        print(f"[submission] model initiated benchmark={tasks[0].benchmark if tasks else 'unknown'} items={total} pool={pool_models}", flush=True)
+        for i, task in enumerate(tasks, start=1):
+            print(f"[submission] item {i}/{total} start id={task.task_id}", flush=True)
+            traj = await run_trajectory(
+                task, policy, pool, pool_models, sample=sample, client=cli, **run_kwargs
+            )
+            trajs.append(traj)
+            score = R.score(traj)
+            verdict = "pass" if score >= 0.5 else "fail"
+            print(
+                f"[submission] item {i}/{total} done {verdict} score={score:.3f}",
+                flush=True,
+            )
+    score = float(mean(R.score(t) for t in trajs)) if trajs else 0.0
+    print(f"[submission] completed score={score:.4f}", flush=True)
+    return score
+
+
 async def _score_single_model(tasks, pool, model, benchmark, *, max_tokens, reasoning) -> float:
     """Baseline: ask one model directly (one Worker-style turn), score its answer."""
     import httpx
@@ -96,6 +120,34 @@ async def evaluate(args) -> dict:
     tasks = load_tasks(args.benchmark, "test", max_items=args.max_items, seed=args.seed)
     print(f"[eval] benchmark={args.benchmark}  {len(tasks)} test tasks  pool={pool_models}")
     run_kwargs = dict(max_turns=args.max_turns, max_tokens=args.max_tokens, reasoning=args.reasoning)
+
+    if args.submission_only:
+        cfg = yaml.safe_load(Path(args.config).read_text())["coordinator"]
+        device, dtype = resolve_device_dtype(
+            requested_device=args.device,
+            requested_dtype=args.dtype,
+            default_device=cfg.get("device", "cuda:0"),
+            default_dtype=cfg.get("dtype", "bfloat16"),
+            context="eval",
+        )
+        print(f"[eval] building coordinator on {device}/{dtype}...")
+        policy, spec = CoordinatorPolicy.build(
+            model_name=cfg["encoder_model"], device=device,
+            dtype=dtype, target_layer=cfg["svf"]["target_layer"],
+            svf_matrices=cfg["svf"].get("matrices"), n_models=n_models,
+            l2_normalize=cfg["hidden_state"].get("l2_normalize", True),
+        )
+        theta = np.load(args.theta)
+        policy.configure(theta, spec)
+        s_trinity = await _score_submission_policy(
+            tasks, policy, pool, pool_models, sample=False, **run_kwargs
+        )
+        results = {"TRINITY": s_trinity}
+        out = {"benchmark": args.benchmark, "results": results, "invariants": {}}
+        if args.out:
+            Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+            Path(args.out).write_text(json.dumps(out, indent=2))
+        return out
 
     results: dict[str, float] = {}
 
@@ -176,6 +228,8 @@ def main() -> None:
     ap.add_argument("--out", default="")
     ap.add_argument("--trace-llm", action="store_true",
                     help="emit per-request OpenRouter/LLM trace logs")
+    ap.add_argument("--submission-only", action="store_true",
+                    help="evaluate the submitted router only and skip offline baselines")
     args = ap.parse_args()
     if args.trace_llm:
         os.environ["TRINITY_TRACE_LLM"] = "1"
