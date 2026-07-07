@@ -191,8 +191,8 @@ cp experiments/math500/<run-name>/history.json submissions/final_model/  # optio
 python -m trinity.eval \
   --benchmark math500 \
   --theta submissions/final_model/best_theta.npy \
-  --provider openrouter \
-  --models configs/models.openrouter.yaml \
+  --provider chutes \
+  --models configs/models.chutes.yaml \
   --device cpu \
   --dtype float32 \
   --out submissions/final_model/eval.json
@@ -221,3 +221,5 @@ Repository setup:
 - set `MINIROUTER_WEBHOOK_SECRET` as a GitHub Actions secret with the same value
 - optionally set `BACKEND_BASE_URL` as a repository variable if the backend URL changes
 - the workflow posts submission archives to `POST /submit`
+- set `EVAL_PROVIDER=chutes` and `EVAL_MODELS_CONFIG=configs/models.chutes.yaml` for default
+  validator evals using the Chutes pool

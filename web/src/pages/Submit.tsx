@@ -36,8 +36,8 @@ cp experiments/math500/<run-name>/history.json submissions/final_model/  # optio
 python -m trinity.eval \\
   --benchmark math500 \\
   --theta submissions/final_model/best_theta.npy \\
-  --provider openrouter \\
-  --models configs/models.openrouter.yaml \\
+  --provider chutes \\
+  --models configs/models.chutes.yaml \\
   --device cpu \\
   --dtype float32 \\
   --out submissions/final_model/eval.json

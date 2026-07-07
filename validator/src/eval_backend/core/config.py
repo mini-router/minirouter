@@ -72,8 +72,8 @@ DEFAULT_LOCAL_EVAL_COMMAND_TEMPLATE = (
     "--device cpu --dtype float32 --max-items {max_items} "
     "--theta {checkpoint_path} --out {results_path}"
 )
-DEFAULT_EVAL_PROVIDER = "openrouter"
-DEFAULT_EVAL_MODELS_CONFIG = "configs/models.openrouter.yaml"
+DEFAULT_EVAL_PROVIDER = "chutes"
+DEFAULT_EVAL_MODELS_CONFIG = "configs/models.chutes.yaml"
 DEFAULT_EVAL_RESULT_POINTER = "results.TRINITY"
 DEFAULT_EVAL_MAX_ITEMS = 20
 DEFAULT_EVAL_BENCHMARK = "math500"
