@@ -331,14 +331,14 @@ def leaderboard(request: Request, limit: int = 100) -> LeaderboardResponse:
     try:
         stmt = (
             select(Submission)
-            .where(Submission.status == "completed")
+            .where(Submission.source == "seed")
             .order_by(Submission.latest_score.desc().nullslast(), Submission.created_at.asc())
             .limit(max(1, min(limit, 500)))
         )
         items = session.execute(stmt).scalars().all()
         board: list[LeaderboardEntry] = []
         for idx, submission in enumerate(items, start=1):
-            metrics = {}
+            metrics: dict[str, Any] = {}
             if submission.best_run_id:
                 run = session.get(EvaluationRun, submission.best_run_id)
                 if run and run.metrics_json:

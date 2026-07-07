@@ -37,6 +37,9 @@ interface BackendLeaderboardResponse {
 }
 
 function normalizeLeaderboardEntry(entry: BackendLeaderboardEntry): LeaderboardEntry {
+  const report =
+    entry.report.startsWith('/api/submissions/') ? `/submission/${entry.submission_id}` : entry.report
+
   return {
     rank: entry.rank,
     submission_id: entry.submission_id,
@@ -49,7 +52,7 @@ function normalizeLeaderboardEntry(entry: BackendLeaderboardEntry): LeaderboardE
     bbh: entry.bbh,
     params: entry.params,
     submitted: entry.submitted,
-    report: `/submission/${entry.submission_id}`,
+    report,
     status: entry.status,
   }
 }

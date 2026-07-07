@@ -5,7 +5,7 @@ import { useLeaderboard } from '../hooks/useLeaderboard'
 
 export default function LeaderboardTable() {
   const [search, setSearch] = useState('')
-  const { entries, source, error } = useLeaderboard()
+  const { entries, error } = useLeaderboard()
 
   const filtered = useMemo(() => {
     return entries.filter((e) => e.team.toLowerCase().includes(search.toLowerCase()))
@@ -21,13 +21,9 @@ export default function LeaderboardTable() {
           </h2>
           <p className="mt-2 text-sm text-text-dim">
             {filtered.length} entries currently shown. Search narrows by team name.
-            {source === 'api' ? ' Live data is loaded from the backend.' : ' Showing bundled fallback data.'}
+            {' '}Live data is loaded from the backend.
           </p>
-          {error && source !== 'api' && (
-            <p className="mt-2 text-xs text-text-dim">
-              Backend fetch failed, using fallback leaderboard.
-            </p>
-          )}
+          {error && <p className="mt-2 text-xs text-text-dim">Backend fetch failed.</p>}
         </div>
         <div className="w-full max-w-md">
           <label className="meta-label mb-2 block" htmlFor="leaderboard-search">
