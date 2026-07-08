@@ -70,12 +70,17 @@ accept-confidence), min-max normalized *within* the correct and incorrect bucket
 outranks a wrong one. A/B on the held-out seeds; success = lower cross-seed variance, no worse mean.
 Sources: HERO (arXiv 2510.07242, 2025); Router-R1 (NeurIPS 2025, arXiv 2506.09033).
 
-**4. LRA-CMA-ES** (Nomura et al.)
+**4. LRA-CMA-ES** (Nomura et al.) — **IMPLEMENTED (default-off), offline-validated**
 Our `SepCMAES` wraps stock pycma with no learning-rate adaptation, so it updates at full rate even when
 generation-to-generation ranking is pure reward noise — exactly the regime that collapses bad seeds. LRA
 shrinks the step when SNR is low and restores it when signal returns, at default popsize (no extra evals).
-Port the reference eta-adaptation into `SepCMAES.tell`. Validate on the multi-seed eval and the S7 synthetic
-objective with injected noise.
+Shipped in `src/trinity/optim/lra.py` + `sep_cmaes.py` (`sep_cmaes.lra.enabled` / `--lra`). NOTE: the
+paper's SNR of the *parameter update* did **not** discriminate our regime (the separable mean displacement
+decorrelates even on a clean objective — see JOURNAL 2026-07-09); the shipped controller instead keys off
+the **fitness-estimation SNR** `Var(candidate fitnesses)` vs the `p(1-p)/m_cma` sampling noise, which is
+neutral on a clean signal by construction and damps only when the ranking is noise-dominated. Validated on
+the S7 synthetic objective with injected noise (`scripts/lra_ablation.py`): neutral on clean, −1.8/−5.8/−9.6%
+final distance at noise sd 0.75/1.5/3.0. The held-out-math A/B (blank-init vs `--lra`) is still unrun.
 Source: LRA-CMA-ES (ACM TELO 5(1), March 2025, DOI 10.1145/3698203).
 
 **5. Multi-layer / pooled encoder feature**

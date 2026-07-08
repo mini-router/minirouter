@@ -28,6 +28,8 @@ from typing import Callable
 
 import numpy as np
 
+from .lra import LRAConfig, LRAController
+
 def _import_cma():
     """Import pycma lazily, so this module (and trinity.optim) imports cleanly on
     boxes without `cma` — it is only needed when an optimizer is actually built."""
@@ -85,6 +87,7 @@ class SepCMAES:
         popsize: int | None = None,
         seed: int = 0,
         maxiter: int = 60,
+        lra: LRAConfig | bool | None = None,
     ) -> None:
         """Initialize the separable CMA-ES strategy.
 
@@ -98,6 +101,13 @@ class SepCMAES:
                 :func:`default_popsize` (n=13312 -> 33).
             seed: RNG seed for reproducible sampling.
             maxiter: Maximum number of generations ``T`` (TRINITY default 60).
+            lra: Learning-Rate Adaptation for the noisy binary reward
+                (docs/IMPROVEMENTS.md #4). ``None`` / ``False`` disables it and
+                the optimizer is **exactly** vanilla sep-CMA-ES; pass ``True``
+                for :class:`~trinity.optim.lra.LRAConfig` defaults or an explicit
+                config. When enabled, each :meth:`tell` scales the mean and
+                step-size update by an SNR-driven ``eta in [eta_min, 1]``
+                (``eta == 1`` reproduces the vanilla update exactly).
 
         Raises:
             ValueError: If ``x0`` is provided with a shape other than ``(n,)``.
@@ -132,6 +142,12 @@ class SepCMAES:
         cma = _import_cma()
         self._es = cma.CMAEvolutionStrategy(list(x0_vec), self.sigma0, opts)
 
+        # Optional Learning-Rate Adaptation controller (None => vanilla path).
+        self._lra: LRAController | None = None
+        if lra is not None and lra is not False:
+            lra_cfg = LRAConfig() if lra is True else lra
+            self._lra = LRAController(lra_cfg)
+
         # Track the best-so-far in MAXIMIZATION space (so callers never see the
         # internal sign flip). None until the first `tell`.
         self._best_x: np.ndarray | None = None
@@ -152,6 +168,7 @@ class SepCMAES:
         self,
         solutions: list[np.ndarray],
         fitnesses: list[float],
+        fitness_noise_var: float | None = None,
     ) -> None:
         """Update the distribution from evaluated candidates.
 
@@ -162,6 +179,12 @@ class SepCMAES:
         Args:
             solutions: The candidate vectors returned by :meth:`ask`.
             fitnesses: One scalar per solution; larger means better.
+            fitness_noise_var: Sampling-noise variance of a single candidate's
+                fitness *estimate* this generation (e.g.
+                ``mean_i p_i(1-p_i)/m_cma`` for a mean of ``m_cma`` Bernoulli
+                rewards). Only consulted when LRA is enabled; ``None`` or ``<= 0``
+                leaves the learning rate at 1.0 (vanilla update). Ignored
+                entirely on the vanilla (LRA-disabled) path.
 
         Raises:
             ValueError: If the two lists differ in length.
@@ -174,14 +197,56 @@ class SepCMAES:
         sols = [np.asarray(x, dtype=float) for x in solutions]
         fits = [float(f) for f in fitnesses]
 
+        # Snapshot pre-update distribution state so LRA can scale the update.
+        # Skipped entirely on the vanilla path so behavior is byte-identical.
+        if self._lra is not None:
+            mean_old = np.asarray(self._es.mean, dtype=float).copy()
+            sigma_old = float(self._es.sigma)
+
         # cma minimizes -> feed negated objective.
         self._es.tell(sols, [-f for f in fits])
+
+        if self._lra is not None:
+            self._apply_lra(fits, fitness_noise_var, mean_old, sigma_old)
 
         # Update best-so-far in maximization space.
         for x, f in zip(sols, fits):
             if f > self._best_f:
                 self._best_f = f
                 self._best_x = x.copy()
+
+    def _apply_lra(
+        self,
+        fits: list[float],
+        fitness_noise_var: float | None,
+        mean_old: np.ndarray,
+        sigma_old: float,
+    ) -> None:
+        """Blend the just-applied vanilla update toward ``mean_old``/``sigma_old``.
+
+        The library has already advanced ``mean``/``sigma`` to their full-rate
+        values; we replace them with an ``eta``-scaled step, where ``eta`` comes
+        from the fitness-estimation SNR of this generation (see
+        :class:`~trinity.optim.lra.LRAController`). ``eta == 1`` leaves the
+        vanilla update untouched. The mean is blended linearly and the step size
+        geometrically (both exact no-ops at ``eta == 1``).
+
+        Note: pycma's internal evolution paths were accumulated against the full
+        step; overriding the mean makes them a mild approximation. This is the
+        deliberate, low-risk separable specialization (JOURNAL 2026-07-09) — the
+        alternative, re-scaling pycma's internal update, would fork the library.
+        """
+        assert self._lra is not None  # guarded by caller
+        noise_var = 0.0 if fitness_noise_var is None else float(fitness_noise_var)
+        eta = self._lra.update(np.asarray(fits, dtype=float), noise_var)
+        if eta >= 1.0:  # exact vanilla; avoid touching library state needlessly
+            return
+
+        mean_van = np.asarray(self._es.mean, dtype=float)
+        sigma_van = float(self._es.sigma)
+        self._es.mean = list(mean_old + eta * (mean_van - mean_old))
+        if sigma_old > 0.0 and sigma_van > 0.0:
+            self._es.sigma = float(sigma_old * (sigma_van / sigma_old) ** eta)
 
     # ------------------------------------------------------------------ #
     # Introspection
@@ -227,6 +292,11 @@ class SepCMAES:
         """Number of completed generations (``tell`` calls)."""
         return int(self._es.countiter)
 
+    @property
+    def lra_eta(self) -> float | None:
+        """Current LRA learning rate, or ``None`` when LRA is disabled."""
+        return None if self._lra is None else self._lra.eta
+
 
 def run(
     objective: Callable[[np.ndarray], float],
@@ -238,6 +308,7 @@ def run(
     seed: int = 0,
     maxiter: int = 60,
     verbose: bool = False,
+    lra: LRAConfig | bool | None = None,
 ) -> tuple[np.ndarray, float, list[dict]]:
     """Run separable CMA-ES to **maximize** ``objective`` and log per-iteration.
 
@@ -272,6 +343,7 @@ def run(
         popsize=popsize,
         seed=seed,
         maxiter=maxiter,
+        lra=lra,
     )
     history: list[dict] = []
 
@@ -289,12 +361,15 @@ def run(
             "gen_best_fitness": gen_best,
             "gen_mean_fitness": gen_mean,
         }
+        if opt.lra_eta is not None:
+            record["lra_eta"] = opt.lra_eta
         history.append(record)
         if verbose:
+            eta_str = "" if opt.lra_eta is None else f" | eta={opt.lra_eta:.3f}"
             print(
                 f"[sep-CMA-ES] iter {opt.iteration:3d}/{maxiter} | "
                 f"best={best_f:+.4f} | gen_best={gen_best:+.4f} | "
-                f"gen_mean={gen_mean:+.4f}"
+                f"gen_mean={gen_mean:+.4f}{eta_str}"
             )
 
     best_x, best_f = opt.best()

@@ -57,6 +57,21 @@ sep_cmaes:
     cost_penalty: 0.0                   # no explicit length/cost penalty (bounded by 4096 x K)
   budget_b_env: 31680                   # = m_cma * lambda * generations = 16 * 33 * 60
 
+  # Learning-Rate Adaptation (IMPROVEMENTS.md #4). OFF by default -> the optimizer
+  # is exactly vanilla sep-CMA-ES. When enabled, each generation's mean+step-size
+  # update is scaled by an eta in [eta_min, 1] driven by the fitness-estimation
+  # SNR: Var(candidate fitnesses) vs the p(1-p)/m_cma sampling noise of each mean.
+  # eta==1 when the ranking is trustworthy (or noiseless), so it never regresses a
+  # clean signal; it damps only when candidate differences are buried in reward
+  # noise. Validated offline in scripts/lra_ablation.py. See src/trinity/optim/lra.py.
+  lra:
+    enabled: false
+    alpha: 1.0       # target smoothed SNR; damp below, open toward 1.0 above
+    beta: 0.3        # EMA smoothing of the per-generation SNR
+    gain: 0.3        # multiplicative adaptation rate of eta
+    eta_min: 0.1     # floor so the optimizer keeps moving in a noisy regime
+    warmup: 3        # generations held at eta=1.0 while the SNR estimate settles
+
 # Training-only fitness shaping (improvement #3). Read by trinity.optim.fitness
 # .FitnessConfig.from_dict. DEFAULTS BELOW PRESERVE THE ORIGINAL MEAN-BINARY
 # FITNESS EXACTLY (enable_reweight off + zero-effect bonuses collapse to binary).

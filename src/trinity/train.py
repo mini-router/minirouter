@@ -26,6 +26,7 @@ from .coordinator.policy import CoordinatorPolicy
 from .coordinator.runtime import resolve_device_dtype
 from .llm.pool_factory import build_pool
 from .optim.fitness import FitnessConfig, evaluate_population
+from .optim.lra import LRAConfig
 from .optim.sep_cmaes import SepCMAES, default_popsize
 from .orchestration.dataset import load_tasks, sample_minibatch
 
@@ -107,6 +108,13 @@ async def train(args) -> dict:
 
     x0 = _resolve_x0(args, spec)
 
+    # Learning-Rate Adaptation for the noisy binary reward (IMPROVEMENTS.md #4).
+    # Off unless the config's sep_cmaes.lra.enabled is true or --lra is passed;
+    # when off, the optimizer is exactly the vanilla path.
+    lra_dict = sc.get("lra") or {}
+    lra_enabled = bool(lra_dict.get("enabled", False)) or getattr(args, "lra", False)
+    lra_arg = LRAConfig.from_dict(lra_dict) if lra_enabled else None
+
     es = SepCMAES(
         n=spec.n_total,
         sigma0=sigma0,
@@ -114,9 +122,11 @@ async def train(args) -> dict:
         popsize=popsize,
         seed=args.seed,
         maxiter=generations,
+        lra=lra_arg,
     )
     print(f"[train] sep-CMA-ES: λ={es.popsize}, σ0={sigma0}, m_cma={m_cma}, T={generations}, "
-          f"budget≈{es.popsize * m_cma * generations}")
+          f"budget≈{es.popsize * m_cma * generations}"
+          + (f", LRA={lra_arg}" if lra_arg is not None else ""))
 
     run_dir = _REPO / "experiments" / args.benchmark / args.run_name
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -153,7 +163,15 @@ async def train(args) -> dict:
             thetas, spec, policy, pool, pool_models, minibatch_fn,
             sample=True, on_candidate=_on_cand, fitness_cfg=fitness_cfg, **run_kwargs
         )
-        es.tell(thetas, fits)
+        # Sampling-noise variance of each candidate's fitness ESTIMATE: for a mean
+        # of m_cma Bernoulli rewards p_i, Var = p_i(1-p_i)/m_cma. LRA damps the
+        # update when this swamps the spread of candidate fitnesses; consumed only
+        # when LRA is enabled (None -> no effect). See optim/lra.py.
+        noise_var = None
+        if lra_arg is not None:
+            p = np.clip(np.asarray(fits, dtype=float), 0.0, 1.0)
+            noise_var = float(np.mean(p * (1.0 - p)) / max(m_cma, 1))
+        es.tell(thetas, fits, fitness_noise_var=noise_var)
 
         best_x, best_f = es.best()
         rec = {
@@ -163,10 +181,13 @@ async def train(args) -> dict:
             "best_fitness": float(best_f),
             "seconds": round(time.time() - t0, 1),
         }
+        if es.lra_eta is not None:
+            rec["lra_eta"] = round(es.lra_eta, 4)
         history.append(rec)
         print(f"[gen {gen:3d}] mean={rec['gen_mean_fitness']:.3f} "
               f"max={rec['gen_max_fitness']:.3f} best={rec['best_fitness']:.3f} "
-              f"({rec['seconds']}s)")
+              + (f"eta={rec['lra_eta']:.3f} " if 'lra_eta' in rec else "")
+              + f"({rec['seconds']}s)")
 
         np.save(run_dir / "best_theta.npy", best_x)
         (run_dir / "history.json").write_text(json.dumps(history, indent=2))
@@ -212,6 +233,9 @@ def main() -> None:
                          "used as the sep-CMA-ES initial mean instead of the zero init")
     ap.add_argument("--enable-reweight", action="store_true", dest="enable_reweight",
                     help="turn on variance-aware task reweighting (#3) regardless of config")
+    ap.add_argument("--lra", action="store_true", dest="lra",
+                    help="enable sep-CMA-ES learning-rate adaptation (#4) regardless of config; "
+                         "damps the update when the noisy binary reward makes the ranking untrustworthy")
     args = ap.parse_args()
     # argparse stores 0 for "not set" on the int overrides; normalize to None-ish.
     args.generations = args.generations or None

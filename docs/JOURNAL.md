@@ -18,6 +18,40 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-09 — LRA-CMA-ES: update-stream SNR fails, fitness-estimation SNR works  #finding #mistake #decision #repro
+**Context:** implementing IMPROVEMENTS.md #4 (learning-rate adaptation, Nomura et al. ACM TELO
+2025) to stop the noisy binary reward from collapsing sep-CMA-ES seeds — the failure mode
+IMPROVEMENTS.md blames for the trained router capturing none of the ~4.9pt math head-room.
+**Expected:** port the paper's SNR-of-the-parameter-update into `SepCMAES.tell` and damp the step
+when the update looks noise-like.
+**Actual (mistake):** the first controller keyed off the coherence of pycma's per-generation **mean
+displacement** (EMA first vs second moment). Instrumented on the S7 sphere with/without injected
+fitness noise, `snr_norm` was statistically identical across noise levels (~0.5–0.8 after the
+transient), so `eta` decayed the SAME on clean and noisy — i.e. it was a blind step *annealer*, not
+a noise detector. It cut the clean-objective result in half (dist 0.40 → 0.81). Shipping that
+mislabeled as "LRA" would have been a misrepresented, clean-regressing change. A ranked
+natural-gradient coherence proxy was no better (it even inverted: more noise → higher apparent SNR).
+**Root cause:** in separable CMA the mean-shift direction decorrelates generation-to-generation
+even on a clean objective (diagonal-covariance sampling + weighted recombination), so the update
+stream carries almost no signal about *reward* noise. The paper's whitened-space assumption does not
+transfer to our regime — consistent with SPEC §0.4's warning about assuming separability transfers.
+**Fix / decision:** measure the SNR that *is* observable for free here — the **fitness-estimation
+SNR within a generation**: `snr = max(Var(candidate fitnesses) − noise_var, 0) / noise_var`, where
+`noise_var = mean_i p_i(1−p_i)/m_cma` is the Bernoulli sampling noise of each mean estimate. `eta` in
+`[eta_min, 1]` scales the mean+step-size update. On a clean objective `noise_var→0 ⇒ eta≡1`, so it is
+**neutral by construction** (no clean regression); it damps only when candidate differences are
+buried in reward noise. Shipped **default-off** (`sep_cmaes.lra.enabled: false`, `--lra` to force on);
+disabled path is byte-identical to before.
+**Repro:** `python scripts/lra_ablation.py` (24 seeds, n=64, T=60, pure numpy+pycma, no spend):
+CLEAN neutral (0.389 vs 0.390, identical p90); mean final distance better at every injected noise
+level, with the gain **growing with noise** — sd 0.75/1.5/3.0 → −1.8% / −5.8% / −9.6% vs vanilla.
+Covered by 17 offline tests in `tests/test_lra.py` (SNR math, warm-up, default-off byte-identity,
+noiseless≡vanilla, beats-vanilla-under-noise).
+**Follow-up:** the win is shown on a synthetic proxy only; whether it moves the held-out math score
+is unproven and needs a GPU + funded-pool A/B (blank-init vanilla vs `--lra`, same seed/budget).
+Scope is mean+step-size damping; re-scaling pycma's full separable covariance update was left out to
+avoid forking the library (mild evolution-path inconsistency documented in `_apply_lra`).
+
 ## 2026-07-06 — Validator backend moved into repo and eval deduplicated  #decision #repro
 **Context:** the standalone `minirouter-evaluation-service` needed to live inside this repo so
 submission intake, leaderboard storage, and checkpoint evaluation can ship together.
