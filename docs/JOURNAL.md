@@ -18,6 +18,25 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-09 — Offline unit tests for the inner coordination loop (S4)  #decision #repro
+**Context:** `orchestration/session.run_trajectory` is the per-query routing loop (up to K turns of
+policy-picks-agent+role -> pool-answers -> append; SPEC §2/§4). It is deliberately provider/torch-
+agnostic ("tests pass a mock / a stub"), yet the ONLY thing exercising it was the S4 smoke script —
+no pytest coverage of the termination rule, final-answer selection, or agent-index wrap.
+**Expected:** the Verifier-ACCEPT-after-Worker termination guard (SPEC §0.3.5), REVISE-continues,
+run-to-max-turns, `agent_idx % pool` wrap, and O_τ selection should be locked offline.
+**Actual:** no `tests/test_session.py` existed.
+**Root cause:** the loop was only ever run through the full policy+pool stack.
+**Fix / decision:** add `tests/test_session.py` — a scripted mock policy + stub pool, driven via
+`asyncio.run` (no async plugin), zero GPU/network. Pins: ACCEPT-after-Worker terminates; a turn-1
+Verifier ACCEPT is BLOCKED with `verifier_requires_prior_worker=True` and ALLOWED when disabled;
+REVISE does not terminate; no-ACCEPT runs to max_turns; an out-of-range agent index wraps modulo the
+pool; `_final_answer` prefers the last Worker then the last non-Verifier then ""; verdict is None on
+non-Verifier turns; token counts are recorded; and `_filter_supported` drops `reasoning` for a narrow
+stub `chat`.
+**Follow-up:** none; completes the coordinator-core coverage set (head #52, svf #53) with the loop
+that ties them to the pool.
+
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
 fell back to local CPU and still reported completion.
