@@ -53,6 +53,16 @@ Expected files:
 - `eval.json` if you want to include a local evaluation report
 
 Before opening a PR, make sure the model bundle is complete and the local eval command succeeds.
+You can check the bundle offline (no API keys, no GPU) with:
+
+```bash
+python scripts/validate_submission.py            # defaults to submissions/final_model/
+python scripts/validate_submission.py --dir path/to/bundle
+```
+
+It verifies the required files are present, that `best_theta.npy` is a finite float
+vector of the expected length, and that `summary.json` is valid — exiting non-zero on
+any problem so you catch mistakes before the validator backend does.
 
 ## Rules
 

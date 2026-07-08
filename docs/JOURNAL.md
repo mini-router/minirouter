@@ -18,6 +18,24 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-08 — Offline submission-bundle validator CLI  #decision #todo
+**Context:** `CONTRIBUTOIN.md` tells miners to make sure `submissions/final_model/` is complete before
+opening a PR, but nothing checked the bundle locally — a missing `best_theta.npy`, a wrong θ length, or
+a broken `summary.json` only surfaced later in the validator backend / PR-automation queue, after the PR
+was already open.
+**Expected:** miners should be able to catch bundle mistakes offline, with no API keys or GPU.
+**Actual:** added `scripts/validate_submission.py` (pure numpy + stdlib). It checks required files
+(`best_theta.npy`, `summary.json`), reports optional files (`history.json`, `eval.json`), verifies
+`best_theta.npy` is a finite float vector of length `ParamSpec.n_total` (13312 by default), validates
+`summary.json` as JSON, and warns when `summary["n_total"]` disagrees with the θ length. Exit 0 on a
+valid bundle (warnings allowed), 1 on any error.
+**Root cause:** the contribution guide documented the requirement but shipped no tool to enforce it.
+**Fix / decision:** keep the checker single-source-of-truth by importing the real `make_spec()` for
+`n_total` rather than hardcoding it. Covered by `tests/test_validate_submission.py` (12 cases). Wired
+into `CONTRIBUTOIN.md` and the README miner workflow.
+**Follow-up:** the PR-automation `Verify submission bundle` step could call this same script so the
+backend and the local check stay in lockstep.
+
 ## 2026-07-06 — Validator backend moved into repo and eval deduplicated  #decision #repro
 **Context:** the standalone `minirouter-evaluation-service` needed to live inside this repo so
 submission intake, leaderboard storage, and checkpoint evaluation can ship together.

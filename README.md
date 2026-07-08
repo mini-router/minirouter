@@ -204,6 +204,15 @@ git commit -m "Add final model bundle"
 git push origin sn74-your-github-username
 ```
 
+Before opening the PR, validate the bundle offline (no API keys or GPU needed):
+
+```bash
+python scripts/validate_submission.py
+```
+
+It checks the required files, that `best_theta.npy` is a finite float vector whose length
+matches the coordinator (`n_total`, 13312 by default), and that `summary.json` is valid.
+
 Open a pull request from your branch. The validator and maintainer workflow will pick up the bundle
 from the PR, evaluate it, and record the result.
 
