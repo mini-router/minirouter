@@ -18,6 +18,18 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-08 — results_table now surfaces oracle-ceiling reports  #decision #repro
+**Context:** IMPROVEMENTS.md #1 calls for wiring the oracle-ceiling diagnostic into the eval
+results path; `scripts/oracle_ceiling.py` already writes `oracle_report_<bench>.json` but
+`scripts/results_table.py` only aggregated `eval*.json`.
+**Expected:** one Markdown summary should show both held-out TRINITY scores and pool headroom.
+**Actual:** miners had to open separate oracle JSON files by hand.
+**Root cause:** the two reporting scripts were built independently.
+**Fix / decision:** `results_table.py` now loads `experiments/**/oracle_report_*.json`, renders a
+headroom table (best single, routing oracle, gap closed, verdict), and includes oracle reports in
+`--json` output.
+**Follow-up:** optional CLI flag to point at a single oracle report path.
+
 ## 2026-07-06 — Validator backend moved into repo and eval deduplicated  #decision #repro
 **Context:** the standalone `minirouter-evaluation-service` needed to live inside this repo so
 submission intake, leaderboard storage, and checkpoint evaluation can ship together.
