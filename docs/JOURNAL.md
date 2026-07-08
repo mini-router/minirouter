@@ -28,6 +28,16 @@ offline tests for comment/export/quote parsing or the "existing env wins" rule.
 **Fix / decision:** add ``tests/test_envfile.py`` (tmp-path only; no real secrets read).
 **Follow-up:** none.
 
+## 2026-07-08 — Remote helper scripts default to allocated GPU 5  #mistake #decision #repro
+**Context:** issue #33 reported that `scripts/run_remote.sh` and `scripts/setup_remote.sh` defaulted
+`TRINITY_GPU_INDEX` to `0` even though project guidance allocates GPU `5`.
+**Expected:** remote setup/train/eval helpers should pin to GPU `5` when the env var is unset.
+**Actual:** both scripts used `TRINITY_GPU_INDEX:-0`, so unconfigured runs could land on the wrong device.
+**Root cause:** script defaults drifted from `AGENTS.md` / validator config (`DEFAULT_TRINITY_GPU_INDEX = 5`).
+**Fix / decision:** changed the default GPU index to `5` in both scripts (including remote heredoc fallbacks)
+and added a `run_remote` log line showing the effective GPU index.
+**Follow-up:** none.
+
 ## 2026-07-08 — Webhook auth now fails closed on default/missing secret  #mistake #decision #repro
 **Context:** issue #18 identified that webhook auth checks returned early when `GITHUB_WEBHOOK_SECRET`
 was unset or left as the default `replace-me`.
