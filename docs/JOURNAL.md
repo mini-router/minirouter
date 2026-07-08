@@ -18,6 +18,23 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-09 — Offline unit tests for the linear coordinator head  #decision #repro
+**Context:** `coordinator/head.py` (`LinearHead`) is the router itself — it maps the SLM hidden
+state to two independent categoricals (which agent, which role) via `z = W·h`, argmax at eval and
+sampling at train (SPEC §3.3 / §4.3). It had **no dedicated test coverage**; every coordinator test
+is gated behind loading Qwen3-0.6B on a GPU, so the pure decision logic was never exercised in CI.
+**Expected:** the forward split, softmax factorization, argmax/sampling paths, role mapping, and
+`load_weight` validation should be locked so a future edit cannot silently break routing.
+**Actual:** no `tests/test_head.py` existed.
+**Root cause:** the head was only ever tested implicitly through the full torch/GPU stack.
+**Fix / decision:** add `tests/test_head.py` — CPU + torch only, **no model download / network**. It
+drives `forward`/`select` with hand-built weights and a one-hot `h` so `z = W·h` equals a chosen logit
+vector, making every assertion exact: agent/role split, bias-free linearity, zero-init uniform policy,
+argmax-per-group, `ROLE_ORDER` mapping, seeded-sampling reproducibility + peaked-distribution behavior,
+batch/shape guards, and `load_weight` shape validation. Uses `pytest.importorskip("torch")` so it skips
+cleanly on a torch-less box.
+**Follow-up:** none; complements the CI-on-every-PR work (#36) by giving the router real coverage.
+
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
 fell back to local CPU and still reported completion.
