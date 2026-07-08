@@ -18,6 +18,23 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-09 — Offline unit tests for the Fugu Conductor eval harness  #decision #repro
+**Context:** `fugu/eval.evaluate` is the leaderboard-facing number for the Conductor track — it reports
+**pure binary** `is_correct` (never the shaped training reward), averages `reps` samples per task to
+denoise, emits the per-query majority binary that feeds `scripts/oracle_ceiling.py`, and honours a
+spend cap. None of that aggregation logic was covered.
+**Expected:** accuracy/parse_rate aggregation, the reps→majority-binary rounding, sample-vs-greedy
+selection, parse-gate-fail → 0, and the cost-cap abort should be locked offline.
+**Actual:** no `tests/test_fugu_eval.py` existed.
+**Root cause:** the harness was only run end-to-end against a paid pool.
+**Fix / decision:** add `tests/test_fugu_eval.py` — a stub conductor + stub pool with the REAL
+parse-gate/executor and grader (so accuracy is genuinely end-to-end), zero GPU/network, `asyncio.run`.
+Pins: all-correct→1.0 and mixed→0.5 accuracy; parse-gate failure scores 0 and runs no worker calls;
+empty task list → 0.0; reps=3 majority binary rounds up on 2/3 and down on 1/3; reps>1 draws sampled
+(`sample=True`) while reps=1 is greedy; and `cap_usd` aborts, stops starting new tasks
+(`concurrency=1`), and sets `aborted` on both the result and the cost report.
+**Follow-up:** none; extends the fugu offline suite (cost/reward/workflow/grpo) to the eval harness.
+
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
 fell back to local CPU and still reported completion.
