@@ -18,6 +18,17 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-08 — Remote helper scripts default to allocated GPU 5  #mistake #decision #repro
+**Context:** issue #33 reported that `scripts/run_remote.sh` and `scripts/setup_remote.sh` defaulted
+`TRINITY_GPU_INDEX` to `0` even though project guidance allocates GPU `5`.
+**Expected:** remote setup/train/eval helpers should pin to GPU `5` when the env var is unset.
+**Actual:** both scripts used `TRINITY_GPU_INDEX:-0`, so unconfigured runs could land on the wrong device.
+**Root cause:** script defaults drifted from `AGENTS.md` / validator config (`DEFAULT_TRINITY_GPU_INDEX = 5`).
+**Fix / decision:** changed the default GPU index to `5` in both scripts (including remote heredoc fallbacks),
+added a `run_remote` log line showing the effective GPU index, and locked the behavior with offline tests in
+`tests/test_remote_scripts.py`.
+**Follow-up:** none.
+
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
 fell back to local CPU and still reported completion.
