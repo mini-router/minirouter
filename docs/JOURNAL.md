@@ -18,6 +18,22 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-08 — pool --selftest crashed with NameError (missing import sys)  #mistake #fix #repro
+**Context:** running the documented pool sanity check
+`python -m trinity.llm.fireworks_client --selftest` (which re-exports
+`openai_compatible_pool.main`), per AGENTS.md §7 step 1.
+**Expected:** `main()` runs `_selftest()` and exits with its status code (0 = all models reachable).
+**Actual:** even when the pings succeed, `main()` reaches
+`sys.exit(asyncio.run(_selftest()))` and raises `NameError: name 'sys' is not defined`
+(openai_compatible_pool.py:318) — the self-test never reports its real status.
+**Root cause:** the module uses `sys.exit(...)` but never imports `sys` (imports were argparse,
+asyncio, os, time, …). The non-`--selftest` path (`ap.print_help()`) doesn't touch `sys`, so it
+slipped through.
+**Fix / decision:** add `import sys` to the module. Added `tests/test_pool_selftest.py` (offline,
+`_selftest` stubbed — no network/GPU) asserting `main()` raises `SystemExit` with the propagated
+code instead of `NameError`.
+**Follow-up:** none; other modules already import `sys` where needed.
+
 ## 2026-07-06 — Validator backend moved into repo and eval deduplicated  #decision #repro
 **Context:** the standalone `minirouter-evaluation-service` needed to live inside this repo so
 submission intake, leaderboard storage, and checkpoint evaluation can ship together.
