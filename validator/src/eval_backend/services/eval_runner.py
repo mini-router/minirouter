@@ -545,6 +545,7 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
     stdout = ""
     stderr = ""
     remote_error: str | None = None
+    execution_mode = settings.eval_execution_mode if settings.eval_execution_mode == "local_cpu" else "remote_gpu"
 
     attempts: list[str] = []
     if settings.eval_execution_mode != "local_cpu":
@@ -576,7 +577,45 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
         except Exception as exc:
             remote_error = f"remote gpu attempt failed: {exc}"
 
+    if remote_error and not settings.eval_allow_local_fallback:
+        run.status = "failed"
+        run.phase = "failed"
+        run.message = "remote gpu evaluation failed and local fallback is disabled"
+        run.error = remote_error
+        run.stdout = stdout
+        run.stderr = stderr
+        run.finished_at = _utcnow()
+        run.command = " || ".join(attempts) if attempts else ""
+        run.metrics_json = json.dumps(
+            {
+                "results_missing": True,
+                "execution_mode": "remote_gpu",
+                "local_fallback": False,
+                "remote_error": remote_error,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        submission.status = "failed"
+        session.flush()
+        return EvaluationResult(
+            run=run,
+            score=None,
+            metrics={
+                "results_missing": True,
+                "execution_mode": "remote_gpu",
+                "local_fallback": False,
+                "remote_error": remote_error,
+            },
+            stdout=stdout,
+            stderr=stderr,
+        )
+
     if remote_error or settings.eval_execution_mode == "local_cpu":
+        if remote_error:
+            execution_mode = "local_fallback"
+        else:
+            execution_mode = "local_cpu"
         try:
             _touch_progress(
                 session,
@@ -609,16 +648,47 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
             run.stdout = stdout
             run.stderr = stderr
             run.finished_at = _utcnow()
-            run.metrics_json = json.dumps({"results_missing": True}, ensure_ascii=False, sort_keys=True)
+            run.metrics_json = json.dumps(
+                {
+                    "results_missing": True,
+                    "execution_mode": execution_mode,
+                    "local_fallback": bool(remote_error),
+                    "remote_error": remote_error,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
             submission.status = "failed"
             session.flush()
-            return EvaluationResult(run=run, score=None, metrics={"results_missing": True}, stdout=stdout, stderr=stderr)
+            return EvaluationResult(
+                run=run,
+                score=None,
+                metrics={
+                    "results_missing": True,
+                    "execution_mode": execution_mode,
+                    "local_fallback": bool(remote_error),
+                    "remote_error": remote_error,
+                },
+                stdout=stdout,
+                stderr=stderr,
+            )
 
     metrics, score = _prepare_results(local_results_path, settings=settings)
+    metrics["execution_mode"] = execution_mode
+    metrics["local_fallback"] = bool(remote_error)
+    if remote_error:
+        metrics["remote_error"] = remote_error
 
     run.status = "completed"
     run.phase = "completed"
-    run.message = f"completed score={score:.4f}" if score is not None else "completed"
+    if score is not None and remote_error:
+        run.message = f"completed with local fallback score={score:.4f}"
+    elif score is not None:
+        run.message = f"completed score={score:.4f}"
+    elif remote_error:
+        run.message = "completed with local fallback"
+    else:
+        run.message = "completed"
     run.score = score
     run.metrics_json = json.dumps(metrics, ensure_ascii=False, sort_keys=True)
     run.stdout = stdout
