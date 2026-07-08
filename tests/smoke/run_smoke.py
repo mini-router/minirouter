@@ -266,7 +266,7 @@ def s8() -> tuple[bool, str]:
     from trinity.coordinator.params import initial_theta
 
     theta = initial_theta(spec)
-    tasks = load_tasks("math500", "test", max_items=2, seed=0)
+    tasks = load_tasks("math500", "test", max_items=2, seed=0, allow_toy_fallback=True)
     fit, trajs = asyncio.run(
         evaluate_candidate(
             theta, spec, policy, pool, pool_models, tasks,

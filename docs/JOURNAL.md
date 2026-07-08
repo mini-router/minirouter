@@ -18,6 +18,21 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-08 — Toy-set fallback made loud + opt-in (was silent)  #mistake #fix
+**Context:** follow-up to #7 / closed PR #8 (issue #65): hardening `orchestration/dataset.load_tasks`
+so real eval/train runs cannot score on the offline toy set when HuggingFace loading fails.
+**Expected:** a real `trinity.eval` / `trinity.train` run either loads the real benchmark or fails
+visibly.
+**Actual:** `load_tasks` silently substituted `_toy_tasks()` (2-3 hand-written items) whenever the HF
+load returned nothing — missing `datasets`, no network, a gated/renamed id, or a wrong split.
+**Root cause:** the toy set is smoke-test-only, but nothing distinguished a smoke test from a real run,
+so the fallback corrupted reported numbers instead of surfacing the load failure.
+**Fix / decision:** `load_tasks` now raises `RuntimeError` on a 0-task real load by default; the toy set
+is opt-in via `allow_toy_fallback=True` or `TRINITY_ALLOW_TOY_FALLBACK=1`, and when used it prints a loud
+stderr warning. Smoke test S8 opts in explicitly; train/eval and analysis scripts stay strict. Covered by
+`tests/test_dataset_fallback.py`.
+**Follow-up:** MMLU/GPQA split mapping remains tracked separately (#44).
+
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
 fell back to local CPU and still reported completion.
