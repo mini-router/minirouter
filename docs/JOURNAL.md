@@ -18,6 +18,27 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-08 — Toy-set fallback made loud + opt-in (was silent)  #mistake #fix
+**Context:** hardening `orchestration/dataset.load_tasks` after noticing it could score a real run on
+the offline toy set.
+**Expected:** a real `trinity.eval` / `trinity.train` run either loads the real benchmark or fails
+visibly.
+**Actual:** `load_tasks` silently substituted `_toy_tasks()` (2-3 hand-written items) whenever the HF
+load returned nothing — missing `datasets`, no network, a gated/renamed id, or a wrong split. eval then
+printed e.g. `2 test tasks` and computed the headline invariants (`TRINITY > best single`) on 2 fake
+questions with no warning. `_try_load_hf` even documented "failures are intentionally silent... the
+caller decides whether the fallback is loud", but the caller never made it loud.
+**Root cause:** the toy set is smoke-test-only, but nothing distinguished a smoke test from a real run,
+so the fallback corrupted reported numbers instead of surfacing the load failure.
+**Fix / decision:** `load_tasks` now raises `RuntimeError` on a 0-task real load by default; the toy set
+is opt-in via `allow_toy_fallback=True` or `TRINITY_ALLOW_TOY_FALLBACK=1`, and when used it prints a loud
+stderr warning. The one legitimate offline consumer (smoke test S8 in `tests/smoke/run_smoke.py`) opts
+in explicitly. Covered by `tests/test_dataset_fallback.py` (6 cases). eval/train and the `scripts/`
+entrypoints stay at the default, so they now fail loudly rather than lie.
+**Follow-up:** the GPQA/MMLU logical-split mapping (agent-flagged: GPQA has only `train`, MMLU has no
+`train`) is a separate issue — with this guard those wrong-split loads now raise instead of silently
+returning toy data, which is the correct failure mode.
+
 ## 2026-07-06 — Validator backend moved into repo and eval deduplicated  #decision #repro
 **Context:** the standalone `minirouter-evaluation-service` needed to live inside this repo so
 submission intake, leaderboard storage, and checkpoint evaluation can ship together.
