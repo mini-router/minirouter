@@ -43,6 +43,22 @@ fail-closed config behavior plus invalid/valid auth paths.
 **Follow-up:** if maintainers want a local-dev bypass, add an explicit opt-in env var rather than relying
 on implicit default-secret bypass.
 
+## 2026-07-08 — Validator now fails missing-results evaluations  #mistake #decision #repro
+**Context:** issue #12 reported that validator runs could finish as `completed` even when `results.json`
+was never produced by the eval command.
+**Expected:** missing result artifacts should be a terminal non-success state so API/PR reporting does not
+present false-positive completions.
+**Actual:** `_prepare_results()` returned `{"results_missing": True}, None`, but `evaluate_submission()`
+still unconditionally set `run.status` and `submission.status` to `completed`.
+**Root cause:** the completion transition happened after result parsing without checking the missing-results
+sentinel metric.
+**Fix / decision:** added an explicit guard in `validator/src/eval_backend/services/eval_runner.py` to mark
+the run/submission as `failed` with a clear error when `results_missing` is detected; completion now only
+happens for valid result payloads. Added validator unit tests for both branches (missing results fails,
+valid results completes) in `validator/tests/test_eval_runner.py`.
+**Follow-up:** if maintainers later introduce an `incomplete` terminal state, this branch can map the same
+guard to that status instead of `failed`.
+
 ## 2026-07-08 — PR automation runs offline bundle validator before upload  #decision #repro
 **Context:** the offline checker shipped in PR #4 but PR automation still only tested that
 `best_theta.npy` existed, so malformed bundles could queue and fail on the backend.
