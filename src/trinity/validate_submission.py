@@ -6,7 +6,7 @@ No network calls; safe to run offline without API keys.
 
 Example::
 
-    python -m trinity.validate_submission
+    python utility/validate_submission.py
     python -m trinity.validate_submission --dir submissions/final_model
 """
 from __future__ import annotations

@@ -43,6 +43,19 @@ fail-closed config behavior plus invalid/valid auth paths.
 **Follow-up:** if maintainers want a local-dev bypass, add an explicit opt-in env var rather than relying
 on implicit default-secret bypass.
 
+## 2026-07-08 — PR automation runs offline bundle validator before upload  #decision #repro
+**Context:** the offline checker shipped in PR #4 but PR automation still only tested that
+`best_theta.npy` existed, so malformed bundles could queue and fail on the backend.
+**Expected:** invalid bundles fail in CI before `POST /submit`.
+**Actual:** workflow now checks out base-branch validator tooling and runs
+`utility/validate_submission.py --dir pr/submissions/final_model`; non-zero exit fails the job.
+The CLI wrapper moved from `scripts/` to `utility/` so path-based PR labels stay off train/eval.
+**Root cause:** validator was documented for miners but not wired into automation; `scripts/` paths
+always pick up train/eval labels.
+**Fix / decision:** validate from base ref (so miner forks without the utility tree still work),
+replace the shell `test -f` gate, relocate wrapper to `utility/`.
+**Follow-up:** confirm a bad theta length fails the workflow before upload.
+
 ## 2026-07-08 — PR automation queued on docs-only final_model touch  #mistake #gotcha
 **Context:** PR #4 added the offline submission validator and also edited
 `submissions/final_model/README.md`. The `PR automation` workflow uses
@@ -67,7 +80,7 @@ before opening a PR, but nothing in-repo checked the bundle offline. Bad artifac
 after PR automation uploaded them to the validator backend.
 **Expected:** miners can catch missing `best_theta.npy`, wrong θ length, or broken `summary.json`
 before spending a PR cycle.
-**Actual:** added `trinity.validate_submission` + `scripts/validate_submission.py` with unit tests;
+**Actual:** added `trinity.validate_submission` + `utility/validate_submission.py` with unit tests;
 docs now point miners at the checker. Tracks issue #3.
 **Root cause:** contribution rules assumed a manual checklist with no executable gate.
 **Fix / decision:** ship a zero-network CLI that validates required files, θ shape against

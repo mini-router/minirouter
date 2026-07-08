@@ -3,8 +3,8 @@
 
 Usage::
 
-    python scripts/validate_submission.py
-    python scripts/validate_submission.py --dir submissions/final_model
+    python utility/validate_submission.py
+    python utility/validate_submission.py --dir submissions/final_model
 """
 from __future__ import annotations
 

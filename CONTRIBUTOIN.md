@@ -57,7 +57,7 @@ Before opening a PR, make sure the model bundle is complete and the local eval c
 Validate the bundle offline first (no API keys required):
 
 ```bash
-python scripts/validate_submission.py
+python utility/validate_submission.py
 # or:
 python -m trinity.validate_submission --dir submissions/final_model
 ```

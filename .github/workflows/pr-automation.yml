@@ -159,13 +159,21 @@ jobs:
               core.info(`Labels applied: ${[...labels].join(', ') || 'none'}`)
             }
 
-      - name: Verify submission bundle
+      - name: Checkout submission validator
+        if: steps.classify.outputs.should_queue == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          path: base
+          persist-credentials: false
+
+      - name: Validate submission bundle
         if: steps.classify.outputs.should_queue == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          test -d pr/submissions/final_model
-          test -f pr/submissions/final_model/best_theta.npy
+          python -m pip install --quiet numpy
+          python base/utility/validate_submission.py --dir pr/submissions/final_model
 
       - name: Package submission bundle
         if: steps.classify.outputs.should_queue == 'true'
