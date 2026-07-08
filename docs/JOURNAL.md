@@ -31,6 +31,75 @@ crash showed it sits on the hot eval path.
 head+tail preservation, and verifier `VERDICT:` survival under truncation.
 **Follow-up:** none.
 
+## 2026-07-08 — envfile loader unit tests  #decision #repro
+**Context:** ``trinity.envfile`` auto-loads ``secrets.env`` for pool clients but had no
+offline tests for comment/export/quote parsing or the "existing env wins" rule.
+**Expected:** parsing quirks should be locked so a malformed line cannot corrupt
+``os.environ`` or override an already-exported key.
+**Actual:** only JOURNAL notes from the original loader landing; no pytest coverage.
+**Root cause:** small utility module shipped without a dedicated test file.
+**Fix / decision:** add ``tests/test_envfile.py`` (tmp-path only; no real secrets read).
+**Follow-up:** none.
+
+## 2026-07-08 — Webhook auth now fails closed on default/missing secret  #mistake #decision #repro
+**Context:** issue #18 identified that webhook auth checks returned early when `GITHUB_WEBHOOK_SECRET`
+was unset or left as the default `replace-me`.
+**Expected:** webhook endpoints should reject requests when the secret is not configured, rather than
+silently bypassing auth.
+**Actual:** `_verify_github_signature()` and `_verify_shared_secret()` exited without validation for
+missing/default secret values, allowing unauthenticated webhook traffic in misconfigured deployments.
+**Root cause:** secret configuration validation was treated as optional inside request-time auth checks.
+**Fix / decision:** added a shared configuration guard in `validator/src/eval_backend/api/routes.py` that
+raises HTTP 500 when webhook secret is missing/default, then performs normal 401 signature/secret checks
+only with a valid configured secret. Added focused tests in `validator/tests/test_webhook_auth.py` for
+fail-closed config behavior plus invalid/valid auth paths.
+**Follow-up:** if maintainers want a local-dev bypass, add an explicit opt-in env var rather than relying
+on implicit default-secret bypass.
+
+## 2026-07-08 — PR automation runs offline bundle validator before upload  #decision #repro
+**Context:** the offline checker shipped in PR #4 but PR automation still only tested that
+`best_theta.npy` existed, so malformed bundles could queue and fail on the backend.
+**Expected:** invalid bundles fail in CI before `POST /submit`.
+**Actual:** workflow now checks out base-branch validator tooling and runs
+`utility/validate_submission.py --dir pr/submissions/final_model`; non-zero exit fails the job.
+The CLI wrapper moved from `scripts/` to `utility/` so path-based PR labels stay off train/eval.
+**Root cause:** validator was documented for miners but not wired into automation; `scripts/` paths
+always pick up train/eval labels.
+**Fix / decision:** validate from base ref (so miner forks without the utility tree still work),
+replace the shell `test -f` gate, relocate wrapper to `utility/`.
+**Follow-up:** confirm a bad theta length fails the workflow before upload.
+
+## 2026-07-08 — PR automation queued on docs-only final_model touch  #mistake #gotcha
+**Context:** PR #4 added the offline submission validator and also edited
+`submissions/final_model/README.md`. The `PR automation` workflow uses
+`pull_request_target` and treats any path under `submissions/final_model/` as a
+miner submission.
+**Expected:** feature/docs PR labels as `train`/`docs` and exits without calling `/submit`.
+**Actual:** CI labeled `submission`+`miner`, uploaded the incomplete existing bundle,
+waited ~60 minutes on status `queued`, then failed with
+`Timed out waiting for submission a97348fe-...` (backend worker never advanced it).
+**Root cause:** classification matched README under `final_model/`; combined with the
+`sn74-*` branch prefix that always adds `miner`, `should_queue` became true for a
+non-model change. Also, workflow logic runs from `main` under `pull_request_target`,
+so a workflow fix in the PR head cannot save the current run.
+**Fix / decision:** revert the `final_model/README.md` edit so this PR no longer
+touches artifact paths; queue only when real artifacts change (especially
+`best_theta.npy`), and treat other `final_model/` paths as docs.
+**Follow-up:** after merge, confirm a docs-only `sn74-*` PR no longer hits `/submit`.
+
+## 2026-07-08 — Local submission bundle validator  #decision #finding
+**Context:** `CONTRIBUTOIN.md` requires miners to ensure `submissions/final_model/` is complete
+before opening a PR, but nothing in-repo checked the bundle offline. Bad artifacts only failed
+after PR automation uploaded them to the validator backend.
+**Expected:** miners can catch missing `best_theta.npy`, wrong θ length, or broken `summary.json`
+before spending a PR cycle.
+**Actual:** added `trinity.validate_submission` + `utility/validate_submission.py` with unit tests;
+docs now point miners at the checker. Tracks issue #3.
+**Root cause:** contribution rules assumed a manual checklist with no executable gate.
+**Fix / decision:** ship a zero-network CLI that validates required files, θ shape against
+`ParamSpec.n_total`, and summary JSON coherency; warn (do not fail) on summary `n_total` drift.
+**Follow-up:** optionally wire the same checks into PR automation before `/submit`.
+
 ## 2026-07-06 — Validator backend moved into repo and eval deduplicated  #decision #repro
 **Context:** the standalone `minirouter-evaluation-service` needed to live inside this repo so
 submission intake, leaderboard storage, and checkpoint evaluation can ship together.

@@ -117,9 +117,22 @@ jobs:
               labels.add('miner')
             }
 
-            if (any((path) => path.startsWith('submissions/final_model/'))) {
+            // Only real model artifacts count as a submission — docs under
+            // submissions/final_model/ (e.g. README.md) must not queue eval.
+            const submissionArtifacts = [
+              'submissions/final_model/best_theta.npy',
+              'submissions/final_model/summary.json',
+              'submissions/final_model/history.json',
+              'submissions/final_model/eval.json',
+            ]
+            const touchedSubmissionArtifact = any((path) =>
+              submissionArtifacts.includes(path)
+            )
+            if (touchedSubmissionArtifact) {
               labels.add('submission')
               labels.add('miner')
+            } else if (any((path) => path.startsWith('submissions/final_model/'))) {
+              labels.add('docs')
             }
 
             if (labels.size > 0) {
@@ -131,7 +144,11 @@ jobs:
               })
             }
 
-            const shouldQueue = labels.has('miner') && labels.has('submission')
+            // Require the checkpoint itself so metadata-only PRs never block on eval.
+            const shouldQueue =
+              labels.has('miner') &&
+              labels.has('submission') &&
+              names.includes('submissions/final_model/best_theta.npy')
             core.setOutput('should_queue', String(shouldQueue))
             core.setOutput('repo_full_name', `${owner}/${repo}`)
             core.setOutput('pr_number', String(pr.number))
@@ -142,13 +159,21 @@ jobs:
               core.info(`Labels applied: ${[...labels].join(', ') || 'none'}`)
             }
 
-      - name: Verify submission bundle
+      - name: Checkout submission validator
+        if: steps.classify.outputs.should_queue == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          path: base
+          persist-credentials: false
+
+      - name: Validate submission bundle
         if: steps.classify.outputs.should_queue == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          test -d pr/submissions/final_model
-          test -f pr/submissions/final_model/best_theta.npy
+          python -m pip install --quiet numpy
+          python base/utility/validate_submission.py --dir pr/submissions/final_model
 
       - name: Package submission bundle
         if: steps.classify.outputs.should_queue == 'true'
