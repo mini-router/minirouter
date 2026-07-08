@@ -18,6 +18,22 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-08 — Validator now fails missing-results evaluations  #mistake #decision #repro
+**Context:** issue #12 reported that validator runs could finish as `completed` even when `results.json`
+was never produced by the eval command.
+**Expected:** missing result artifacts should be a terminal non-success state so API/PR reporting does not
+present false-positive completions.
+**Actual:** `_prepare_results()` returned `{"results_missing": True}, None`, but `evaluate_submission()`
+still unconditionally set `run.status` and `submission.status` to `completed`.
+**Root cause:** the completion transition happened after result parsing without checking the missing-results
+sentinel metric.
+**Fix / decision:** added an explicit guard in `validator/src/eval_backend/services/eval_runner.py` to mark
+the run/submission as `failed` with a clear error when `results_missing` is detected; completion now only
+happens for valid result payloads. Added validator unit tests for both branches (missing results fails,
+valid results completes) in `validator/tests/test_eval_runner.py`.
+**Follow-up:** if maintainers later introduce an `incomplete` terminal state, this branch can map the same
+guard to that status instead of `failed`.
+
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
 fell back to local CPU and still reported completion.
