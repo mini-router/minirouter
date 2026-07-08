@@ -79,7 +79,7 @@ paper's SNR of the *parameter update* did **not** discriminate our regime (the s
 decorrelates even on a clean objective — see JOURNAL 2026-07-09); the shipped controller instead keys off
 the **fitness-estimation SNR** `Var(candidate fitnesses)` vs the `p(1-p)/m_cma` sampling noise, which is
 neutral on a clean signal by construction and damps only when the ranking is noise-dominated. Validated on
-the S7 synthetic objective with injected noise (`scripts/lra_ablation.py`): neutral on clean, −1.8/−5.8/−9.6%
+the S7 synthetic objective with injected noise (`utility/lra_ablation.py`): neutral on clean, −1.8/−5.8/−9.6%
 final distance at noise sd 0.75/1.5/3.0. The held-out-math A/B (blank-init vs `--lra`) is still unrun.
 Source: LRA-CMA-ES (ACM TELO 5(1), March 2025, DOI 10.1145/3698203).
 

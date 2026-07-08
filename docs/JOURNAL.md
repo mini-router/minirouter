@@ -42,7 +42,7 @@ SNR within a generation**: `snr = max(Var(candidate fitnesses) − noise_var, 0)
 **neutral by construction** (no clean regression); it damps only when candidate differences are
 buried in reward noise. Shipped **default-off** (`sep_cmaes.lra.enabled: false`, `--lra` to force on);
 disabled path is byte-identical to before.
-**Repro:** `python scripts/lra_ablation.py` (24 seeds, n=64, T=60, pure numpy+pycma, no spend):
+**Repro:** `python utility/lra_ablation.py` (24 seeds, n=64, T=60, pure numpy+pycma, no spend):
 CLEAN neutral (0.389 vs 0.390, identical p90); mean final distance better at every injected noise
 level, with the gain **growing with noise** — sd 0.75/1.5/3.0 → −1.8% / −5.8% / −9.6% vs vanilla.
 Covered by 17 offline tests in `tests/test_lra.py` (SNR math, warm-up, default-off byte-identity,

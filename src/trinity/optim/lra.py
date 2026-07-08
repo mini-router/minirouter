@@ -27,7 +27,7 @@ When real fitness differences dwarf the estimation noise the ranking is
 trustworthy (``eta -> 1``); when they are buried in noise, damp (``eta -> eta_min``).
 On a clean objective ``noise_var -> 0`` so ``snr -> inf`` and ``eta == 1`` — LRA is
 **neutral by construction, never a regression** (verified in
-``scripts/lra_ablation.py``). Under injected noise it lowers the final and
+``utility/lra_ablation.py``). Under injected noise it lowers the final and
 worst-case distance-to-optimum, and the gain grows with the noise level.
 
 Scope (documented honestly): the returned ``eta`` scales the **mean and
@@ -53,7 +53,7 @@ class LRAConfig:
     """Hyperparameters for :class:`LRAController`.
 
     Defaults were tuned on the offline noisy-sphere ablation
-    (``scripts/lra_ablation.py``): exactly neutral on a clean objective, and a
+    (``utility/lra_ablation.py``): exactly neutral on a clean objective, and a
     lower mean/worst-case final distance under injected fitness noise (gain
     growing with the noise level).
 

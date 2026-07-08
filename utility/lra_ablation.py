@@ -19,7 +19,7 @@ Success criteria (both must hold to justify shipping, default-off):
 
 No GPU, no network, no API spend — pure numpy + pycma. Run:
 
-    python scripts/lra_ablation.py
+    python utility/lra_ablation.py
 """
 from __future__ import annotations
 

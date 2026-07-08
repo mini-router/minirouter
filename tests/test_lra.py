@@ -9,7 +9,7 @@ Pure numpy + pycma; no GPU, no network, no API spend. Covers:
   the existing training path;
 * the headline claim, in miniature: on a noisy quadratic LRA reaches a strictly
   better optimum than vanilla (the full 24-seed sweep lives in
-  ``scripts/lra_ablation.py``).
+  ``utility/lra_ablation.py``).
 """
 import sys
 from pathlib import Path

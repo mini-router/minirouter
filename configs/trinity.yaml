@@ -63,7 +63,7 @@ sep_cmaes:
   # SNR: Var(candidate fitnesses) vs the p(1-p)/m_cma sampling noise of each mean.
   # eta==1 when the ranking is trustworthy (or noiseless), so it never regresses a
   # clean signal; it damps only when candidate differences are buried in reward
-  # noise. Validated offline in scripts/lra_ablation.py. See src/trinity/optim/lra.py.
+  # noise. Validated offline in utility/lra_ablation.py. See src/trinity/optim/lra.py.
   lra:
     enabled: false
     alpha: 1.0       # target smoothed SNR; damp below, open toward 1.0 above
