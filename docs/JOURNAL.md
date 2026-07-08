@@ -28,6 +28,21 @@ offline tests for comment/export/quote parsing or the "existing env wins" rule.
 **Fix / decision:** add ``tests/test_envfile.py`` (tmp-path only; no real secrets read).
 **Follow-up:** none.
 
+## 2026-07-08 — Webhook auth now fails closed on default/missing secret  #mistake #decision #repro
+**Context:** issue #18 identified that webhook auth checks returned early when `GITHUB_WEBHOOK_SECRET`
+was unset or left as the default `replace-me`.
+**Expected:** webhook endpoints should reject requests when the secret is not configured, rather than
+silently bypassing auth.
+**Actual:** `_verify_github_signature()` and `_verify_shared_secret()` exited without validation for
+missing/default secret values, allowing unauthenticated webhook traffic in misconfigured deployments.
+**Root cause:** secret configuration validation was treated as optional inside request-time auth checks.
+**Fix / decision:** added a shared configuration guard in `validator/src/eval_backend/api/routes.py` that
+raises HTTP 500 when webhook secret is missing/default, then performs normal 401 signature/secret checks
+only with a valid configured secret. Added focused tests in `validator/tests/test_webhook_auth.py` for
+fail-closed config behavior plus invalid/valid auth paths.
+**Follow-up:** if maintainers want a local-dev bypass, add an explicit opt-in env var rather than relying
+on implicit default-secret bypass.
+
 ## 2026-07-06 — Validator backend moved into repo and eval deduplicated  #decision #repro
 **Context:** the standalone `minirouter-evaluation-service` needed to live inside this repo so
 submission intake, leaderboard storage, and checkpoint evaluation can ship together.
