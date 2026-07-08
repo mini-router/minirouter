@@ -190,6 +190,8 @@ cp experiments/math500/<run-name>/best_theta.npy submissions/final_model/
 cp experiments/math500/<run-name>/summary.json submissions/final_model/
 cp experiments/math500/<run-name>/history.json submissions/final_model/  # optional
 
+python utility/validate_submission.py --dir submissions/final_model
+
 python -m trinity.eval \
   --benchmark math500 \
   --theta submissions/final_model/best_theta.npy \

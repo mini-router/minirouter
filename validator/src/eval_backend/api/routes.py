@@ -121,23 +121,31 @@ def get_session(request: Request) -> Session:
     return request.app.state.session_factory()
 
 
+def _ensure_webhook_secret_configured(secret: str) -> str:
+    configured = (secret or "").strip()
+    if not configured or configured == "replace-me":
+        raise HTTPException(
+            status_code=500,
+            detail="webhook secret is not configured; set GITHUB_WEBHOOK_SECRET",
+        )
+    return configured
+
+
 def _verify_github_signature(raw_body: bytes, signature: str | None, secret: str) -> None:
-    if not secret or secret == "replace-me":
-        return
+    configured_secret = _ensure_webhook_secret_configured(secret)
     if not signature or not signature.startswith("sha256="):
         raise HTTPException(status_code=401, detail="missing github signature")
-    expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    expected = hmac.new(configured_secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
     provided = signature.removeprefix("sha256=")
     if not hmac.compare_digest(expected, provided):
         raise HTTPException(status_code=401, detail="invalid github signature")
 
 
 def _verify_shared_secret(provided: str | None, secret: str) -> None:
-    if not secret or secret == "replace-me":
-        return
+    configured_secret = _ensure_webhook_secret_configured(secret)
     if not provided:
         raise HTTPException(status_code=401, detail="missing webhook secret")
-    if not hmac.compare_digest(provided, secret):
+    if not hmac.compare_digest(provided, configured_secret):
         raise HTTPException(status_code=401, detail="invalid webhook secret")
 
 
