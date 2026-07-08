@@ -18,6 +18,16 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-09 — async batch gather unit tests  #decision #repro
+**Context:** ``orchestration/async_utils.gather_in_batches`` bounds fan-out for large
+benchmark sweeps but had no dedicated offline tests.
+**Expected:** batching should preserve result order, clamp non-positive batch sizes,
+and honor ``return_exceptions`` without launching unbounded concurrency.
+**Actual:** no ``tests/test_async_utils.py`` existed.
+**Root cause:** small async helper shipped without pytest coverage.
+**Fix / decision:** add offline tests using ``asyncio.run`` (no pytest-asyncio plugin).
+**Follow-up:** none.
+
 ## 2026-07-08 — postprocess truncation unit tests  #decision #repro
 **Context:** `roles/postprocess.py` implements SPEC §4.5 head+tail truncation (verdict /
 final-answer preservation) but had no dedicated offline tests; only an indirect null-content
