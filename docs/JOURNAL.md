@@ -18,6 +18,26 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-09 — Offline unit tests for the SVF adapter (S2)  #decision #repro
+**Context:** `coordinator/svf.py` is the second half of the CMA-ES vector θ — it SVDs 7 linear
+matrices of a transformer block, freezes U/Vh, and learns only singular-value scales
+(`W' = U diag(s·scale) Vh`). SPEC's smoke test S2 explicitly wants the identity round-trip and the
+real scale count asserted, but there was **no test**: every coordinator test needs a loaded
+Qwen3-0.6B on a GPU, so the reconstruction math was never exercised in CI.
+**Expected:** the scale count/slice layout, identity round-trip, uniform-scale law, per-matrix
+isolation, `reset()`, and length/name validation should be locked offline.
+**Actual:** no `tests/test_svf.py` existed.
+**Root cause:** SVF was only ever exercised through the full torch/GPU model load.
+**Fix / decision:** add `tests/test_svf.py` (CPU + torch, **no model download**) driven by a tiny
+module that mirrors the Qwen3 paths (`model.model.layers[L].self_attn.{q,k,v,o}_proj` +
+`.mlp.{gate,up,down}_proj`) at small dims. Pins: `num_scales == 7·D` with contiguous slices;
+`set_scales(ones)` round-trips to the original weight; a uniform scale `c` gives `W' = c·W` exactly;
+scaling one matrix's block leaves the other six untouched; `reset()` restores the pristine weight
+bit-for-bit; only the target layer is modified; wrong length -> ValueError, unknown name -> KeyError.
+Uses `pytest.importorskip("torch")` so it skips cleanly on a torch-less box.
+**Follow-up:** none; complements CI-on-every-PR (#36) and the head-tests PR by covering the other
+half of θ.
+
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
 fell back to local CPU and still reported completion.
