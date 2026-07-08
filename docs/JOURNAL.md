@@ -18,6 +18,18 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-09 — role prompt assembly unit tests  #decision #repro
+**Context:** ``roles/prompts.py`` implements SPEC §4.4 system contracts and the
+``render_transcript`` / ``build_messages`` helpers used by the inner loop, but had
+no dedicated offline tests.
+**Expected:** deterministic prompt assembly should be locked so transcript rendering
+and role-specific system prompts cannot drift silently.
+**Actual:** no ``tests/test_prompts.py`` existed.
+**Root cause:** small pure-string module shipped without pytest coverage.
+**Fix / decision:** add offline tests for empty/single/multi-turn transcript rendering,
+verifier verdict surfacing, and OpenAI-style message layout per role.
+**Follow-up:** none.
+
 ## 2026-07-08 — postprocess truncation unit tests  #decision #repro
 **Context:** `roles/postprocess.py` implements SPEC §4.5 head+tail truncation (verdict /
 final-answer preservation) but had no dedicated offline tests; only an indirect null-content
