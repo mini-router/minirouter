@@ -82,6 +82,7 @@ DEFAULT_GIT_AUTHOR_EMAIL = "eval-bot@example.com"
 DEFAULT_TRINITY_SECRETS_FILE = "./secrets.env"
 DEFAULT_EVAL_TIMEOUT_SECONDS = 1800
 DEFAULT_EVAL_EXECUTION_MODE = "remote_gpu"
+DEFAULT_EVAL_ALLOW_LOCAL_FALLBACK = True
 
 
 @dataclass(slots=True)
@@ -115,6 +116,7 @@ class Settings:
     trinity_secrets_file: str = DEFAULT_TRINITY_SECRETS_FILE
     eval_timeout_seconds: int = DEFAULT_EVAL_TIMEOUT_SECONDS
     eval_execution_mode: str = DEFAULT_EVAL_EXECUTION_MODE
+    eval_allow_local_fallback: bool = DEFAULT_EVAL_ALLOW_LOCAL_FALLBACK
     sync_eval_on_submit: bool = False
 
     @classmethod
@@ -173,6 +175,8 @@ class Settings:
             trinity_secrets_file=get("TRINITY_SECRETS_FILE", DEFAULT_TRINITY_SECRETS_FILE),
             eval_timeout_seconds=int(get("EVAL_TIMEOUT_SECONDS", str(DEFAULT_EVAL_TIMEOUT_SECONDS))),
             eval_execution_mode=get("EVAL_EXECUTION_MODE", DEFAULT_EVAL_EXECUTION_MODE),
+            eval_allow_local_fallback=get("EVAL_ALLOW_LOCAL_FALLBACK", "true").lower()
+            in {"1", "true", "yes", "on"},
             sync_eval_on_submit=get("SYNC_EVAL_ON_SUBMIT", "false").lower()
             in {"1", "true", "yes", "on"},
         )
