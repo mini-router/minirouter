@@ -391,7 +391,7 @@ def _remote_attempt(
     *,
     on_line=None,
 ) -> tuple[str, int, str, str]:
-    host = settings.trinity_gpu_host
+    host = settings.trinity_remote_host
     remote_workspace = _remote_workspace(settings, submission_id)
     remote_checkpoint = remote_workspace / checkpoint_path.name
     remote_results = remote_workspace / local_results_path.name
@@ -555,7 +555,7 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
                 run,
                 submission,
                 phase="remote_gpu",
-                message=f"launching remote gpu on {settings.trinity_gpu_host}",
+                message=f"launching remote gpu on {settings.trinity_remote_host}",
                 current=0,
                 total=settings.eval_max_items,
             )
