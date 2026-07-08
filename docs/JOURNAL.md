@@ -18,6 +18,24 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-08 — MC grader read the FIRST choice letter, not the model's final one  #mistake #fix #repro
+**Context:** grading MMLU/GPQA answers via `extract_choice_letter` in
+`src/trinity/orchestration/reward.py` (drives the binary reward).
+**Expected:** the extractor returns the model's FINAL choice — the same
+"final answer comes last" convention used by `extract_boxed`, `extract_last_number`,
+`extract_code`, and this function's own last-line fallback.
+**Actual:** the explicit-pattern loop used `pat.search(text)` (FIRST match). For a
+self-correcting answer like `"The answer is A.\nActually, the answer is C."`
+(reference `C`) it returned `A` → wrong reward.
+**Root cause:** first-match on the explicit patterns is inconsistent with the rest of
+the module and with the docstring, which says final answers come last.
+**Fix / decision:** iterate `pat.finditer(text)` and take the LAST match of the
+highest-priority matching pattern. Pattern priority is unchanged; only the
+within-pattern position changes (first → last). Added
+`tests/test_choice_extraction.py` (offline) covering self-correction, priority,
+repeated `\boxed`, and the existing prose/next-line smoke cases.
+**Follow-up:** none; single-answer, prose-`A`, and `Final answer:\nB` cases verified unchanged.
+
 ## 2026-07-06 — Validator backend moved into repo and eval deduplicated  #decision #repro
 **Context:** the standalone `minirouter-evaluation-service` needed to live inside this repo so
 submission intake, leaderboard storage, and checkpoint evaluation can ship together.
