@@ -57,9 +57,7 @@ Before opening a PR, make sure the model bundle is complete and the local eval c
 Validate the bundle offline first (no API keys required):
 
 ```bash
-python utility/validate_submission.py
-# or:
-python -m trinity.validate_submission --dir submissions/final_model
+python utility/validate_submission.py --dir submissions/final_model
 ```
 
 The checker confirms required files exist, `best_theta.npy` has the expected length
