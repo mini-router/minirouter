@@ -18,6 +18,7 @@ from tenacity import (
 )
 
 from ..envfile import load_project_env
+from .cache import ResponseCache
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DEFAULT_CONFIG = _REPO_ROOT / "configs" / "models.yaml"
@@ -55,6 +56,7 @@ class ChatResult:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     finish_reason: str | None = None
+    cached: bool = False
     raw: dict = field(default_factory=dict, repr=False)
 
 
@@ -98,6 +100,8 @@ class OpenAICompatiblePool:
         self._headers: dict[str, dict[str, str]] = {
             name: self._build_headers(spec) for name, spec in self.providers.items()
         }
+        # Opt-in response cache (disabled unless TRINITY_LLM_CACHE points at a dir).
+        self.cache = ResponseCache.from_env()
 
     def _load_providers(self, cfg: dict) -> dict[str, ProviderSpec]:
         providers_cfg = cfg.get("providers")
@@ -276,10 +280,46 @@ class OpenAICompatiblePool:
                 raw=data,
             )
 
+        # Serve identical requests from the opt-in cache (free, no ledger cost).
+        cache_key: str | None = None
+        if self.cache.enabled:
+            cache_key = self.cache.make_key(
+                provider=provider.name,
+                model_id=route.model_id,
+                messages=messages,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                reasoning=reasoning,
+            )
+            hit = self.cache.get(cache_key)
+            if hit is not None:
+                if trace:
+                    print(
+                        f"[llm] == cache hit provider={provider.name} "
+                        f"model={route.model_id}",
+                        flush=True,
+                    )
+                return ChatResult(cached=True, **hit)
+
         if client is not None:
-            return await _do(client)
-        async with httpx.AsyncClient() as cli:
-            return await _do(cli)
+            result = await _do(client)
+        else:
+            async with httpx.AsyncClient() as cli:
+                result = await _do(cli)
+
+        if cache_key is not None:
+            self.cache.put(
+                cache_key,
+                {
+                    "model": result.model,
+                    "text": result.text,
+                    "prompt_tokens": result.prompt_tokens,
+                    "completion_tokens": result.completion_tokens,
+                    "finish_reason": result.finish_reason,
+                },
+            )
+        return result
 
 
 async def _selftest() -> int:

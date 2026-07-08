@@ -18,6 +18,25 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-08 — Opt-in on-disk LLM response cache  #decision #finding
+**Context:** sep-CMA-ES re-queries the pool with identical `(question, model, params)`
+tuples across generations, and eval reruns replay the same held-out set — each an
+identical paid Fireworks/Chutes call. The repo tracks "every dollar of API spend."
+**Expected:** identical requests should be served locally instead of re-billed, and
+reruns should be reproducible.
+**Actual:** `OpenAICompatiblePool.chat()` always hit the network; there was no memoization.
+**Root cause:** no cache layer existed; only a cost *ledger* (`TRINITY_COST_LEDGER`) recorded
+spend after the fact.
+**Fix / decision:** add `src/trinity/llm/cache.py` — a content-addressed disk cache
+(`ResponseCache`) keyed by a SHA-256 over provider/model_id/messages/decoding params.
+Wire it into `chat()`: **disabled by default**, enabled only when `TRINITY_LLM_CACHE`
+points at a directory. A hit returns a `ChatResult(cached=True, ...)` and never appends to
+the cost ledger; a miss falls through to the network then persists atomically. Corrupt/partial
+entries fail closed as misses so the hot path never raises. 10 offline tests, incl. an
+end-to-end assertion that a seeded hit short-circuits the network.
+**Follow-up:** enabling the cache makes `temperature>0` requests deterministic across runs
+(intended for cost/repro) — keep it OFF during sampling-noise studies that need fresh draws.
+
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
 fell back to local CPU and still reported completion.
