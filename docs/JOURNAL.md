@@ -18,6 +18,24 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-09 — Math grader marked comma-grouped answers wrong  #mistake #repro
+**Context:** issue #35 — auditing the reward path (`src/trinity/orchestration/reward.py`),
+the single source of truth for correctness used by both sep-CMA-ES training fitness and eval.
+**Expected:** `R.score_text("math500", r"\boxed{1,234}", "1234") == 1.0` (a correct large
+number written with a thousands separator should grade correct).
+**Actual:** it returned `0.0`. Same for a comma in the *reference* (`\boxed{2500}` vs `2,500`).
+Plain ints, negatives, fractions, and percents graded fine — only comma-grouped numbers failed.
+**Root cause:** `extract_last_number` strips commas but `normalize_math_answer` did not, so the
+extract path and the compare path disagreed. `"1,234"` failed exact-match vs `"1234"`,
+`float("1,234")` raised so the numeric path was skipped, and the sympy fallback parsed `"1,234"`
+as the tuple `(1, 234)` — every resolution path failed.
+**Fix / decision:** strip only a comma that groups exactly three trailing digits
+(`re.sub(r"(?<=\d),(?=\d{3}(?:\D|$))", "", s)`) in `normalize_math_answer`, so grouped numbers
+normalize to a bare integer while set/tuple/interval answers like `(1,2)` are left untouched.
+Added `tests/test_reward_math.py` (pure stdlib, offline) covering both sides, multi-group numbers,
+the non-thousands guard, and that wrong answers still score 0.
+**Follow-up:** none; the extract and compare paths now agree on comma handling.
+
 ## 2026-07-08 — postprocess truncation unit tests  #decision #repro
 **Context:** `roles/postprocess.py` implements SPEC §4.5 head+tail truncation (verdict /
 final-answer preservation) but had no dedicated offline tests; only an indirect null-content
