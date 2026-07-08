@@ -54,6 +54,18 @@ Expected files:
 
 Before opening a PR, make sure the model bundle is complete and the local eval command succeeds.
 
+Validate the bundle offline first (no API keys required):
+
+```bash
+python scripts/validate_submission.py
+# or:
+python -m trinity.validate_submission --dir submissions/final_model
+```
+
+The checker confirms required files exist, `best_theta.npy` has the expected length
+(13,312 by default), and `summary.json` is valid JSON. Fix any reported errors before
+pushing.
+
 ## Rules
 
 - Keep each miner's work isolated to their branch.

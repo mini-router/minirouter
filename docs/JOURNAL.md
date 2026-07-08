@@ -43,6 +43,19 @@ fail-closed config behavior plus invalid/valid auth paths.
 **Follow-up:** if maintainers want a local-dev bypass, add an explicit opt-in env var rather than relying
 on implicit default-secret bypass.
 
+## 2026-07-08 — Local submission bundle validator  #decision #finding
+**Context:** `CONTRIBUTOIN.md` requires miners to ensure `submissions/final_model/` is complete
+before opening a PR, but nothing in-repo checked the bundle offline. Bad artifacts only failed
+after PR automation uploaded them to the validator backend.
+**Expected:** miners can catch missing `best_theta.npy`, wrong θ length, or broken `summary.json`
+before spending a PR cycle.
+**Actual:** added `trinity.validate_submission` + `scripts/validate_submission.py` with unit tests;
+docs now point miners at the checker. Tracks issue #3.
+**Root cause:** contribution rules assumed a manual checklist with no executable gate.
+**Fix / decision:** ship a zero-network CLI that validates required files, θ shape against
+`ParamSpec.n_total`, and summary JSON coherency; warn (do not fail) on summary `n_total` drift.
+**Follow-up:** optionally wire the same checks into PR automation before `/submit`.
+
 ## 2026-07-06 — Validator backend moved into repo and eval deduplicated  #decision #repro
 **Context:** the standalone `minirouter-evaluation-service` needed to live inside this repo so
 submission intake, leaderboard storage, and checkpoint evaluation can ship together.
