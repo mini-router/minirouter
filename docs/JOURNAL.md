@@ -18,6 +18,19 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-08 — postprocess truncation unit tests  #decision #repro
+**Context:** `roles/postprocess.py` implements SPEC §4.5 head+tail truncation (verdict /
+final-answer preservation) but had no dedicated offline tests; only an indirect null-content
+fix was logged in JOURNAL.
+**Expected:** deterministic truncation behavior should be locked by unit tests so future
+edits cannot silently drop verifier verdicts or crash on `None`.
+**Actual:** no `tests/test_postprocess.py` existed.
+**Root cause:** postprocess was treated as trivial pass-through until the null-content eval
+crash showed it sits on the hot eval path.
+**Fix / decision:** add offline tests for strip/`None`, budget disable, elision marker,
+head+tail preservation, and verifier `VERDICT:` survival under truncation.
+**Follow-up:** none.
+
 ## 2026-07-06 — Validator backend moved into repo and eval deduplicated  #decision #repro
 **Context:** the standalone `minirouter-evaluation-service` needed to live inside this repo so
 submission intake, leaderboard storage, and checkpoint evaluation can ship together.
