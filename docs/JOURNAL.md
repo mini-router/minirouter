@@ -18,6 +18,22 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-09 — Validator secrets discovery matches trinity.envfile  #mistake #decision #repro
+**Context:** follow-up to PR #19 envfile tests; validator `Settings.load()` and Trinity tooling should
+read the same secrets locations per `AGENTS.md`.
+**Expected:** operators using only `~/.config/trinity/secrets.env` or repo `.env` should get the same
+`DATABASE_URL` / webhook secrets in the validator as in `trinity` entrypoints.
+**Actual:** `Settings.load()` only checked `TRINITY_SECRETS_FILE` override and repo-root `secrets.env`,
+with a narrower parser (no `expanduser` / `expandvars`, weaker quoting).
+**Root cause:** validator config predated the shared `trinity.envfile` helper and never picked up the
+full candidate chain.
+**Fix / decision:** aligned `_secrets_file_candidates()` with `load_project_env()` order
+(`TRINITY_SECRETS_FILE` → `secrets.env` → `.env` → `~/.config/trinity/secrets.env`), improved
+`_parse_env_file()` quoting/expansion, and record the resolved path in `trinity_secrets_file`.
+Added `validator/tests/test_config.py`.
+**Follow-up:** optionally import `trinity.envfile` directly once validator always runs with repo `src`
+on `PYTHONPATH`.
+
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
 fell back to local CPU and still reported completion.

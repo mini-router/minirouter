@@ -6,6 +6,10 @@ validator, worker, and API live alongside the router code. Use the repo-root
 `secrets.env` for both the router and the validator. The validator backend
 requires Postgres, so `DATABASE_URL` must be a PostgreSQL connection string.
 
+`Settings.load()` resolves secrets in the same order as `trinity.envfile`:
+`TRINITY_SECRETS_FILE` (if set), repo-root `secrets.env`, repo-root `.env`, then
+`~/.config/trinity/secrets.env`. Process environment variables still override file values.
+
 ## What it does
 
 - accepts PR webhooks from the miner repo

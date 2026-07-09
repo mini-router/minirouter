@@ -24,8 +24,27 @@ def _parse_env_file(path: Path) -> dict[str, str]:
         if "=" not in line:
             continue
         key, value = line.split("=", 1)
-        values[key.strip()] = value.strip().strip("'\"")
+        key = key.strip()
+        value = value.strip()
+        if value and len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        values[key] = os.path.expanduser(os.path.expandvars(value))
     return values
+
+
+def _secrets_file_candidates(root: Path) -> list[Path]:
+    candidates: list[Path] = []
+    trinity_secrets = os.environ.get("TRINITY_SECRETS_FILE", "").strip()
+    if trinity_secrets:
+        candidates.append(Path(trinity_secrets).expanduser())
+    candidates.extend(
+        [
+            root / "secrets.env",
+            root / ".env",
+            Path.home() / ".config" / "trinity" / "secrets.env",
+        ]
+    )
+    return candidates
 
 
 def _first_existing(paths: Iterable[Path]) -> Path | None:
@@ -122,10 +141,7 @@ class Settings:
     @classmethod
     def load(cls) -> "Settings":
         root = _repo_root()
-        trinity_secrets = os.environ.get("TRINITY_SECRETS_FILE", "").strip()
-        candidate_files = [Path(trinity_secrets)] if trinity_secrets else []
-        candidate_files.append(root / "secrets.env")
-        env_path = _first_existing(candidate_files)
+        env_path = _first_existing(_secrets_file_candidates(root))
         file_values = _parse_env_file(env_path) if env_path else {}
 
         def get(name: str, default: str) -> str:
@@ -172,7 +188,7 @@ class Settings:
             eval_benchmark=get("EVAL_BENCHMARK", DEFAULT_EVAL_BENCHMARK),
             git_author_name=get("GIT_AUTHOR_NAME", DEFAULT_GIT_AUTHOR_NAME),
             git_author_email=get("GIT_AUTHOR_EMAIL", DEFAULT_GIT_AUTHOR_EMAIL),
-            trinity_secrets_file=get("TRINITY_SECRETS_FILE", DEFAULT_TRINITY_SECRETS_FILE),
+            trinity_secrets_file=str(env_path) if env_path else get("TRINITY_SECRETS_FILE", DEFAULT_TRINITY_SECRETS_FILE),
             eval_timeout_seconds=int(get("EVAL_TIMEOUT_SECONDS", str(DEFAULT_EVAL_TIMEOUT_SECONDS))),
             eval_execution_mode=get("EVAL_EXECUTION_MODE", DEFAULT_EVAL_EXECUTION_MODE),
             eval_allow_local_fallback=get("EVAL_ALLOW_LOCAL_FALLBACK", "true").lower()
