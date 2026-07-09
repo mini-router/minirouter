@@ -18,12 +18,7 @@ def load(
     allow_toy_fallback: bool = False,
 ):
     """Load LiveCodeBench tasks for the requested split."""
-    return load_tasks(
-        "livecodebench",
-        split,
-        max_items=max_items,
-        seed=seed,
-    )
+    return load_tasks(split, max_items=max_items, seed=seed)
 
 
 def load_tasks(

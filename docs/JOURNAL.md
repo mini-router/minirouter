@@ -18,6 +18,28 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-09 — benchmarks.livecodebench.load() was dead, and its test hid it  #mistake #gotcha
+**Context:** `configs/benchmarks.yaml` registers `loader: "benchmarks.livecodebench"`, and
+`benchmarks/__init__.py` documents the contract as "each loader exposes `load(split, **kw)`".
+**Expected:** `benchmarks.livecodebench.load("test", max_items=1)` returns a `list[Task]`.
+**Actual:** `TypeError: load_tasks() takes 1 positional argument but 2 positional arguments
+(and 2 keyword-only arguments) were given`. The canonical entrypoint raised on **every** call.
+**Root cause:** `load()` passed `("livecodebench", split)` positionally, but the benchmark name
+belongs to the *imported* `_load_tasks(benchmark, split, ...)`, not to the sibling
+`load_tasks(split, *, ...)` it actually called — that one takes a single positional.
+**Fix / decision:** `load()` now delegates to `load_tasks(split, ...)`, so the benchmark name is
+named in exactly one place.
+**The real lesson — the test asserted the bug.** `test_livecodebench_facade_delegates`
+monkeypatched `LCB.load_tasks` with a *four*-positional stub, so the buggy two-positional call
+type-checked against the fake and the suite stayed green over a dead entrypoint. A stub whose
+signature does not match the function it replaces cannot catch a signature bug. Patched the real
+delegation boundary (`LCB._load_tasks`) instead, and added a test that calls `load()` without
+patching `load_tasks` at all.
+**Follow-up:** `allow_toy_fallback` is still accepted and silently dropped by both wrappers;
+left alone here since the toy-set fallback behaviour is tracked separately in #65.
+
+---
+
 ## 2026-07-09 — role prompt assembly unit tests  #decision #repro
 **Context:** ``roles/prompts.py`` implements SPEC §4.4 system contracts and the
 ``render_transcript`` / ``build_messages`` helpers used by the inner loop, but had
