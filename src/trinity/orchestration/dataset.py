@@ -330,7 +330,7 @@ def _parse_lcb_tests(row: Any) -> list[dict[str, str]]:
     for case in raw:
         if isinstance(case, dict):
             inp = case.get("input", case.get("stdin", ""))
-            out = case.get("output", case.get("expected_output", ""))
+            out = case.get("output", case.get("expected_output", case.get("stdout", "")))
             tests.append({"input": str(inp), "output": str(out)})
     return tests
 
