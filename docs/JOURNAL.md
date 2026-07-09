@@ -18,6 +18,21 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-09 — θ pack/unpack unit tests (smoke S3)  #decision #repro
+**Context:** `coordinator/params.py` defines the CMA-ES search-vector layout
+(``θ = [head_W.flatten() | svf_scales]``, ``n = 13,312``). SPEC smoke test S3
+exercises round-trip identity in ``tests/smoke/run_smoke.py``, but there was no
+dedicated pytest module locking layout validation, dtype, or copy semantics.
+**Expected:** offline tests should pin ``make_spec`` defaults, pack/unpack
+round-trip, ``initial_theta`` (zeros + ones), row-major head layout, and
+shape/length guards — matching the coverage pattern used for postprocess (#15)
+and envfile (#19).
+**Actual:** no ``tests/test_params.py`` existed.
+**Root cause:** S3 lived only inside the smoke ladder CLI, not in the PR test
+suite.
+**Fix / decision:** add ``tests/test_params.py`` (numpy only, no torch/GPU/network).
+**Follow-up:** none.
+
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
 fell back to local CPU and still reported completion.
