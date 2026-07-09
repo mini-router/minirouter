@@ -12,12 +12,18 @@ def test_livecodebench_facade_delegates(monkeypatch):
         seen["args"] = (benchmark, split, max_items, seed)
         return ["ok"]
 
-    monkeypatch.setattr(LCB, "load_tasks", fake_load_tasks)
+    monkeypatch.setattr(LCB, "_load_tasks", fake_load_tasks)
 
     out = LCB.load("test", max_items=3, seed=7)
 
     assert out == ["ok"]
     assert seen["args"] == ("livecodebench", "test", 3, 7)
+
+
+def test_livecodebench_load_entrypoint_regression(monkeypatch):
+    """Regression for #86: load() must reach _load_tasks without a TypeError."""
+    monkeypatch.setattr(LCB, "_load_tasks", lambda *a, **k: ["ok"])
+    assert LCB.load("test", max_items=1, seed=0) == ["ok"]
 
 
 def test_livecodebench_hf_row_parses_to_task(monkeypatch):

@@ -19,7 +19,6 @@ def load(
 ):
     """Load LiveCodeBench tasks for the requested split."""
     return load_tasks(
-        "livecodebench",
         split,
         max_items=max_items,
         seed=seed,
