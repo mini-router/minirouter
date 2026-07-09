@@ -33,6 +33,12 @@ happens for valid result payloads. Added validator unit tests for both branches 
 valid results completes) in `validator/tests/test_eval_runner.py`.
 **Follow-up:** if maintainers later introduce an `incomplete` terminal state, this branch can map the same
 guard to that status instead of `failed`.
+**Review update (2026-07-09):** maintainer flagged that the regression test used an in-memory SQLite session,
+which never exercises the validator's Postgres-only path (`eval_backend.db._ensure_postgres` rejects any
+non-postgresql driver). Replaced the ad-hoc SQLite session with a shared, Postgres-backed
+`validator_session` fixture in `validator/tests/conftest.py` (per-test isolation via an outer transaction
+rollback; skips cleanly when no Postgres is reachable). `test_eval_runner.py` now runs against the real
+production backend.
 
 ## 2026-07-08 — Verifier verdict regex matched ACCEPT as a prefix  #mistake #fix
 **Context:** auditing the multi-turn termination path (`roles/verifier.py` decides when the coordinator

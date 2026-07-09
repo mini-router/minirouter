@@ -3,19 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
 from eval_backend.core.config import Settings
-from eval_backend.db import Base
 from eval_backend.models import Submission
 from eval_backend.services import eval_runner
-
-
-def _build_session():
-    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
-    Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)()
 
 
 def _build_settings(tmp_path: Path) -> Settings:
@@ -44,8 +34,8 @@ def _add_submission(session, checkpoint_path: Path) -> Submission:
     return submission
 
 
-def test_missing_results_marks_evaluation_failed(tmp_path, monkeypatch):
-    session = _build_session()
+def test_missing_results_marks_evaluation_failed(validator_session, tmp_path, monkeypatch):
+    session = validator_session
     settings = _build_settings(tmp_path)
     checkpoint_path = tmp_path / "theta.npy"
     checkpoint_path.write_bytes(b"theta")
@@ -65,8 +55,8 @@ def test_missing_results_marks_evaluation_failed(tmp_path, monkeypatch):
     assert "did not produce results.json" in (result.run.error or "")
 
 
-def test_valid_results_stay_completed(tmp_path, monkeypatch):
-    session = _build_session()
+def test_valid_results_stay_completed(validator_session, tmp_path, monkeypatch):
+    session = validator_session
     settings = _build_settings(tmp_path)
     checkpoint_path = tmp_path / "theta.npy"
     checkpoint_path.write_bytes(b"theta")
