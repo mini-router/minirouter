@@ -6,18 +6,25 @@ import trinity.orchestration.reward as R
 
 
 def test_livecodebench_facade_delegates(monkeypatch):
+    # Patch the real underlying dependency (the imported ``_load_tasks``) rather
+    # than the sibling ``load_tasks``, so this test exercises the actual call the
+    # facade makes and would catch a mis-wired ``load()`` -> ``load_tasks()`` hop.
     seen = {}
 
-    def fake_load_tasks(benchmark, split, max_items, seed):
+    def fake_underlying(benchmark, split, *, max_items=None, seed=0):
         seen["args"] = (benchmark, split, max_items, seed)
         return ["ok"]
 
-    monkeypatch.setattr(LCB, "load_tasks", fake_load_tasks)
+    monkeypatch.setattr(LCB, "_load_tasks", fake_underlying)
 
-    out = LCB.load("test", max_items=3, seed=7)
-
-    assert out == ["ok"]
+    # Both public entrypoints must work and inject the "livecodebench" name.
+    out_load = LCB.load("test", max_items=3, seed=7)
+    assert out_load == ["ok"]
     assert seen["args"] == ("livecodebench", "test", 3, 7)
+
+    out_load_tasks = LCB.load_tasks("test", max_items=5, seed=1)
+    assert out_load_tasks == ["ok"]
+    assert seen["args"] == ("livecodebench", "test", 5, 1)
 
 
 def test_livecodebench_hf_row_parses_to_task(monkeypatch):
