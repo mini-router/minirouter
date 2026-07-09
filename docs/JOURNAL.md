@@ -35,6 +35,23 @@ passing `test`/`validation`/`dev` through, then route `_load_mmlu_hf` through it
 split name.
 **Follow-up:** complementary to #7 (fail-loud-on-toy-fallback); this fixes the *reason* the MMLU
 load failed rather than only surfacing it.
+## 2026-07-09 — Math grader marked comma-grouped answers wrong  #mistake #repro
+**Context:** issue #35 — auditing the reward path (`src/trinity/orchestration/reward.py`),
+the single source of truth for correctness used by both sep-CMA-ES training fitness and eval.
+**Expected:** `R.score_text("math500", r"\boxed{1,234}", "1234") == 1.0` (a correct large
+number written with a thousands separator should grade correct).
+**Actual:** it returned `0.0`. Same for a comma in the *reference* (`\boxed{2500}` vs `2,500`).
+Plain ints, negatives, fractions, and percents graded fine — only comma-grouped numbers failed.
+**Root cause:** `extract_last_number` strips commas but `normalize_math_answer` did not, so the
+extract path and the compare path disagreed. `"1,234"` failed exact-match vs `"1234"`,
+`float("1,234")` raised so the numeric path was skipped, and the sympy fallback parsed `"1,234"`
+as the tuple `(1, 234)` — every resolution path failed.
+**Fix / decision:** strip only a comma that groups exactly three trailing digits
+(`re.sub(r"(?<=\d),(?=\d{3}(?:\D|$))", "", s)`) in `normalize_math_answer`, so grouped numbers
+normalize to a bare integer while set/tuple/interval answers like `(1,2)` are left untouched.
+Added `tests/test_reward_math.py` (pure stdlib, offline) covering both sides, multi-group numbers,
+the non-thousands guard, and that wrong answers still score 0.
+**Follow-up:** none; the extract and compare paths now agree on comma handling.
 
 ## 2026-07-08 — Empty `choices` on a 200 response crashed eval  #mistake #fix
 **Context:** hardening the OpenAI-compatible pool client after the 2026-07-06 null-`content` fix.
