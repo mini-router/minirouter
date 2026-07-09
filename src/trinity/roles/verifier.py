@@ -23,7 +23,10 @@ import re
 __all__ = ["VERDICT_RE", "parse_verdict", "extract_diagnosis"]
 
 # Case-insensitive verdict pattern. ``finditer`` lets us take the LAST occurrence.
-VERDICT_RE = re.compile(r"VERDICT:\s*(ACCEPT|REVISE)", re.IGNORECASE)
+# The trailing ``\b`` anchors the token so a longer word that merely *starts* with
+# ACCEPT/REVISE (e.g. "ACCEPTABLE", "ACCEPTED") is NOT read as a committed verdict;
+# such text yields no match and the orchestration layer's fail-safe REVISE applies.
+VERDICT_RE = re.compile(r"VERDICT:\s*(ACCEPT|REVISE)\b", re.IGNORECASE)
 
 
 def parse_verdict(text: str) -> str | None:
