@@ -99,3 +99,5 @@ To enable automatic merge after evaluation, set `GITHUB_AUTO_MERGE_SUBMISSIONS=t
 To keep only the PR comment and skip auto-merge, leave it `false`.
 
 The public website can read `GET /api/leaderboard` and `GET /api/submissions/{id}`.
+The leaderboard includes completed submissions from miner PRs (`github_pr`), direct uploads
+(`upload`), and optional seed mock rows (`seed`), ranked by `latest_score`.

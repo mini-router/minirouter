@@ -18,6 +18,18 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-09 — Leaderboard now ranks completed real submissions  #mistake #decision #repro
+**Context:** follow-up after miner PR eval pipeline; public site reads `GET /api/leaderboard`.
+**Expected:** evaluated `github_pr` (and public `upload`) submissions should appear alongside seed
+mock rows once they complete with a score.
+**Actual:** leaderboard query filtered `Submission.source == "seed"` only, so real competition
+results never surfaced on the site.
+**Root cause:** seed data from `seed_mock_data.py` was wired first and the filter was never
+broadened when PR intake landed.
+**Fix / decision:** include `github_pr`, `upload`, and `seed` sources when `status == completed`
+and `latest_score` is set; keep score-desc / created-at-asc ordering. Added API unit tests.
+**Follow-up:** none.
+
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
 fell back to local CPU and still reported completion.

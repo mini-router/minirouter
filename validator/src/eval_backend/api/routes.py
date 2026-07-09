@@ -27,6 +27,8 @@ from ..services.storage import store_upload
 
 router = APIRouter()
 
+LEADERBOARD_SOURCES = ("github_pr", "upload", "seed")
+
 
 def _submission_to_schema(submission: Submission) -> SubmissionOut:
     ordered_evaluations = sorted(
@@ -339,8 +341,10 @@ def leaderboard(request: Request, limit: int = 100) -> LeaderboardResponse:
     try:
         stmt = (
             select(Submission)
-            .where(Submission.source == "seed")
-            .order_by(Submission.latest_score.desc().nullslast(), Submission.created_at.asc())
+            .where(Submission.source.in_(LEADERBOARD_SOURCES))
+            .where(Submission.status == "completed")
+            .where(Submission.latest_score.is_not(None))
+            .order_by(Submission.latest_score.desc(), Submission.created_at.asc())
             .limit(max(1, min(limit, 500)))
         )
         items = session.execute(stmt).scalars().all()
