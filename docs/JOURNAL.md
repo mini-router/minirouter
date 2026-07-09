@@ -18,6 +18,22 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-09 — LiveCodeBench benchmark facade and regression tests added  #decision #repro
+**Context:** the core dataset loader and reward checker already handled LiveCodeBench, but the repo
+still only exposed a stub benchmark package and the high-level README did not describe the code
+benchmark path.
+**Expected:** the config-facing benchmark registry should have a concrete LiveCodeBench module, and
+the behavior should be covered by offline tests.
+**Actual:** `benchmarks/livecodebench.py` did not exist, so `configs/benchmarks.yaml` pointed at a
+module name with no implementation.
+**Root cause:** the internal loader/scorer landed before the public benchmark facade.
+**Fix / decision:** add `benchmarks/livecodebench.py` as a thin wrapper around
+`trinity.orchestration.dataset.load_tasks("livecodebench", ...)`, add tests for facade delegation,
+HF row parsing, and pass@1 scoring, and update the README to call out LiveCodeBench explicitly in the
+automatic grader description.
+**Follow-up:** if we later wire `configs/benchmarks.yaml` into a runtime loader, the module is now in
+place.
+
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
 fell back to local CPU and still reported completion.
