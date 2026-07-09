@@ -83,27 +83,49 @@ def render(rows: list[dict]) -> str:
                     # here would understate the fixed single baseline and bias R1/R2.
                     vals.append(max(bench_vals))
             return sum(vals) / len(vals) if vals else None
-        # TRINITY per-task best (max TRINITY across coordinators per bench), averaged
-        trin_avg = sum(max(r["trinity"] for r in by_bench[b]) for b in benches) / len(benches)
-        rand_avg = sum(
-            sum(r["random"] for r in by_bench[b]) / len(by_bench[b]) for b in benches
-        ) / len(benches)
+        # TRINITY per-task best (max TRINITY across coordinators per bench), averaged.
+        # Mirror single_avg(): drop null scores per bench and skip benches with no
+        # usable value, so a missing measurement is reported as unmeasurable (None)
+        # rather than silently coerced to 0 -- which would fabricate a won R1/R4.
+        def _bench_agg(key, reduce):
+            vals = []
+            for b in benches:
+                bench_vals = [r[key] for r in by_bench[b] if r[key] is not None]
+                if bench_vals:
+                    vals.append(reduce(bench_vals))
+            return sum(vals) / len(vals) if vals else None
+
+        trin_avg = _bench_agg("trinity", max)
+        rand_avg = _bench_agg("random", lambda vs: sum(vs) / len(vs))
         out.append(f"Averaged across {benches}:\n")
         out.append("| system | multi-task average |")
         out.append("|---|---|")
-        out.append(f"| **TRINITY (per-task best coordinator)** | **{trin_avg:.3f}** |")
+        out.append(f"| **TRINITY (per-task best coordinator)** | **{fmt(trin_avg)}** |")
         for m in models:
             sa = single_avg(m)
             if sa is not None:
                 out.append(f"| single: {m} (fixed) | {sa:.3f} |")
-        out.append(f"| random routing | {rand_avg:.3f} |")
-        best_fixed = max((single_avg(m) or 0) for m in models)
+        out.append(f"| random routing | {fmt(rand_avg)} |")
+        fixed_avgs = [sa for m in models if (sa := single_avg(m)) is not None]
+        best_fixed = max(fixed_avgs) if fixed_avgs else None
         out.append(f"\n**R1/R2** (TRINITY avg > best fixed single avg): "
-                   f"{'✅ HOLDS' if trin_avg > best_fixed else '❌'} "
-                   f"({trin_avg:.3f} vs {best_fixed:.3f})")
+                   f"{_verdict(trin_avg, best_fixed)}")
         out.append(f"**R4** (TRINITY avg > random avg): "
-                   f"{'✅ HOLDS' if trin_avg > rand_avg else '❌'} ({trin_avg:.3f} vs {rand_avg:.3f})")
+                   f"{_verdict(trin_avg, rand_avg)}")
     return "\n".join(out) + "\n"
+
+
+def _verdict(lhs, rhs) -> str:
+    """Render an ``lhs > rhs`` invariant verdict, honest about missing data.
+
+    A comparison against an unmeasured value (``None``) must NOT print as a won
+    ``✅ HOLDS``: an absent baseline is not a beaten one. Report it as N/A so the
+    reader knows the invariant could not be evaluated.
+    """
+    if lhs is None or rhs is None:
+        missing = "TRINITY" if lhs is None else "baseline"
+        return f"⚠️ N/A — {missing} unmeasured ({fmt(lhs)} vs {fmt(rhs)})"
+    return f"{'✅ HOLDS' if lhs > rhs else '❌'} ({lhs:.3f} vs {rhs:.3f})"
 
 
 def main() -> None:

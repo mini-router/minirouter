@@ -84,3 +84,45 @@ def test_r1_r2_true_win_still_holds():
     md = rt.render(rows)
     r1_line = next(line for line in md.splitlines() if line.startswith("**R1/R2**"))
     assert "✅ HOLDS" in r1_line
+
+
+# --- Missing-baseline handling (issue #81) --------------------------------
+# The multi-task summary used to sum/max raw values and crash with TypeError
+# when an eval omitted random_routing (or TRINITY). A missing measurement must
+# never be coerced to 0 and reported as a won comparison.
+
+
+def test_summary_survives_missing_random_baseline():
+    rows = [
+        _row("math500", "c1", trinity=0.85, random=None, single=0.70),
+        _row("mmlu", "c1", trinity=0.85, random=0.50, single=0.80),
+    ]
+    md = rt.render(rows)  # previously raised TypeError
+    assert "Multi-task summary" in md
+    # random_avg comes from the single bench that measured it.
+    assert "| random routing | 0.500 |" in md
+
+
+def test_summary_random_entirely_missing_reports_na_not_win():
+    rows = [
+        _row("math500", "c1", trinity=0.85, random=None, single=0.70),
+        _row("mmlu", "c1", trinity=0.90, random=None, single=0.80),
+    ]
+    md = rt.render(rows)
+    r4_line = next(line for line in md.splitlines() if line.startswith("**R4**"))
+    # An unmeasured baseline must be N/A, NOT a ✅ HOLDS against a fabricated 0.
+    assert "N/A" in r4_line
+    assert "✅ HOLDS" not in r4_line
+    assert "| random routing | — |" in md
+
+
+def test_summary_missing_trinity_reports_na_not_win():
+    rows = [
+        _row("math500", "c1", trinity=None, random=0.50, single=0.70),
+        _row("mmlu", "c1", trinity=None, random=0.50, single=0.80),
+    ]
+    md = rt.render(rows)
+    for tag in ("**R1/R2**", "**R4**"):
+        line = next(x for x in md.splitlines() if x.startswith(tag))
+        assert "N/A" in line
+        assert "✅ HOLDS" not in line
