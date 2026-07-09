@@ -18,7 +18,6 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
-<<<<<<< sn74-galuis116-results-table-max
 ## 2026-07-08 — results_table single baseline used mean, not per-bench max  #mistake #fix #repro
 **Context:** reading the multi-task summary that `scripts/results_table.py` prints (the paper's
 R1/R2 verdict: TRINITY per-task-best avg vs best fixed single model avg).
@@ -36,6 +35,7 @@ oracle-ceiling framing is meant to avoid.
 best, matching TRINITY. Added `tests/test_results_table.py` (offline, no GPU/network) covering the
 false-win scenario, the corrected verdict, and a genuine-win sanity case.
 **Follow-up:** none; eval JSON schema and other aggregates unchanged.
+
 ## 2026-07-08 — Verifier verdict regex matched ACCEPT as a prefix  #mistake #fix
 **Context:** auditing the multi-turn termination path (`roles/verifier.py` decides when the coordinator
 stops on a Verifier ACCEPT).
@@ -53,7 +53,7 @@ of `ACCEPTABLE`/`ACCEPTED`/`REVISED`.
 `tests/test_verifier.py` (covers valid verdicts, prefix words, last-verdict-wins, and diagnosis
 non-truncation).
 **Follow-up:** none — self-contained parser fix.
-=======
+
 ## 2026-07-09 — Math grader marked comma-grouped answers wrong  #mistake #repro
 **Context:** issue #35 — auditing the reward path (`src/trinity/orchestration/reward.py`),
 the single source of truth for correctness used by both sep-CMA-ES training fitness and eval.
@@ -87,7 +87,18 @@ made it fail-safe — a missing/empty choice (or missing `message`) yields an em
 handling. Added `tests/test_pool_parse.py` (7 cases). Scoped to the parsing path only (not the imports)
 so it stays independent of the separate `import sys` --selftest fix (#25).
 **Follow-up:** none — self-contained client-robustness fix.
->>>>>>> main
+
+## 2026-07-08 — Remote eval used nonexistent settings.trinity_gpu_host  #mistake #fix
+**Context:** issue #46 reported that validator remote GPU evaluation failed before SSH with
+`AttributeError: 'Settings' object has no attribute 'trinity_gpu_host'`.
+**Expected:** `_remote_attempt()` should read the configured remote host from `Settings.trinity_remote_host`
+(`TRINITY_GPU_HOST` env).
+**Actual:** `eval_runner.py` referenced `settings.trinity_gpu_host`, which is not defined on `Settings`.
+**Root cause:** field rename/typo — config exposes `trinity_remote_host` but the runner still used the old name.
+**Fix / decision:** replaced both `trinity_gpu_host` references in `eval_runner.py` with
+`trinity_remote_host`; added `validator/tests/test_eval_runner_remote_host.py` to assert SSH host resolution
+uses the real Settings field.
+**Follow-up:** none.
 
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
@@ -104,6 +115,7 @@ fallback when used, and fails immediately when remote fails and fallback is disa
 remote fail + fallback metadata, remote fail + fallback disabled -> failed, and remote success -> no fallback.
 **Follow-up:** if downstream UI/reporting wants stronger signaling, surface `execution_mode` directly as a
 top-level field in submission/evaluation schema.
+
 ## 2026-07-08 — postprocess truncation unit tests  #decision #repro
 **Context:** `roles/postprocess.py` implements SPEC §4.5 head+tail truncation (verdict /
 final-answer preservation) but had no dedicated offline tests; only an indirect null-content
