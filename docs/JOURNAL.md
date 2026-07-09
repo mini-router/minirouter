@@ -36,6 +36,15 @@ entries fail closed as misses so the hot path never raises. 10 offline tests, in
 end-to-end assertion that a seeded hit short-circuits the network.
 **Follow-up:** enabling the cache makes `temperature>0` requests deterministic across runs
 (intended for cost/repro) — keep it OFF during sampling-noise studies that need fresh draws.
+## 2026-07-09 — async batch gather unit tests  #decision #repro
+**Context:** ``orchestration/async_utils.gather_in_batches`` bounds fan-out for large
+benchmark sweeps but had no dedicated offline tests.
+**Expected:** batching should preserve result order, clamp non-positive batch sizes,
+and honor ``return_exceptions`` without launching unbounded concurrency.
+**Actual:** no ``tests/test_async_utils.py`` existed.
+**Root cause:** small async helper shipped without pytest coverage.
+**Fix / decision:** add offline tests using ``asyncio.run`` (no pytest-asyncio plugin).
+**Follow-up:** none.
 ## 2026-07-09 — Leaderboard API excluded real miner submissions  #mistake #decision #repro
 **Context:** issue #48 flagged that `GET /api/leaderboard` never surfaced completed `github_pr` or
 `upload` submissions on the public competition site.

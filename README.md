@@ -209,6 +209,18 @@ git push origin sn74-your-github-username
 Open a pull request from your branch. The validator and maintainer workflow will pick up the bundle
 from the PR, evaluate it, and record the result.
 
+## Continuous integration
+
+The CI workflow lives in `.github/workflows/ci.yml` and runs on every pull request and on push to
+`main`. It does not require any secrets or a database.
+
+- root package: `pip install -e ".[dev]"` then `pytest tests -q`
+- `validator/`: `pip install -e ".[dev]"` then `pytest -q`
+- `web/`: `npm ci`, `npm run build` (type-checks via `tsc -b`), `npm run lint`
+
+This catches a broken test suite or web build on the PR itself, instead of only after merge when
+`deploy-web.yml` runs against `main`.
+
 ## PR automation
 
 The PR automation workflow lives in `.github/workflows/pr-automation.yml`.
