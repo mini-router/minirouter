@@ -16,9 +16,13 @@ Supported benchmarks
     as ``"the answer is (B)"``, ``"B)"``, ``"B."``) and compare to
     ``task.answer``.
 * ``livecodebench`` / ``bigcodebench``
-    Execute candidate code against the task's tests in a subprocess sandbox
-    with a timeout (``run_pass_at_1``). Never ``exec`` untrusted code in
-    process.
+    Execute candidate code against the task's tests in an isolated subprocess
+    with a timeout (``run_pass_at_1``). Untrusted code is never ``exec``'d in
+    process; the child runs with a private HOME, a scrubbed env, resource
+    limits, and best-effort rootless network isolation (see the isolation notes
+    above ``_exec_script_capture``). This is defense-in-depth, NOT a full
+    sandbox — a hostile multi-tenant validator should additionally run under an
+    OS-level sandbox (container / bwrap / nsjail).
 
 Design contract
 ---------------
@@ -32,14 +36,22 @@ module loads on a machine without it.
 """
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import re
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 from fractions import Fraction
 from typing import Sequence
+
+try:  # POSIX only; absent on Windows. Used for child resource limits.
+    import resource as _resource
+except Exception:  # pragma: no cover - non-POSIX
+    _resource = None
 
 from trinity.types import Role, Task, Trajectory
 
@@ -578,12 +590,14 @@ def _check_code(candidate: str, reference: object) -> bool:
 
 
 def run_pass_at_1(code: str, tests: Sequence, timeout_s: int = 10) -> bool:
-    """Execute candidate ``code`` against ``tests`` in a subprocess sandbox.
+    """Execute candidate ``code`` against ``tests`` in an isolated subprocess.
 
     The candidate code is **never** executed in-process. Each invocation writes
-    a temporary script and runs it with the current Python interpreter in a
-    fresh subprocess with a wall-clock timeout. The candidate is judged to pass
-    only if **every** test passes.
+    a temporary script into a private, wiped-after-use directory and runs it with
+    the current Python interpreter in a fresh subprocess with a wall-clock
+    timeout, a scrubbed env + private HOME, resource limits, and best-effort
+    network isolation (see ``_exec_script_capture``). The candidate is judged to
+    pass only if **every** test passes.
 
     Two test flavors are supported (they may be mixed in one list):
 
@@ -669,16 +683,155 @@ def _stdout_matches(got: str, expected: str) -> bool:
     return got_lines == exp_lines
 
 
-def _sandbox_env() -> dict[str, str]:
-    """Minimal environment for the child interpreter."""
+# ---------------------------------------------------------------------------
+# Untrusted-code execution isolation
+# ---------------------------------------------------------------------------
+# The candidate code is model-generated AND, in the validator, comes from
+# untrusted miner submissions. `subprocess.run(...)` as the same user is NOT a
+# sandbox. This layer applies the isolation we CAN enforce without root:
+#
+#   * env scrub + a private HOME/TMPDIR -> the child cannot reach the invoking
+#     user's home, so `~/.config/trinity/secrets.env` (and `~/.aws`, etc.) is
+#     invisible;
+#   * a private working directory it can write in, wiped after each run;
+#   * resource limits (CPU, address space, file size, #procs, #fds) via
+#     `setrlimit` -> bounds fork bombs, memory bombs, and disk-fill;
+#   * best-effort network isolation via a rootless user+net namespace
+#     (`unshare(CLONE_NEWUSER|CLONE_NEWNET)`) -> no external egress, so a
+#     "solution" cannot exfiltrate anything it does read.
+#
+# RESIDUAL RISK (requires an OS-level sandbox to close, NOT done here): without a
+# mount namespace / filesystem confinement the child can still *read* other
+# world-readable files by ABSOLUTE path (e.g. a repo-root `secrets.env`, other
+# miners' `submissions/`). For a hostile multi-tenant validator, run this whole
+# process under bwrap/nsjail/a container with a read-only minimal rootfs, as a
+# dedicated unprivileged user, and keep real credentials off the eval host. Set
+# ``TRINITY_SANDBOX_STRICT=1`` to REFUSE to grade when network isolation cannot
+# be established (fail-closed) instead of the default best-effort.
+
+_CLONE_NEWUSER = 0x10000000
+_CLONE_NEWNET = 0x40000000
+
+# Env-tunable knobs (read per call so tests/deployments can override).
+_ENV_NETNS = "TRINITY_SANDBOX_NETNS"      # "0" disables the netns attempt
+_ENV_STRICT = "TRINITY_SANDBOX_STRICT"    # "1" -> fail-closed if no netns
+_ENV_MEM_MB = "TRINITY_SANDBOX_MEM_MB"    # address-space cap (default 2048)
+
+_netns_supported: bool | None = None  # cached probe result
+_strict_warned = False
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    val = os.environ.get(name)
+    if val is None:
+        return default
+    return val.strip().lower() not in ("", "0", "false", "no", "off")
+
+
+def _do_unshare(flags: int) -> None:
+    """unshare(2) via os.unshare (3.12+) or a libc ctypes fallback (3.10/3.11)."""
+    if hasattr(os, "unshare"):
+        os.unshare(flags)  # type: ignore[attr-defined]
+        return
+    libc = ctypes.CDLL("libc.so.6", use_errno=True)
+    if libc.unshare(flags) != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err))
+
+
+def network_isolation_available() -> bool:
+    """Return True iff a rootless user+net namespace can be created here.
+
+    Probed once in a throwaway forked child (so the current process is never
+    modified) and cached. On non-Linux / no-fork platforms, returns False.
+    """
+    global _netns_supported
+    if _netns_supported is not None:
+        return _netns_supported
+    if not hasattr(os, "fork"):
+        _netns_supported = False
+        return False
+    try:
+        pid = os.fork()
+    except OSError:
+        _netns_supported = False
+        return False
+    if pid == 0:  # child: attempt the unshare, report via exit code
+        try:
+            _do_unshare(_CLONE_NEWUSER | _CLONE_NEWNET)
+            os._exit(0)
+        except BaseException:
+            os._exit(1)
+    _, status = os.waitpid(pid, 0)
+    _netns_supported = (os.waitstatus_to_exitcode(status) == 0)
+    return _netns_supported
+
+
+def _set_rlimits(timeout_s: int) -> None:
+    """Best-effort resource caps for the child (each failure is non-fatal)."""
+    if _resource is None:
+        return
+    mem_mb = 2048
+    try:
+        mem_mb = max(64, int(os.environ.get(_ENV_MEM_MB, "2048")))
+    except ValueError:
+        pass
+
+    def _sl(res_name: str, soft: int, hard: int | None = None) -> None:
+        res = getattr(_resource, res_name, None)
+        if res is None:
+            return
+        try:
+            _resource.setrlimit(res, (soft, soft if hard is None else hard))
+        except (ValueError, OSError):
+            pass
+
+    # CPU seconds: a small margin over the wall clock so CPU-bound loops die too.
+    _sl("RLIMIT_CPU", max(1, int(timeout_s) + 1), max(2, int(timeout_s) + 2))
+    _sl("RLIMIT_AS", mem_mb * 1024 * 1024)
+    _sl("RLIMIT_FSIZE", 64 * 1024 * 1024)   # 64 MiB written-file cap
+    _sl("RLIMIT_NPROC", 128)                # bound fork bombs
+    _sl("RLIMIT_NOFILE", 256)
+    _sl("RLIMIT_CORE", 0)                   # no core dumps
+
+
+def _child_preexec(timeout_s: int, want_netns: bool) -> None:
+    """Runs in the forked child before exec: new session, rlimits, netns.
+
+    A failed netns unshare is swallowed (best-effort); the caller enforces
+    fail-closed behavior up front via :func:`network_isolation_available` when
+    ``TRINITY_SANDBOX_STRICT`` is set.
+    """
+    try:
+        os.setsid()  # own session/process group so a timeout can kill the tree
+    except OSError:
+        pass
+    _set_rlimits(timeout_s)
+    if want_netns:
+        try:
+            _do_unshare(_CLONE_NEWUSER | _CLONE_NEWNET)
+        except Exception:
+            pass  # best-effort; do not break grading on hosts without userns
+
+
+def _sandbox_env(home_dir: str) -> dict[str, str]:
+    """Strict allowlist environment for the child interpreter.
+
+    The real ``HOME`` is deliberately NOT forwarded — it is redirected to the
+    throwaway ``home_dir`` so ``~`` cannot reach the user's secrets. Only a
+    minimal, non-sensitive allowlist is passed through.
+    """
     env = {
-        "PATH": os.environ.get("PATH", ""),
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": home_dir,
+        "TMPDIR": home_dir,
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONIOENCODING": "utf-8",
     }
-    # Preserve a HOME so libraries that need a writable dir do not crash.
-    if "HOME" in os.environ:
-        env["HOME"] = os.environ["HOME"]
+    # Locale is not sensitive and helps unicode-heavy solutions; pass if present.
+    for key in ("LANG", "LC_ALL", "LC_CTYPE"):
+        if key in os.environ:
+            env[key] = os.environ[key]
     return env
 
 
@@ -691,7 +844,12 @@ def _exec_script(script: str, *, stdin_data: str, timeout_s: int) -> bool:
 def _exec_script_capture(
     script: str, *, stdin_data: str, timeout_s: int
 ) -> tuple[bool, str]:
-    """Run a script in a subprocess and capture stdout.
+    """Run untrusted ``script`` in an isolated subprocess and capture stdout.
+
+    Isolation applied (see module notes above): private HOME/TMPDIR + env scrub,
+    a wiped private working dir, ``setrlimit`` resource caps, and best-effort
+    rootless network-namespace isolation. With ``TRINITY_SANDBOX_STRICT=1`` the
+    call fails closed when network isolation is unavailable.
 
     Args:
         script: The full Python source to execute.
@@ -703,34 +861,69 @@ def _exec_script_capture(
         return code ``0`` (no exception/timeout) and ``stdout`` is the captured
         standard output (empty on failure).
     """
-    tmp_path: str | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False, encoding="utf-8"
-        ) as fh:
-            fh.write(script)
-            tmp_path = fh.name
-        try:
-            proc = subprocess.run(
-                [sys.executable, tmp_path],
-                input=stdin_data,
-                capture_output=True,
-                text=True,
-                timeout=timeout_s,
-                env=_sandbox_env(),
-                cwd=tempfile.gettempdir(),
+    global _strict_warned
+    want_netns = _bool_env(_ENV_NETNS, True)
+    strict = _bool_env(_ENV_STRICT, False)
+    if strict and not network_isolation_available():
+        if not _strict_warned:
+            print(
+                "[reward] TRINITY_SANDBOX_STRICT set but rootless network "
+                "isolation is unavailable on this host; refusing to execute "
+                "untrusted code. Run under a container/bwrap/nsjail or unset "
+                "the flag.",
+                file=sys.stderr,
+                flush=True,
             )
-        except subprocess.TimeoutExpired:
-            return False, ""
+            _strict_warned = True
+        return False, ""
+
+    run_dir = tempfile.mkdtemp(prefix="trinity-sbx-")
+    script_path = os.path.join(run_dir, "candidate.py")
+    preexec = None
+    if os.name == "posix" and hasattr(os, "fork"):
+        preexec = lambda: _child_preexec(timeout_s, want_netns)  # noqa: E731
+    try:
+        with open(script_path, "w", encoding="utf-8") as fh:
+            fh.write(script)
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, "-I", script_path],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=_sandbox_env(run_dir),
+                cwd=run_dir,
+                preexec_fn=preexec,
+            )
         except (OSError, ValueError):
             return False, ""
-        return (proc.returncode == 0), (proc.stdout or "")
+        try:
+            stdout, _ = proc.communicate(input=stdin_data, timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            _kill_process_tree(proc)
+            return False, ""
+        except (OSError, ValueError):
+            _kill_process_tree(proc)
+            return False, ""
+        return (proc.returncode == 0), (stdout or "")
     finally:
-        if tmp_path is not None:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+        shutil.rmtree(run_dir, ignore_errors=True)
+
+
+def _kill_process_tree(proc: "subprocess.Popen") -> None:
+    """SIGKILL the child's whole process group (set via setsid), then reap."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (OSError, ProcessLookupError, AttributeError):
+        try:
+            proc.kill()
+        except OSError:
+            pass
+    try:
+        proc.wait(timeout=5)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
