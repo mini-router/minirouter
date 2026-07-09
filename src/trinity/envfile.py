@@ -22,7 +22,15 @@ def _parse_env_line(line: str) -> tuple[str, str] | None:
         return None
     value = value.strip()
     if value and len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        # Quoted value: keep everything between the quotes verbatim, including `#`.
         value = value[1:-1]
+    else:
+        # Unquoted value: strip a trailing inline comment introduced by ` #`
+        # (whitespace + hash), matching common `.env` conventions. A bare `#`
+        # with no leading whitespace is treated as literal value text.
+        match = re.search(r"\s#", value)
+        if match:
+            value = value[: match.start()].rstrip()
     value = os.path.expanduser(os.path.expandvars(value))
     return key, value
 

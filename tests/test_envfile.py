@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from trinity.envfile import load_env_file, load_project_env
+from trinity.envfile import _parse_env_line, load_env_file, load_project_env
 
 
 @pytest.fixture
@@ -71,6 +71,34 @@ def test_load_env_file_skips_invalid_keys(tmp_path, isolated_key):
     load_env_file(path)
     assert "bad-key" not in os.environ
     assert os.environ[isolated_key] == "yes"
+
+
+def test_parse_strips_inline_comment_unquoted():
+    assert _parse_env_line("OPENROUTER_API_KEY=sk-abc123  # production key") == (
+        "OPENROUTER_API_KEY",
+        "sk-abc123",
+    )
+
+
+def test_parse_keeps_hash_inside_quotes():
+    assert _parse_env_line('KEY="value # kept"') == ("KEY", "value # kept")
+    assert _parse_env_line("KEY='value # kept'") == ("KEY", "value # kept")
+
+
+def test_parse_bare_hash_without_space_is_literal():
+    # A `#` not preceded by whitespace is part of the value (e.g. a URL fragment).
+    assert _parse_env_line("KEY=abc#frag") == ("KEY", "abc#frag")
+
+
+def test_parse_full_line_comment_still_skipped():
+    assert _parse_env_line("# whole line") is None
+
+
+def test_load_env_file_strips_inline_comment(tmp_path, isolated_key):
+    path = tmp_path / "secrets.env"
+    path.write_text(f"{isolated_key}=hello  # trailing note\n", encoding="utf-8")
+    load_env_file(path)
+    assert os.environ[isolated_key] == "hello"
 
 
 def test_load_project_env_prefers_repo_secrets(tmp_path, isolated_key, monkeypatch):
