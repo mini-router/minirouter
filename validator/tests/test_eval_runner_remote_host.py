@@ -49,6 +49,7 @@ def test_remote_attempt_uses_trinity_remote_host(tmp_path, monkeypatch):
         settings,
         checkpoint_path,
         local_results_path,
+        tmp_path / "cost_ledger.jsonl",
         "sub-remote-host",
         {},
     )
