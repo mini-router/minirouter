@@ -18,6 +18,18 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-09 — shared types unit tests  #decision #repro
+**Context:** ``trinity/types.py`` defines ``Role``, ``Task``, ``TurnRecord``, and
+``Trajectory`` — the integration contract across the coordinator stack — but had
+no dedicated offline pytest coverage.
+**Expected:** enum values, ``ROLE_ORDER``, default fields, and trajectory token
+sums should be locked so field renames or property changes cannot drift silently.
+**Actual:** no ``tests/test_types.py`` existed.
+**Root cause:** dataclasses were treated as trivial wiring until session/head
+tests started depending on stable field semantics.
+**Fix / decision:** add ``tests/test_types.py`` (stdlib only, no torch/GPU/network).
+**Follow-up:** none.
+
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
 fell back to local CPU and still reported completion.
