@@ -74,7 +74,12 @@ class SepCMAES:
             solutions = opt.ask()
             fitnesses = [objective(x) for x in solutions]  # higher = better
             opt.tell(solutions, fitnesses)
-        best_x, best_f = opt.best()
+        best_x, best_f = opt.best()   # best_x = distribution mean (ship this)
+
+    ``best()`` returns the distribution mean (``xfavorite``), the noise-robust
+    recommendation to ship; ``incumbent()`` returns the raw best-*evaluated*
+    candidate (``xbest``) for logging only. Under a noisy objective the two differ
+    and ``xbest`` overfits sampling noise — see :meth:`best`.
     """
 
     def __init__(
@@ -187,27 +192,67 @@ class SepCMAES:
     # Introspection
     # ------------------------------------------------------------------ #
     def best(self) -> tuple[np.ndarray, float]:
-        """Return the best solution found so far and its (maximized) fitness.
+        """Return the RECOMMENDED solution and a reference fitness for it.
 
-        Prefers the library's own incumbent (``xbest``) when available, which is
-        more robust than tracking the raw population best; falls back to the
-        locally tracked best, then to the current distribution mean.
+        The recommendation is the distribution mean ``xfavorite`` (== the current
+        CMA-ES mean), **not** the single best-evaluated candidate ``xbest``.
+
+        Our fitness is a *noisy* objective: each candidate is scored on a small,
+        freshly-sampled minibatch with a *sampled* policy, so a single fitness is
+        a high-variance estimate of the true ``J(theta) = E[R(tau)]``. ``xbest``
+        is therefore the *luckiest* draw of the whole run — shipping it overfits
+        minibatch/sampling noise. pycma documents ``xfavorite`` (the mean) as the
+        recommended estimate of the optimum for noisy problems, because averaging
+        over the population/generations cancels the per-eval noise. See
+        :meth:`incumbent` if you specifically want the raw best-evaluated θ (for
+        logging only).
+
+        The returned fitness is the best *observed* fitness during the run
+        (:attr:`_best_f`), kept as a monotone reference/upper-bound for logging.
+        It is **not** a measurement of the mean's fitness — the mean was never
+        evaluated. Re-evaluate the returned θ on a held-out batch for an honest
+        score before trusting the number.
 
         Returns:
-            A tuple ``(best_x, best_f)`` where ``best_x`` has shape ``(n,)`` and
-            ``best_f`` is the objective value in maximization space.
+            A tuple ``(x_recommended, best_observed_f)`` where ``x_recommended``
+            has shape ``(n,)`` (the distribution mean) and ``best_observed_f`` is
+            the best fitness seen so far, in maximization space.
 
         Raises:
             RuntimeError: If called before any :meth:`tell`.
         """
+        if self._best_x is None:
+            raise RuntimeError("best() called before any tell(); no evaluation yet.")
+        favorite = getattr(self._es.result, "xfavorite", None)
+        if favorite is None:
+            # Older pycma or a degenerate result: fall back to the live mean, then
+            # to the locally tracked best-evaluated candidate.
+            favorite = getattr(self._es, "mean", None)
+        if favorite is not None:
+            return np.asarray(favorite, dtype=float), self._best_f
+        return self._best_x.copy(), self._best_f
+
+    def incumbent(self) -> tuple[np.ndarray, float]:
+        """Return the single best-*evaluated* candidate ``(xbest, fbest)``.
+
+        This is the luckiest draw under the noisy objective and is provided for
+        LOGGING/diagnostics only — do NOT ship it (use :meth:`best`, the mean).
+
+        Returns:
+            A tuple ``(x_best, f_best)`` in maximization space. Falls back to the
+            locally tracked best if pycma's ``xbest`` is unavailable.
+
+        Raises:
+            RuntimeError: If called before any :meth:`tell`.
+        """
+        if self._best_x is None:
+            raise RuntimeError("incumbent() called before any tell(); no evaluation yet.")
         lib_best = getattr(self._es.result, "xbest", None)
         lib_fval = getattr(self._es.result, "fbest", None)
         if lib_best is not None and lib_fval is not None:
             # `fbest` is in the minimized (negated) space -> flip back.
             return np.asarray(lib_best, dtype=float), -float(lib_fval)
-        if self._best_x is not None:
-            return self._best_x.copy(), self._best_f
-        raise RuntimeError("best() called before any tell(); no evaluation yet.")
+        return self._best_x.copy(), self._best_f
 
     def stop(self) -> bool:
         """Whether any CMA-ES termination criterion (e.g. ``maxiter``) is met.
@@ -259,8 +304,11 @@ def run(
     Returns:
         A tuple ``(best_x, best_f, history)`` where:
 
-        * ``best_x``: best parameter vector found, shape ``(n,)``.
-        * ``best_f``: its objective value (maximization space).
+        * ``best_x``: the recommended parameter vector = the CMA-ES distribution
+          mean (``xfavorite``), shape ``(n,)`` — the noise-robust choice to ship,
+          NOT the single best-evaluated candidate (see :meth:`SepCMAES.best`).
+        * ``best_f``: the best *observed* fitness during the run (maximization
+          space), a monotone reference — not a measurement of ``best_x`` itself.
         * ``history``: list of per-iteration dicts with keys
           ``{"iteration", "best_fitness", "gen_best_fitness", "gen_mean_fitness"}``
           suitable for logging ``J(theta)`` over training (docs/SPEC.md §5.2).
