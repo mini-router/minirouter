@@ -33,6 +33,24 @@ slipped through.
 `_selftest` stubbed — no network/GPU) asserting `main()` raises `SystemExit` with the propagated
 code instead of `NameError`.
 **Follow-up:** none; other modules already import `sys` where needed.
+## 2026-07-08 — Verifier verdict regex matched ACCEPT as a prefix  #mistake #fix
+**Context:** auditing the multi-turn termination path (`roles/verifier.py` decides when the coordinator
+stops on a Verifier ACCEPT).
+**Expected:** only a committed `VERDICT: ACCEPT` / `VERDICT: REVISE` line should be parsed as a verdict.
+**Actual:** `VERDICT_RE = r"VERDICT:\s*(ACCEPT|REVISE)"` was unanchored, so `ACCEPT` matched as a prefix
+inside longer words — `parse_verdict("VERDICT: ACCEPTABLE only once the bug is fixed")` returned
+`"ACCEPT"`. The coordinator then terminates early and commits an answer the Verifier meant to reject,
+lowering accuracy and the binary reward. `extract_diagnosis` (same regex) also truncated the diagnosis
+at the false match.
+**Root cause:** the alternation had no trailing word boundary, so `ACCEPT`/`REVISE` matched as prefixes
+of `ACCEPTABLE`/`ACCEPTED`/`REVISED`.
+**Fix / decision:** anchor the token with `\b` (`r"VERDICT:\s*(ACCEPT|REVISE)\b"`). Whole-word verdicts
+(with/without trailing punctuation, case-insensitive) still parse; prefix-only words no longer do, so
+`parse_verdict` returns `None` and the documented fail-safe REVISE (SPEC §0.3.5 / §4.6) applies. Added
+`tests/test_verifier.py` (covers valid verdicts, prefix words, last-verdict-wins, and diagnosis
+non-truncation).
+**Follow-up:** none — self-contained parser fix.
+
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
 fell back to local CPU and still reported completion.
@@ -48,7 +66,6 @@ fallback when used, and fails immediately when remote fails and fallback is disa
 remote fail + fallback metadata, remote fail + fallback disabled -> failed, and remote success -> no fallback.
 **Follow-up:** if downstream UI/reporting wants stronger signaling, surface `execution_mode` directly as a
 top-level field in submission/evaluation schema.
-
 ## 2026-07-08 — postprocess truncation unit tests  #decision #repro
 **Context:** `roles/postprocess.py` implements SPEC §4.5 head+tail truncation (verdict /
 final-answer preservation) but had no dedicated offline tests; only an indirect null-content
@@ -130,7 +147,6 @@ docs now point miners at the checker. Tracks issue #3.
 **Fix / decision:** ship a zero-network CLI that validates required files, θ shape against
 `ParamSpec.n_total`, and summary JSON coherency; warn (do not fail) on summary `n_total` drift.
 **Follow-up:** optionally wire the same checks into PR automation before `/submit`.
-
 ## 2026-07-06 — Validator backend moved into repo and eval deduplicated  #decision #repro
 **Context:** the standalone `minirouter-evaluation-service` needed to live inside this repo so
 submission intake, leaderboard storage, and checkpoint evaluation can ship together.
