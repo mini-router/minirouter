@@ -18,6 +18,26 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-09 — Every LiveCodeBench `functional` problem scored 0  #mistake #repro
+**Context:** auditing the code-benchmark reward path right after `feat: implement livecodebench` landed.
+**Expected:** a correct `Solution.twoSum` scores 1.0 on a LiveCodeBench functional problem.
+**Actual:** it scored **0.0**. Every functional problem was unsolvable regardless of the answer.
+**Root cause:** three linked gaps. (1) LiveCodeBench stores the function name inside a JSON
+`metadata` blob (`metadata["func_name"]`), but `_load_livecodebench_hf` read it as a top-level
+column via `_row_get(row, "fn_name", "func_name")`, so `fn_name` was always `None`.
+(2) `_parse_lcb_tests` discarded each case's `testtype` (`stdin` vs `functional`).
+(3) `reward.py` never referenced `fn_name` at all and had no call-based execution path, so a
+functional test (`{"input": "[2,7,11,15]\n9", "output": "[0,1]"}`) was run as a *stdin program*:
+the candidate read nothing, printed nothing, and stdout `""` never matched `"[0,1]"`.
+**Fix / decision:** parse `func_name` out of the metadata JSON (`_lcb_func_name`), preserve
+`testtype` per test, thread `fn_name` through `_coerce_test_spec` -> `run_pass_at_1` ->
+`_run_one_test`, and add `_run_functional_test`: decode the newline-separated JSON args
+(LiveCodeBench's convention, one JSON value per positional arg), resolve `fn_name` as a
+`Solution` method or a module-level function, call it in the same sandboxed subprocess, and
+compare with tuples normalized to lists. `fn_name=None` keeps the historical stdin behavior, so
+stdin/assert tests and the S5 smoke assertions are untouched.
+**Follow-up:** private (hidden) LiveCodeBench tests are still not executed — only `public_test_cases`.
+
 ## 2026-07-09 — Leaderboard API excluded real miner submissions  #mistake #decision #repro
 **Context:** issue #48 flagged that `GET /api/leaderboard` never surfaced completed `github_pr` or
 `upload` submissions on the public competition site.

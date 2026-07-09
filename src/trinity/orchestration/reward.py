@@ -543,20 +543,24 @@ def extract_code(text: str) -> str:
     return text.strip()
 
 
-def _coerce_test_spec(reference: object) -> tuple[list, int]:
-    """Normalize a code reference into ``(tests, timeout_s)``.
+def _coerce_test_spec(reference: object) -> tuple[list, int, str | None]:
+    """Normalize a code reference into ``(tests, timeout_s, fn_name)``.
 
     The ``Task.answer`` for code benchmarks may be:
       * a ``list`` of tests, or
-      * a ``dict`` with key ``"tests"`` and optional ``"timeout_s"``, or
+      * a ``dict`` with key ``"tests"``, optional ``"timeout_s"`` and optional
+        ``"fn_name"`` (LiveCodeBench functional problems), or
       * a JSON string encoding either of the above.
 
     Each test is one of:
       * a ``str`` of assert-based Python (executed after the candidate code), or
       * a ``dict`` ``{"stdin": str, "expected_stdout": str}`` for I/O tests, or
+      * a ``dict`` ``{"input": ..., "output": ..., "testtype": "functional"}``
+        for a call-based test (see :func:`_run_functional_test`), or
       * a 2-tuple/list ``(stdin, expected_stdout)``.
     """
     timeout_s = 10
+    fn_name: str | None = None
     spec: object = reference
     if isinstance(spec, str):
         try:
@@ -565,6 +569,8 @@ def _coerce_test_spec(reference: object) -> tuple[list, int]:
             spec = [spec]
     if isinstance(spec, dict):
         timeout_s = int(spec.get("timeout_s", timeout_s))
+        raw_fn = spec.get("fn_name") or spec.get("func_name")
+        fn_name = str(raw_fn) if raw_fn else None
         tests = spec.get("tests", [])
     else:
         tests = spec
@@ -572,7 +578,7 @@ def _coerce_test_spec(reference: object) -> tuple[list, int]:
         tests = []
     if not isinstance(tests, list):
         tests = [tests]
-    return tests, timeout_s
+    return tests, timeout_s, fn_name
 
 
 def _check_code(candidate: str, reference: object) -> bool:
@@ -580,11 +586,13 @@ def _check_code(candidate: str, reference: object) -> bool:
     code = extract_code(candidate)
     if not code.strip():
         return False
-    tests, timeout_s = _coerce_test_spec(reference)
-    return run_pass_at_1(code, tests, timeout_s=timeout_s)
+    tests, timeout_s, fn_name = _coerce_test_spec(reference)
+    return run_pass_at_1(code, tests, timeout_s=timeout_s, fn_name=fn_name)
 
 
-def run_pass_at_1(code: str, tests: Sequence, timeout_s: int = 10) -> bool:
+def run_pass_at_1(
+    code: str, tests: Sequence, timeout_s: int = 10, *, fn_name: str | None = None
+) -> bool:
     """Execute candidate ``code`` against ``tests`` in a subprocess sandbox.
 
     The candidate code is **never** executed in-process. Each invocation writes
@@ -603,10 +611,19 @@ def run_pass_at_1(code: str, tests: Sequence, timeout_s: int = 10) -> bool:
       trimmed per line) to ``expected_stdout``. Use this for competitive-
       programming style benchmarks (LiveCodeBench).
 
+    A third flavor exists for LiveCodeBench:
+
+    * **functional** (``dict`` with ``"testtype": "functional"``, or any test when
+      ``fn_name`` is given): the candidate's ``fn_name`` is *called* with
+      JSON-decoded arguments rather than run as a program. See
+      :func:`_run_functional_test`.
+
     Args:
         code: Candidate Python source (already fence-stripped).
         tests: Sequence of tests as described above.
         timeout_s: Per-test wall-clock timeout in seconds.
+        fn_name: Function/method name to call for functional tests. When ``None``
+            every dict test is treated as stdin/stdout (the historical behavior).
 
     Returns:
         ``True`` iff the candidate passes all tests (and there is at least one
@@ -617,13 +634,42 @@ def run_pass_at_1(code: str, tests: Sequence, timeout_s: int = 10) -> bool:
     if not tests:
         return False
     for test in tests:
-        if not _run_one_test(code, test, timeout_s):
+        if not _run_one_test(code, test, timeout_s, fn_name=fn_name):
             return False
     return True
 
 
-def _run_one_test(code: str, test: object, timeout_s: int) -> bool:
+def _is_functional_test(test: object, fn_name: str | None) -> bool:
+    """True iff ``test`` should be executed by calling ``fn_name``.
+
+    A test is functional when it declares ``testtype == "functional"``, or when a
+    ``fn_name`` is known and the test does not explicitly declare ``stdin``.
+    LiveCodeBench sets ``func_name`` in its ``metadata`` exactly for these.
+    """
+    if not fn_name:
+        return False
+    if isinstance(test, dict):
+        testtype = str(test.get("testtype", "")).strip().lower()
+        if testtype:
+            return testtype == "functional"
+        return "stdin" not in test
+    return False
+
+
+def _run_one_test(
+    code: str, test: object, timeout_s: int, *, fn_name: str | None = None
+) -> bool:
     """Run a single test in an isolated subprocess. Returns pass/fail."""
+    if _is_functional_test(test, fn_name):
+        assert isinstance(test, dict)  # narrowed by _is_functional_test
+        return _run_functional_test(
+            code,
+            str(test.get("input", "")),
+            str(test.get("output", "")),
+            fn_name=str(fn_name),
+            timeout_s=timeout_s,
+        )
+
     stdin_data: str | None = None
     expected_stdout: str | None = None
     assert_block: str | None = None
@@ -665,6 +711,91 @@ def _run_one_test(code: str, test: object, timeout_s: int) -> bool:
     if not ok:
         return False
     return _stdout_matches(stdout, expected_stdout or "")
+
+
+# Harness appended after the candidate code for a functional test. It resolves
+# ``fn_name`` either as a method of a ``Solution`` class (the LiveCodeBench
+# convention) or as a module-level function, calls it with the decoded args, and
+# exits non-zero on mismatch. Tuples are normalized to lists so a solution that
+# returns ``(1, 2)`` matches an expected ``[1, 2]``.
+_FUNCTIONAL_HARNESS = '''
+
+import json as _json
+import sys as _sys
+
+
+def _tr_norm(value):
+    if isinstance(value, tuple):
+        return [_tr_norm(v) for v in value]
+    if isinstance(value, list):
+        return [_tr_norm(v) for v in value]
+    if isinstance(value, dict):
+        return {{k: _tr_norm(v) for k, v in value.items()}}
+    return value
+
+
+_tr_args = _json.loads({args_json})
+_tr_expected = _json.loads({expected_json})
+_tr_fn_name = {fn_name_json}
+
+_tr_target = None
+_tr_solution_cls = globals().get("Solution")
+if _tr_solution_cls is not None and hasattr(_tr_solution_cls, _tr_fn_name):
+    _tr_target = getattr(_tr_solution_cls(), _tr_fn_name)
+elif _tr_fn_name in globals():
+    _tr_target = globals()[_tr_fn_name]
+
+if _tr_target is None:
+    _sys.exit(1)
+
+_tr_result = _tr_target(*_tr_args)
+_sys.exit(0 if _tr_norm(_tr_result) == _tr_norm(_tr_expected) else 1)
+'''
+
+
+def _parse_functional_args(raw_input: str) -> list | None:
+    """Decode a LiveCodeBench functional test input into a positional arg list.
+
+    LiveCodeBench encodes the arguments as newline-separated JSON values, one per
+    positional parameter (e.g. ``"[2,7,11,15]\\n9"`` -> ``[[2,7,11,15], 9]``).
+    Returns ``None`` if any line is not valid JSON.
+    """
+    args: list = []
+    for line in raw_input.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            args.append(json.loads(line))
+        except (json.JSONDecodeError, ValueError):
+            return None
+    return args
+
+
+def _run_functional_test(
+    code: str, raw_input: str, raw_expected: str, *, fn_name: str, timeout_s: int
+) -> bool:
+    """Call ``fn_name`` with the test's decoded arguments and compare the result.
+
+    The candidate defines either a ``Solution`` class with ``fn_name`` as a method
+    (the LiveCodeBench convention) or a module-level ``fn_name`` function. The
+    call happens in the same sandboxed subprocess used for the other test flavors.
+    """
+    args = _parse_functional_args(raw_input)
+    if args is None:
+        return False
+    expected = raw_expected.strip()
+    try:  # the expected value must itself be a JSON literal
+        json.loads(expected)
+    except (json.JSONDecodeError, ValueError):
+        return False
+
+    harness = _FUNCTIONAL_HARNESS.format(
+        args_json=repr(json.dumps(args)),
+        expected_json=repr(expected),
+        fn_name_json=repr(fn_name),
+    )
+    return _exec_script(code + harness, stdin_data="", timeout_s=timeout_s)
 
 
 def _stdout_matches(got: str, expected: str) -> bool:
