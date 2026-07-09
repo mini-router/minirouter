@@ -18,7 +18,20 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
-<<<<<<< sn74-galuis116-choice-last-match
+## 2026-07-09 — Leaderboard API excluded real miner submissions  #mistake #decision #repro
+**Context:** issue #48 flagged that `GET /api/leaderboard` never surfaced completed `github_pr` or
+`upload` submissions on the public competition site.
+**Expected:** evaluated miner submissions should rank on the public leaderboard alongside any seeded
+demo rows.
+**Actual:** the endpoint filtered with `Submission.source == "seed"`, so only README mock data appeared
+even after real evaluations completed successfully.
+**Root cause:** the seed-data helper (`seed_mock_data.py`) introduced a source tag that the leaderboard
+query treated as the sole visibility filter instead of completed scored submissions.
+**Fix / decision:** query submissions with `status == "completed"` and non-null `latest_score`, ordered
+by score descending. Added `validator/tests/test_leaderboard.py` for mixed seed/real ordering and
+incomplete submission exclusion.
+**Follow-up:** if operators want seed-only demo mode, add an explicit config flag rather than hardcoding
+`source == "seed"`.
 ## 2026-07-08 — MC grader read the FIRST choice letter, not the model's final one  #mistake #fix #repro
 **Context:** grading MMLU/GPQA answers via `extract_choice_letter` in
 `src/trinity/orchestration/reward.py` (drives the binary reward).
@@ -36,6 +49,43 @@ within-pattern position changes (first → last). Added
 `tests/test_choice_extraction.py` (offline) covering self-correction, priority,
 repeated `\boxed`, and the existing prose/next-line smoke cases.
 **Follow-up:** none; single-answer, prose-`A`, and `Final answer:\nB` cases verified unchanged.
+## 2026-07-08 — pool --selftest crashed with NameError (missing import sys)  #mistake #fix #repro
+**Context:** running the documented pool sanity check
+`python -m trinity.llm.fireworks_client --selftest` (which re-exports
+`openai_compatible_pool.main`), per AGENTS.md §7 step 1.
+**Expected:** `main()` runs `_selftest()` and exits with its status code (0 = all models reachable).
+**Actual:** even when the pings succeed, `main()` reaches
+`sys.exit(asyncio.run(_selftest()))` and raises `NameError: name 'sys' is not defined`
+(openai_compatible_pool.py:318) — the self-test never reports its real status.
+**Root cause:** the module uses `sys.exit(...)` but never imports `sys` (imports were argparse,
+asyncio, os, time, …). The non-`--selftest` path (`ap.print_help()`) doesn't touch `sys`, so it
+slipped through.
+**Fix / decision:** add `import sys` to the module. Added `tests/test_pool_selftest.py` (offline,
+`_selftest` stubbed — no network/GPU) asserting `main()` raises `SystemExit` with the propagated
+code instead of `NameError`.
+**Follow-up:** none; other modules already import `sys` where needed.
+## 2026-07-08 — Validator now fails missing-results evaluations  #mistake #decision #repro
+**Context:** issue #12 reported that validator runs could finish as `completed` even when `results.json`
+was never produced by the eval command.
+**Expected:** missing result artifacts should be a terminal non-success state so API/PR reporting does not
+present false-positive completions.
+**Actual:** `_prepare_results()` returned `{"results_missing": True}, None`, but `evaluate_submission()`
+still unconditionally set `run.status` and `submission.status` to `completed`.
+**Root cause:** the completion transition happened after result parsing without checking the missing-results
+sentinel metric.
+**Fix / decision:** added an explicit guard in `validator/src/eval_backend/services/eval_runner.py` to mark
+the run/submission as `failed` with a clear error when `results_missing` is detected; completion now only
+happens for valid result payloads. Added validator unit tests for both branches (missing results fails,
+valid results completes) in `validator/tests/test_eval_runner.py`.
+**Follow-up:** if maintainers later introduce an `incomplete` terminal state, this branch can map the same
+guard to that status instead of `failed`.
+**Review update (2026-07-09):** maintainer flagged that the regression test used an in-memory SQLite session,
+which never exercises the validator's Postgres-only path (`eval_backend.db._ensure_postgres` rejects any
+non-postgresql driver). Replaced the ad-hoc SQLite session with a shared, Postgres-backed
+`validator_session` fixture in `validator/tests/conftest.py` (per-test isolation via an outer transaction
+rollback; skips cleanly when no Postgres is reachable). `test_eval_runner.py` now runs against the real
+production backend.
+
 ## 2026-07-08 — Verifier verdict regex matched ACCEPT as a prefix  #mistake #fix
 **Context:** auditing the multi-turn termination path (`roles/verifier.py` decides when the coordinator
 stops on a Verifier ACCEPT).
@@ -53,7 +103,6 @@ of `ACCEPTABLE`/`ACCEPTED`/`REVISED`.
 `tests/test_verifier.py` (covers valid verdicts, prefix words, last-verdict-wins, and diagnosis
 non-truncation).
 **Follow-up:** none — self-contained parser fix.
-=======
 ## 2026-07-09 — Math grader marked comma-grouped answers wrong  #mistake #repro
 **Context:** issue #35 — auditing the reward path (`src/trinity/orchestration/reward.py`),
 the single source of truth for correctness used by both sep-CMA-ES training fitness and eval.
@@ -87,7 +136,6 @@ made it fail-safe — a missing/empty choice (or missing `message`) yields an em
 handling. Added `tests/test_pool_parse.py` (7 cases). Scoped to the parsing path only (not the imports)
 so it stays independent of the separate `import sys` --selftest fix (#25).
 **Follow-up:** none — self-contained client-robustness fix.
->>>>>>> main
 
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
@@ -104,6 +152,7 @@ fallback when used, and fails immediately when remote fails and fallback is disa
 remote fail + fallback metadata, remote fail + fallback disabled -> failed, and remote success -> no fallback.
 **Follow-up:** if downstream UI/reporting wants stronger signaling, surface `execution_mode` directly as a
 top-level field in submission/evaluation schema.
+
 ## 2026-07-08 — postprocess truncation unit tests  #decision #repro
 **Context:** `roles/postprocess.py` implements SPEC §4.5 head+tail truncation (verdict /
 final-answer preservation) but had no dedicated offline tests; only an indirect null-content
