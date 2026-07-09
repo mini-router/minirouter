@@ -18,6 +18,76 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-08 — results_table single baseline used mean, not per-bench max  #mistake #fix #repro
+**Context:** reading the multi-task summary that `scripts/results_table.py` prints (the paper's
+R1/R2 verdict: TRINITY per-task-best avg vs best fixed single model avg).
+**Expected:** the fixed single baseline should aggregate each benchmark by its *best* eval (max),
+mirroring TRINITY's `max(r["trinity"] ...)` per bench and the code comment on line 74
+("best per-bench single score … max across that bench's evals").
+**Actual:** `single_avg()` aggregated each bench with `sum(bench_vals) / len(bench_vals)` (the mean).
+A model with evals {0.70, 0.90} on math and {0.80, 0.86} on mmlu scored 0.815 (mean) instead of
+0.880 (max). With TRINITY at 0.850 this flipped R1/R2 from `❌` (0.850 < 0.880) to a false
+`✅ HOLDS (0.850 vs 0.815)`.
+**Root cause:** mean-vs-max mismatch between the single baseline and the TRINITY aggregate made the
+headline comparison non-apples-to-apples and biased toward TRINITY — the exact false-positive the
+oracle-ceiling framing is meant to avoid.
+**Fix / decision:** aggregate each bench by `max(bench_vals)` so the single baseline is per-task
+best, matching TRINITY. Added `tests/test_results_table.py` (offline, no GPU/network) covering the
+false-win scenario, the corrected verdict, and a genuine-win sanity case.
+**Follow-up:** none; eval JSON schema and other aggregates unchanged.
+
+## 2026-07-08 — Verifier verdict regex matched ACCEPT as a prefix  #mistake #fix
+**Context:** auditing the multi-turn termination path (`roles/verifier.py` decides when the coordinator
+stops on a Verifier ACCEPT).
+**Expected:** only a committed `VERDICT: ACCEPT` / `VERDICT: REVISE` line should be parsed as a verdict.
+**Actual:** `VERDICT_RE = r"VERDICT:\s*(ACCEPT|REVISE)"` was unanchored, so `ACCEPT` matched as a prefix
+inside longer words — `parse_verdict("VERDICT: ACCEPTABLE only once the bug is fixed")` returned
+`"ACCEPT"`. The coordinator then terminates early and commits an answer the Verifier meant to reject,
+lowering accuracy and the binary reward. `extract_diagnosis` (same regex) also truncated the diagnosis
+at the false match.
+**Root cause:** the alternation had no trailing word boundary, so `ACCEPT`/`REVISE` matched as prefixes
+of `ACCEPTABLE`/`ACCEPTED`/`REVISED`.
+**Fix / decision:** anchor the token with `\b` (`r"VERDICT:\s*(ACCEPT|REVISE)\b"`). Whole-word verdicts
+(with/without trailing punctuation, case-insensitive) still parse; prefix-only words no longer do, so
+`parse_verdict` returns `None` and the documented fail-safe REVISE (SPEC §0.3.5 / §4.6) applies. Added
+`tests/test_verifier.py` (covers valid verdicts, prefix words, last-verdict-wins, and diagnosis
+non-truncation).
+**Follow-up:** none — self-contained parser fix.
+
+## 2026-07-09 — Math grader marked comma-grouped answers wrong  #mistake #repro
+**Context:** issue #35 — auditing the reward path (`src/trinity/orchestration/reward.py`),
+the single source of truth for correctness used by both sep-CMA-ES training fitness and eval.
+**Expected:** `R.score_text("math500", r"\boxed{1,234}", "1234") == 1.0` (a correct large
+number written with a thousands separator should grade correct).
+**Actual:** it returned `0.0`. Same for a comma in the *reference* (`\boxed{2500}` vs `2,500`).
+Plain ints, negatives, fractions, and percents graded fine — only comma-grouped numbers failed.
+**Root cause:** `extract_last_number` strips commas but `normalize_math_answer` did not, so the
+extract path and the compare path disagreed. `"1,234"` failed exact-match vs `"1234"`,
+`float("1,234")` raised so the numeric path was skipped, and the sympy fallback parsed `"1,234"`
+as the tuple `(1, 234)` — every resolution path failed.
+**Fix / decision:** strip only a comma that groups exactly three trailing digits
+(`re.sub(r"(?<=\d),(?=\d{3}(?:\D|$))", "", s)`) in `normalize_math_answer`, so grouped numbers
+normalize to a bare integer while set/tuple/interval answers like `(1,2)` are left untouched.
+Added `tests/test_reward_math.py` (pure stdlib, offline) covering both sides, multi-group numbers,
+the non-thousands guard, and that wrong answers still score 0.
+**Follow-up:** none; the extract and compare paths now agree on comma handling.
+
+## 2026-07-08 — Empty `choices` on a 200 response crashed eval  #mistake #fix
+**Context:** hardening the OpenAI-compatible pool client after the 2026-07-06 null-`content` fix.
+**Expected:** `chat()` returns a `ChatResult` for every HTTP 200 reply and the trajectory continues.
+**Actual:** a provider can return HTTP 200 with an **empty** `choices` list (content-filter / safety
+block) or an `{"error": {...}}` envelope with no `choices` key. `data["choices"][0]` then raised
+`IndexError`/`KeyError` straight out of `chat()`, past the `_Retryable` guard, aborting the whole eval
+run. Same failure class as the null-`content` crash, one layer up.
+**Root cause:** the parser assumed `choices` is always a non-empty list carrying a `message`;
+`raise_for_status()` only catches 4xx/5xx, so a valid-but-empty 200 body slipped through.
+**Fix / decision:** extracted response parsing into a pure `_parse_completion(data, model)` helper and
+made it fail-safe — a missing/empty choice (or missing `message`) yields an empty completion
+(`text=""`, `finish_reason="error"`) while still accounting `usage`, mirroring the null-`content`
+handling. Added `tests/test_pool_parse.py` (7 cases). Scoped to the parsing path only (not the imports)
+so it stays independent of the separate `import sys` --selftest fix (#25).
+**Follow-up:** none — self-contained client-robustness fix.
+
 ## 2026-07-08 — Remote eval used nonexistent settings.trinity_gpu_host  #mistake #fix
 **Context:** issue #46 reported that validator remote GPU evaluation failed before SSH with
 `AttributeError: 'Settings' object has no attribute 'trinity_gpu_host'`.
@@ -45,6 +115,7 @@ fallback when used, and fails immediately when remote fails and fallback is disa
 remote fail + fallback metadata, remote fail + fallback disabled -> failed, and remote success -> no fallback.
 **Follow-up:** if downstream UI/reporting wants stronger signaling, surface `execution_mode` directly as a
 top-level field in submission/evaluation schema.
+
 ## 2026-07-08 — postprocess truncation unit tests  #decision #repro
 **Context:** `roles/postprocess.py` implements SPEC §4.5 head+tail truncation (verdict /
 final-answer preservation) but had no dedicated offline tests; only an indirect null-content
