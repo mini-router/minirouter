@@ -187,27 +187,43 @@ class SepCMAES:
     # Introspection
     # ------------------------------------------------------------------ #
     def best(self) -> tuple[np.ndarray, float]:
-        """Return the best solution found so far and its (maximized) fitness.
+        """Return the recommended solution and the best observed fitness.
 
-        Prefers the library's own incumbent (``xbest``) when available, which is
-        more robust than tracking the raw population best; falls back to the
-        locally tracked best, then to the current distribution mean.
+        Returns the **distribution mean** (pycma's ``result.xfavorite``) as the
+        solution vector, *not* the single best-evaluated candidate
+        (``result.xbest``). TRINITY's fitness ``J(theta) = E[R(tau)]`` is a
+        **stochastic** signal: each candidate is scored on a freshly sampled
+        minibatch with a *sampled* policy (``sample=True`` during training). Under
+        such a noisy objective ``xbest`` is selection-on-noise — the luckiest
+        evaluation of the run, not the policy with the best *expected* reward — so
+        shipping it as ``best_theta.npy`` overfits sampling noise. pycma documents
+        ``xfavorite`` as the recommended estimate of the optimum for noisy
+        problems, and CMA-ES theory makes the mean the maximum-likelihood point of
+        the search distribution. See issue #69.
+
+        The returned fitness is the best *observed* training fitness
+        (``self._best_f``), tracked in maximization space. It is a noisy upper
+        estimate used only for logging/monitoring — it is the fitness of the
+        luckiest evaluated candidate, **not** a re-evaluation of the returned mean
+        vector — so it must not be trusted as the mean's true score without a
+        held-out re-eval.
 
         Returns:
-            A tuple ``(best_x, best_f)`` where ``best_x`` has shape ``(n,)`` and
-            ``best_f`` is the objective value in maximization space.
+            A tuple ``(best_x, best_f)`` where ``best_x`` is the distribution mean
+            of shape ``(n,)`` and ``best_f`` is the best observed fitness in
+            maximization space.
 
         Raises:
-            RuntimeError: If called before any :meth:`tell`.
+            RuntimeError: If called before any :meth:`tell` (no evaluation yet).
         """
-        lib_best = getattr(self._es.result, "xbest", None)
-        lib_fval = getattr(self._es.result, "fbest", None)
-        if lib_best is not None and lib_fval is not None:
-            # `fbest` is in the minimized (negated) space -> flip back.
-            return np.asarray(lib_best, dtype=float), -float(lib_fval)
-        if self._best_x is not None:
-            return self._best_x.copy(), self._best_f
-        raise RuntimeError("best() called before any tell(); no evaluation yet.")
+        if self._best_x is None:
+            raise RuntimeError("best() called before any tell(); no evaluation yet.")
+        # Prefer the distribution mean: the robust, noise-averaged recommendation.
+        favorite = getattr(self._es.result, "xfavorite", None)
+        if favorite is not None:
+            return np.asarray(favorite, dtype=float), self._best_f
+        # Fallback for a backend without `xfavorite`: the locally tracked best.
+        return self._best_x.copy(), self._best_f
 
     def stop(self) -> bool:
         """Whether any CMA-ES termination criterion (e.g. ``maxiter``) is met.
