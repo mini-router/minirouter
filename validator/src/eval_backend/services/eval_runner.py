@@ -333,6 +333,12 @@ def _prepare_results(
     return metrics, score
 
 
+def _is_missing_results_payload(metrics: dict[str, Any]) -> bool:
+    """Return True when parsed metrics indicate missing result artifacts."""
+    value = metrics.get("results_missing")
+    return bool(value) if isinstance(value, bool) else False
+
+
 def _build_remote_command(
     settings: Settings,
     checkpoint_path: Path,
@@ -678,6 +684,25 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
     metrics["local_fallback"] = bool(remote_error)
     if remote_error:
         metrics["remote_error"] = remote_error
+    if _is_missing_results_payload(metrics):
+        error = "evaluation did not produce results.json"
+        run.status = "failed"
+        run.phase = "failed"
+        run.message = error
+        run.error = error
+        run.score = None
+        run.metrics_json = json.dumps(metrics, ensure_ascii=False, sort_keys=True)
+        run.stdout = stdout
+        run.stderr = stderr
+        run.finished_at = _utcnow()
+        run.command = " || ".join(attempts) if attempts else ""
+        if run.progress_total is None:
+            run.progress_total = settings.eval_max_items
+        run.progress_current = run.progress_total
+        submission.status = "failed"
+        submission.latest_score = None
+        session.flush()
+        return EvaluationResult(run=run, score=None, metrics=metrics, stdout=stdout, stderr=stderr)
 
     run.status = "completed"
     run.phase = "completed"
