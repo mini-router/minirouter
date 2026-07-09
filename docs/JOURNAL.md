@@ -18,23 +18,21 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
-## 2026-07-08 — Verifier verdict regex matched ACCEPT as a prefix  #mistake #fix
-**Context:** auditing the multi-turn termination path (`roles/verifier.py` decides when the coordinator
-stops on a Verifier ACCEPT).
-**Expected:** only a committed `VERDICT: ACCEPT` / `VERDICT: REVISE` line should be parsed as a verdict.
-**Actual:** `VERDICT_RE = r"VERDICT:\s*(ACCEPT|REVISE)"` was unanchored, so `ACCEPT` matched as a prefix
-inside longer words — `parse_verdict("VERDICT: ACCEPTABLE only once the bug is fixed")` returned
-`"ACCEPT"`. The coordinator then terminates early and commits an answer the Verifier meant to reject,
-lowering accuracy and the binary reward. `extract_diagnosis` (same regex) also truncated the diagnosis
-at the false match.
-**Root cause:** the alternation had no trailing word boundary, so `ACCEPT`/`REVISE` matched as prefixes
-of `ACCEPTABLE`/`ACCEPTED`/`REVISED`.
-**Fix / decision:** anchor the token with `\b` (`r"VERDICT:\s*(ACCEPT|REVISE)\b"`). Whole-word verdicts
-(with/without trailing punctuation, case-insensitive) still parse; prefix-only words no longer do, so
-`parse_verdict` returns `None` and the documented fail-safe REVISE (SPEC §0.3.5 / §4.6) applies. Added
-`tests/test_verifier.py` (covers valid verdicts, prefix words, last-verdict-wins, and diagnosis
-non-truncation).
-**Follow-up:** none — self-contained parser fix.
+## 2026-07-08 — Empty `choices` on a 200 response crashed eval  #mistake #fix
+**Context:** hardening the OpenAI-compatible pool client after the 2026-07-06 null-`content` fix.
+**Expected:** `chat()` returns a `ChatResult` for every HTTP 200 reply and the trajectory continues.
+**Actual:** a provider can return HTTP 200 with an **empty** `choices` list (content-filter / safety
+block) or an `{"error": {...}}` envelope with no `choices` key. `data["choices"][0]` then raised
+`IndexError`/`KeyError` straight out of `chat()`, past the `_Retryable` guard, aborting the whole eval
+run. Same failure class as the null-`content` crash, one layer up.
+**Root cause:** the parser assumed `choices` is always a non-empty list carrying a `message`;
+`raise_for_status()` only catches 4xx/5xx, so a valid-but-empty 200 body slipped through.
+**Fix / decision:** extracted response parsing into a pure `_parse_completion(data, model)` helper and
+made it fail-safe — a missing/empty choice (or missing `message`) yields an empty completion
+(`text=""`, `finish_reason="error"`) while still accounting `usage`, mirroring the null-`content`
+handling. Added `tests/test_pool_parse.py` (7 cases). Scoped to the parsing path only (not the imports)
+so it stays independent of the separate `import sys` --selftest fix (#25).
+**Follow-up:** none — self-contained client-robustness fix.
 
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
