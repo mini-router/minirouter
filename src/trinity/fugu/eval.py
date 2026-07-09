@@ -21,6 +21,18 @@ from trinity.types import Task
 __all__ = ["EvalResult", "evaluate"]
 
 
+def _majority(votes: list[int]) -> int:
+    """Strict majority of binary ``votes``: a tie is NOT a win.
+
+    ``votes`` may be shorter than ``reps`` when the spend cap aborts a task
+    mid-reps, so an even ballot is reachable even for odd ``reps``. Ties resolve
+    against the router, because this module reports binary correctness that
+    ``scripts/oracle_ceiling.py`` tests for significance — banking a 50/50 query
+    as solved is the partial credit the module docstring rules out.
+    """
+    return int(2 * sum(votes) > len(votes))
+
+
 @dataclass
 class EvalResult:
     """Aggregate + per-task evaluation outcome with cost."""
@@ -30,7 +42,7 @@ class EvalResult:
     accuracy: float                       # mean over tasks of (mean over reps)
     parse_rate: float                     # mean fraction of proposals that parsed
     per_task: dict = field(default_factory=dict)
-    per_query_binary: dict = field(default_factory=dict)   # task_id -> 0/1 majority
+    per_query_binary: dict = field(default_factory=dict)   # task_id -> strict majority (tie -> 0)
     cost: dict = field(default_factory=dict)
     aborted: bool = False
 
@@ -91,7 +103,7 @@ async def evaluate(
                     "reps_correct": votes,
                     "parse_rate": sum(parsed) / len(parsed),
                 }
-                per_query_binary[task.task_id] = int(2 * sum(votes) >= len(votes))
+                per_query_binary[task.task_id] = _majority(votes)
 
     await asyncio.gather(*[_one(t) for t in tasks])
 

@@ -18,6 +18,25 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-09 — fugu/eval scored a tied vote as a solved query  #mistake #gotcha
+**Context:** `fugu/eval.evaluate()` reduces each task's reps to the per-query binary that
+`scripts/oracle_ceiling.py` consumes as `--trinity-per-query` for its McNemar test.
+**Expected:** the field comment says "0/1 majority", so a 50/50 ballot scores 0.
+**Actual:** `int(2 * sum(votes) >= len(votes))` — a non-strict compare, so `votes=[1, 0]`
+banked the query as **solved**.
+**Root cause:** `>=` is "at least half", not "a majority". Assumed unreachable because reps
+default to 1, but it is reachable two ways: any even `--reps`, and — less obviously — *odd*
+reps too, because the `cap_usd` check `break`s out of the rep loop mid-task, so `votes` can
+be shorter than `reps` (a `--reps 3` run that trips the cap after two reps records a 2-vote
+ballot).
+**Fix / decision:** extracted `_majority(votes)` using a strict `>`. Ties resolve **against**
+the router: this module's docstring promises "a number here cannot be inflated by partial
+credit", and a coin-flip query counted as 1 is exactly that — it inflates the router side of
+the very significance test the oracle-ceiling layer exists to make trustworthy.
+**Follow-up:** none. Odd, complete ballots (`reps=1`, `reps=3`, …) are unaffected.
+
+---
+
 ## 2026-07-09 — role prompt assembly unit tests  #decision #repro
 **Context:** ``roles/prompts.py`` implements SPEC §4.4 system contracts and the
 ``render_transcript`` / ``build_messages`` helpers used by the inner loop, but had
