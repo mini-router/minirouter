@@ -28,6 +28,12 @@ from typing import Callable
 
 import numpy as np
 
+# pycma treats seed==0 as "unseeded" (it ignores it), so a seed-0 run is not
+# reproducible. We remap 0 to this fixed nonzero value in pycma's valid range
+# [1, 2**32-1] so the documented reproducible default actually holds.
+_SEED0_REMAP: int = 0x5EED  # arbitrary fixed constant; any nonzero value works.
+
+
 def _import_cma():
     """Import pycma lazily, so this module (and trinity.optim) imports cleanly on
     boxes without `cma` — it is only needed when an optimizer is actually built."""
@@ -119,13 +125,20 @@ class SepCMAES:
                     f"x0 must have shape ({self.n},), got {x0_vec.shape}"
                 )
 
+        # pycma IGNORES seed==0 ("cma ignores if seed==0") and leaves numpy's
+        # global RNG unseeded, so the documented reproducible default would in
+        # fact be non-reproducible. Remap 0 to a fixed nonzero value in pycma's
+        # valid range [1, 2**32-1], leaving every other seed unchanged, so the
+        # contract holds. self.seed keeps the caller's original value.
+        cma_seed = self.seed if self.seed != 0 else _SEED0_REMAP
+
         # `verbose=-9` silences pycma's stdout/file logging. Strategy constants
         # (c_sigma, d_sigma, c_1, c_mu, mu, recombination weights) all use the
         # library's separable defaults per docs/SPEC.md §5.3.
         opts = {
             "CMA_diagonal": True,
             "popsize": self._popsize,
-            "seed": self.seed,
+            "seed": cma_seed,
             "maxiter": self.maxiter,
             "verbose": -9,
         }
