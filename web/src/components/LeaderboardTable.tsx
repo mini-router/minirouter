@@ -1,15 +1,75 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import { useLeaderboard } from '../hooks/useLeaderboard'
+import {
+  SORTABLE_COLUMNS,
+  defaultSortDir,
+  sortLeaderboardEntries,
+  type SortDir,
+  type SortKey,
+} from '../lib/sortLeaderboard'
+
+function SortableHeader({
+  label,
+  sortKey,
+  activeKey,
+  activeDir,
+  align = 'left',
+  onSort,
+}: {
+  label: ReactNode
+  sortKey: SortKey
+  activeKey: SortKey
+  activeDir: SortDir
+  align?: 'left' | 'right'
+  onSort: (key: SortKey) => void
+}) {
+  const active = sortKey === activeKey
+  const ariaSort = active ? (activeDir === 'asc' ? 'ascending' : 'descending') : 'none'
+  const indicator = active ? (activeDir === 'asc' ? '↑' : '↓') : null
+  return (
+    <th
+      className={`p-4 font-medium ${align === 'right' ? 'text-right' : 'text-left'}`}
+      aria-sort={ariaSort}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center gap-1 uppercase tracking-[0.22em] transition-colors hover:text-text ${
+          align === 'right' ? 'flex-row-reverse' : ''
+        }`}
+      >
+        <span>{label}</span>
+        <span className="w-3 text-accent-light">{indicator}</span>
+      </button>
+    </th>
+  )
+}
 
 export default function LeaderboardTable() {
   const [search, setSearch] = useState('')
+  const [sortKey, setSortKey] = useState<SortKey>('rank')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
   const { entries, error } = useLeaderboard()
 
   const filtered = useMemo(() => {
     return entries.filter((e) => e.team.toLowerCase().includes(search.toLowerCase()))
   }, [entries, search])
+
+  const sorted = useMemo(
+    () => sortLeaderboardEntries(filtered, sortKey, sortDir),
+    [filtered, sortKey, sortDir],
+  )
+
+  function handleSort(key: SortKey) {
+    if (key === sortKey) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortKey(key)
+      setSortDir(defaultSortDir(key))
+    }
+  }
 
   return (
     <div className="section-shell">
@@ -20,7 +80,8 @@ export default function LeaderboardTable() {
             Ranked by macro-average accuracy
           </h2>
           <p className="mt-2 text-sm text-text-dim">
-            {filtered.length} entries currently shown. Search narrows by team name.
+            {sorted.length} entries currently shown. Search narrows by team name, and column
+            headers sort.
             {' '}Live data is loaded from the backend.
           </p>
           {error && <p className="mt-2 text-xs text-text-dim">Backend fetch failed.</p>}
@@ -50,25 +111,29 @@ export default function LeaderboardTable() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-white/10 bg-white/4 text-left text-xs uppercase tracking-[0.22em] text-text-dim">
-                <th className="p-4 font-medium">Rank</th>
-                <th className="p-4 font-medium">Team</th>
-                <th className="p-4 text-right font-medium">Accuracy</th>
-                <th className="p-4 text-right font-medium">Math</th>
-                <th className="p-4 text-right font-medium">MMLU</th>
-                <th className="p-4 text-right font-medium">Params</th>
-                <th className="p-4 text-right font-medium">Submitted</th>
+                {SORTABLE_COLUMNS.map((column) => (
+                  <SortableHeader
+                    key={column.key}
+                    label={column.label}
+                    sortKey={column.key}
+                    activeKey={sortKey}
+                    activeDir={sortDir}
+                    align={column.align}
+                    onSort={handleSort}
+                  />
+                ))}
                 <th className="p-4 text-center font-medium">Report</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
+              {sorted.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="p-8 text-center text-text-dim">
                     No entries found
                   </td>
                 </tr>
               ) : (
-                filtered.map((entry) => {
+                sorted.map((entry) => {
                   const rankClass =
                     entry.rank === 1
                       ? 'text-gold'

@@ -78,7 +78,10 @@ def render(rows: list[dict]) -> str:
                 bench_vals = [r["singles"].get(model) for r in by_bench[b] if model in r["singles"]]
                 bench_vals = [v for v in bench_vals if v is not None]
                 if bench_vals:
-                    vals.append(sum(bench_vals) / len(bench_vals))
+                    # Best (max) of this bench's evals for the model, matching the
+                    # per-task-best aggregation used for TRINITY below. Using the mean
+                    # here would understate the fixed single baseline and bias R1/R2.
+                    vals.append(max(bench_vals))
             return sum(vals) / len(vals) if vals else None
         # TRINITY per-task best (max TRINITY across coordinators per bench), averaged
         trin_avg = sum(max(r["trinity"] for r in by_bench[b]) for b in benches) / len(benches)
