@@ -276,9 +276,10 @@ def normalize_math_answer(ans: str | None) -> str:
     Strips LaTeX wrappers and cosmetic tokens that never change the value:
     ``$``/``\(``/``\)``, ``\left``/``\right``, ``\!``/``\,``/``\;``/``\:``,
     ``\text{...}``, ``\%`` and trailing ``%``, ``^\circ``/``\degree``, a leading
-    ``=``, surrounding ``\{...\}``, and outer whitespace. Collapses internal
-    whitespace and lowercases. Converts ``a/b`` integer fractions and
-    ``\frac{a}{b}`` to a canonical ``Fraction`` string when possible.
+    ``=``, surrounding ``\{...\}``, thousands-separator commas (``1,234`` ->
+    ``1234``), and outer whitespace. Collapses internal whitespace and
+    lowercases. Converts ``a/b`` integer fractions and ``\frac{a}{b}`` to a
+    canonical ``Fraction`` string when possible.
 
     Args:
         ans: Raw answer text (or ``None``).
@@ -312,6 +313,12 @@ def normalize_math_answer(ans: str | None) -> str:
     s = re.sub(r"\\d?frac\s*(\d)\s*(\d)", r"\1/\2", s)
     s = s.replace(r"\cdot", "*").replace(r"\times", "*")
     s = re.sub(r"\s+", "", s)
+    # Drop thousands-separator commas so "1,234" compares equal to "1234" (and
+    # parses as a number). extract_last_number already strips these, so without
+    # this the extract path and the compare path disagree and a correct answer
+    # scores 0. Only a comma that groups exactly three trailing digits is removed,
+    # leaving set/tuple/interval answers like "(1,2)" untouched.
+    s = re.sub(r"(?<=\d),(?=\d{3}(?:\D|$))", "", s)
     s = s.lower()
     # Canonicalize a pure integer ratio a/b.
     m = re.fullmatch(r"\(?(-?\d+)\)?/\(?(-?\d+)\)?", s)
