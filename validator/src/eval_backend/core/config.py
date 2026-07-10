@@ -62,20 +62,21 @@ DEFAULT_REMOTE_EVAL_COMMAND_TEMPLATE = (
     "PYTHONPATH=src "
     "PYTHONUNBUFFERED=1 python -u -m trinity.eval --submission-only "
     "--benchmark {benchmark} --provider {provider} --models {models_config} "
-    "--device cuda:0 --dtype bfloat16 --max-items {max_items} "
+    "--device cuda:0 --dtype bfloat16 --max-items {max_items} --batch-size {eval_batch_size} "
     "--theta {checkpoint_path} --out {results_path}"
 )
 DEFAULT_LOCAL_EVAL_COMMAND_TEMPLATE = (
     "PYTHONPATH=src "
     "PYTHONUNBUFFERED=1 python -u -m trinity.eval --submission-only "
     "--benchmark {benchmark} --provider {provider} --models {models_config} "
-    "--device cpu --dtype float32 --max-items {max_items} "
+    "--device cpu --dtype float32 --max-items {max_items} --batch-size {eval_batch_size} "
     "--theta {checkpoint_path} --out {results_path}"
 )
 DEFAULT_EVAL_PROVIDER = "chutes"
 DEFAULT_EVAL_MODELS_CONFIG = "configs/models.chutes.yaml"
 DEFAULT_EVAL_RESULT_POINTER = "results.TRINITY"
 DEFAULT_EVAL_MAX_ITEMS = 20
+DEFAULT_EVAL_BATCH_SIZE = 1
 DEFAULT_EVAL_BENCHMARK = "math500"
 DEFAULT_GIT_AUTHOR_NAME = "Minirouter Evaluator"
 DEFAULT_GIT_AUTHOR_EMAIL = "eval-bot@example.com"
@@ -110,6 +111,7 @@ class Settings:
     eval_models_config: str = DEFAULT_EVAL_MODELS_CONFIG
     eval_result_pointer: str = DEFAULT_EVAL_RESULT_POINTER
     eval_max_items: int = DEFAULT_EVAL_MAX_ITEMS
+    eval_batch_size: int = DEFAULT_EVAL_BATCH_SIZE
     eval_benchmark: str = DEFAULT_EVAL_BENCHMARK
     git_author_name: str = DEFAULT_GIT_AUTHOR_NAME
     git_author_email: str = DEFAULT_GIT_AUTHOR_EMAIL
@@ -169,6 +171,7 @@ class Settings:
             eval_models_config=get("EVAL_MODELS_CONFIG", DEFAULT_EVAL_MODELS_CONFIG),
             eval_result_pointer=get("EVAL_RESULT_POINTER", DEFAULT_EVAL_RESULT_POINTER),
             eval_max_items=int(get("EVAL_MAX_ITEMS", str(DEFAULT_EVAL_MAX_ITEMS))),
+            eval_batch_size=int(get("EVAL_BATCH_SIZE", str(DEFAULT_EVAL_BATCH_SIZE))),
             eval_benchmark=get("EVAL_BENCHMARK", DEFAULT_EVAL_BENCHMARK),
             git_author_name=get("GIT_AUTHOR_NAME", DEFAULT_GIT_AUTHOR_NAME),
             git_author_email=get("GIT_AUTHOR_EMAIL", DEFAULT_GIT_AUTHOR_EMAIL),
@@ -180,6 +183,11 @@ class Settings:
             sync_eval_on_submit=get("SYNC_EVAL_ON_SUBMIT", "false").lower()
             in {"1", "true", "yes", "on"},
         )
+
+    @property
+    def trinity_gpu_host(self) -> str:
+        """Backward-compatible alias for the remote GPU host setting."""
+        return self.trinity_remote_host
 
     def ensure_dirs(self) -> None:
         self.artifact_root.mkdir(parents=True, exist_ok=True)
