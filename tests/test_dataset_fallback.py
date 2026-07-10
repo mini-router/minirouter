@@ -50,6 +50,14 @@ def test_env_falsey_still_raises(monkeypatch):
         D.load_tasks("math500", "test", max_items=None)
 
 
+@pytest.mark.parametrize("env_value", ["FALSE", "no", "off", "NO"])
+def test_env_common_falsey_values_still_raise(monkeypatch, env_value):
+    monkeypatch.setenv(D._TOY_FALLBACK_ENV, env_value)
+    _force_empty_load(monkeypatch)
+    with pytest.raises(RuntimeError):
+        D.load_tasks("math500", "test", max_items=None)
+
+
 def test_successful_load_is_unaffected(monkeypatch, _clear_env, capsys):
     real = D._toy_tasks("math500")[:1]
     monkeypatch.setitem(D._HF_LOADERS, "math500", lambda split: list(real))

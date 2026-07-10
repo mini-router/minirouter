@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -80,6 +81,46 @@ def _ledger_append(
             )
     except Exception:
         pass
+
+
+def _parse_completion(data: dict, model: str) -> ChatResult:
+    """Build a :class:`ChatResult` from an OpenAI-compatible chat response.
+
+    Fail-safe against valid-but-unexpected ``200`` payloads. Some providers
+    return HTTP 200 with an **empty** ``choices`` list (a content-filter / safety
+    block) or an ``{"error": {...}}`` envelope instead of a completion. Indexing
+    ``data["choices"][0]`` on those raised ``IndexError`` / ``KeyError`` straight
+    out of :meth:`OpenAICompatiblePool.chat` and aborted the whole eval run.
+
+    We treat a missing/empty choice (or a missing ``message``) as an empty
+    completion (``text=""``, ``finish_reason="error"``), mirroring the existing
+    null-``content`` handling so a single odd reply degrades one turn instead of
+    crashing the run. See JOURNAL 2026-07-08.
+    """
+    usage = data.get("usage") or {}
+    prompt_tokens = int(usage.get("prompt_tokens", 0) or 0)
+    completion_tokens = int(usage.get("completion_tokens", 0) or 0)
+    choices = data.get("choices") or []
+    if not choices:
+        return ChatResult(
+            model=model,
+            text="",
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            finish_reason="error",
+            raw=data,
+        )
+    choice = choices[0] or {}
+    message = choice.get("message") or {}
+    content = message.get("content")
+    return ChatResult(
+        model=model,
+        text="" if content is None else str(content),
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        finish_reason=choice.get("finish_reason"),
+        raw=data,
+    )
 
 
 class OpenAICompatiblePool:
@@ -253,28 +294,19 @@ class OpenAICompatiblePool:
                 raise _Retryable(f"HTTP {resp.status_code}: {resp.text[:200]}")
             resp.raise_for_status()
             data = resp.json()
-            choice = data["choices"][0]
-            usage = data.get("usage", {})
-            pt = usage.get("prompt_tokens", 0)
-            ct = usage.get("completion_tokens", 0)
-            content = choice["message"].get("content")
+            result = _parse_completion(data, payload["model"])
+            pt = result.prompt_tokens
+            ct = result.completion_tokens
             if trace:
                 elapsed = time.perf_counter() - t0
                 print(
                     f"[llm] <- provider={provider.name} model={payload['model']} "
                     f"status={resp.status_code} sec={elapsed:.1f} pt={pt} ct={ct} "
-                    f"finish={choice.get('finish_reason')} content_none={content is None}",
+                    f"finish={result.finish_reason} content_empty={result.text == ''}",
                     flush=True,
                 )
             _ledger_append(provider.name, payload["model"], pt, ct)
-            return ChatResult(
-                model=payload["model"],
-                text="" if content is None else str(content),
-                prompt_tokens=pt,
-                completion_tokens=ct,
-                finish_reason=choice.get("finish_reason"),
-                raw=data,
-            )
+            return result
 
         if client is not None:
             return await _do(client)

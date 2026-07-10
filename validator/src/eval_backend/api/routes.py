@@ -12,20 +12,47 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..core.config import Settings
-from ..models import EvaluationRun, Submission
+from ..models import EvaluationRun, Submission, TrainRun
 from ..schemas import (
     EvaluationOut,
     HealthResponse,
     LeaderboardEntry,
     LeaderboardResponse,
+    TrainCreateRequest,
+    TrainCreateResponse,
+    TrainOut,
     SubmissionCreateResponse,
     SubmissionOut,
 )
 from ..services.eval_runner import evaluate_submission
 from ..services.github import create_pr_submission
+from ..services.artifacts import persist_stored_artifact
+from ..services.queue import enqueue_submission_job
+from ..services.queue import enqueue_train_job
 from ..services.storage import store_upload
 
 router = APIRouter()
+
+
+def _latest_run(submission: Submission) -> tuple[datetime | None, str | None, str | None, int | None, int | None]:
+    newest = None
+    for candidate in list(submission.evaluations) + list(submission.trains):
+        if newest is None:
+            newest = candidate
+            continue
+        left = candidate.created_at or _utcnow()
+        right = newest.created_at or _utcnow()
+        if left > right or (left == right and getattr(candidate, "id", 0) > getattr(newest, "id", 0)):
+            newest = candidate
+    if newest is None:
+        return None, None, None, None, None
+    return (
+        getattr(newest, "created_at", None),
+        getattr(newest, "phase", None),
+        getattr(newest, "message", None),
+        getattr(newest, "progress_current", None),
+        getattr(newest, "progress_total", None),
+    )
 
 
 def _submission_to_schema(submission: Submission) -> SubmissionOut:
@@ -33,22 +60,43 @@ def _submission_to_schema(submission: Submission) -> SubmissionOut:
         submission.evaluations,
         key=lambda run: (run.created_at or _utcnow(), run.id),
     )
+    ordered_trains = sorted(
+        submission.trains,
+        key=lambda run: (run.created_at or _utcnow(), run.id),
+    )
     latest = ordered_evaluations[-1] if ordered_evaluations else None
     evaluations = [
         EvaluationOut(
             id=run.id,
             submission_id=run.submission_id,
+            train_id=run.train_id,
+            input_artifact_id=run.input_artifact_id,
             status=run.status,
             score=run.score,
             phase=run.phase,
             message=run.message,
             progress_current=run.progress_current,
             progress_total=run.progress_total,
+            benchmark_names=list(run.benchmark_names_json or []),
+            provider=run.provider,
+            models_config=run.models_config,
+            execution_mode=run.execution_mode,
+            device=run.device,
+            dtype=run.dtype,
+            batch_size=run.batch_size,
+            max_items=run.max_items,
+            max_turns=run.max_turns,
+            max_tokens=run.max_tokens,
+            reasoning=run.reasoning,
+            seed=run.seed,
+            cost_usd=run.cost_usd,
+            duration_seconds=run.duration_seconds,
             metrics=json.loads(run.metrics_json) if run.metrics_json else {},
             command=run.command,
             stdout=run.stdout,
             stderr=run.stderr,
             results_path=run.results_path,
+            results_artifact_id=run.results_artifact_id,
             error=run.error,
             started_at=run.started_at,
             finished_at=run.finished_at,
@@ -56,28 +104,59 @@ def _submission_to_schema(submission: Submission) -> SubmissionOut:
         )
         for run in submission.evaluations
     ]
+    trains = [
+        TrainOut(
+            id=run.id,
+            submission_id=run.submission_id,
+            status=run.status,
+            phase=run.phase,
+            message=run.message,
+            progress_current=run.progress_current,
+            progress_total=run.progress_total,
+            benchmark_names=list(run.benchmark_names_json or []),
+            warmstart_artifact_id=run.warmstart_artifact_id,
+            output_artifact_id=run.output_artifact_id,
+            cost_usd=run.cost_usd,
+            duration_seconds=run.duration_seconds,
+            metrics=json.loads(run.metrics_json) if run.metrics_json else {},
+            command=run.command,
+            stdout=run.stdout,
+            stderr=run.stderr,
+            error=run.error,
+            started_at=run.started_at,
+            finished_at=run.finished_at,
+            created_at=run.created_at,
+        )
+        for run in ordered_trains
+    ]
+    _, current_phase, current_message, current_progress_current, current_progress_total = _latest_run(submission)
     return SubmissionOut(
         id=submission.id,
         source=submission.source,
+        miner_id=submission.miner_id,
         team_name=submission.team_name,
         repo_full_name=submission.repo_full_name,
         pr_number=submission.pr_number,
         head_sha=submission.head_sha,
-        artifact_name=submission.artifact_name,
-        artifact_path=submission.artifact_path,
-        artifact_sha256=submission.artifact_sha256,
-        checkpoint_path=submission.checkpoint_path,
         benchmark=submission.benchmark,
+        benchmarks=submission.benchmarks,
         status=submission.status,
         latest_score=submission.latest_score,
-        best_run_id=submission.best_run_id,
-        current_phase=latest.phase if latest else None,
-        current_message=latest.message if latest else None,
-        current_progress_current=latest.progress_current if latest else None,
-        current_progress_total=latest.progress_total if latest else None,
+        latest_train_id=submission.latest_train_id,
+        latest_eval_id=submission.latest_eval_id,
+        best_eval_id=submission.best_eval_id,
+        current_phase=current_phase,
+        current_message=current_message,
+        current_progress_current=current_progress_current,
+        current_progress_total=current_progress_total,
+        finished_at=submission.finished_at,
+        duration_seconds=submission.duration_seconds,
+        cost_usd=submission.cost_usd,
+        submission_artifact_id=submission.submission_artifact_id,
         created_at=submission.created_at,
         updated_at=submission.updated_at,
         evaluations=evaluations,
+        trains=trains,
     )
 
 
@@ -96,6 +175,31 @@ def _evaluation_to_schema(run: EvaluationRun) -> EvaluationOut:
         stdout=run.stdout,
         stderr=run.stderr,
         results_path=run.results_path,
+        error=run.error,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        created_at=run.created_at,
+    )
+
+
+def _train_to_schema(run: TrainRun) -> TrainOut:
+    return TrainOut(
+        id=run.id,
+        submission_id=run.submission_id,
+        status=run.status,
+        phase=run.phase,
+        message=run.message,
+        progress_current=run.progress_current,
+        progress_total=run.progress_total,
+        benchmark_names=list(run.benchmark_names_json or []),
+        warmstart_artifact_id=run.warmstart_artifact_id,
+        output_artifact_id=run.output_artifact_id,
+        cost_usd=run.cost_usd,
+        duration_seconds=run.duration_seconds,
+        metrics=json.loads(run.metrics_json) if run.metrics_json else {},
+        command=run.command,
+        stdout=run.stdout,
+        stderr=run.stderr,
         error=run.error,
         started_at=run.started_at,
         finished_at=run.finished_at,
@@ -178,21 +282,41 @@ async def submit(
                 team_name=_safe_team_name(request, team_name),
                 artifact=artifact,
             )
-            submission.benchmark = settings.eval_benchmark
-            submission.status = "queued"
         else:
             submission = Submission(
                 id=submission_id,
                 source="upload",
-                team_name=_safe_team_name(request, team_name),
-                artifact_name=artifact.name,
-                artifact_path=str(artifact.path),
-                artifact_sha256=artifact.sha256,
-                checkpoint_path=str(artifact.checkpoint_path) if artifact.checkpoint_path else None,
-                benchmark=settings.eval_benchmark,
+                miner_id=_safe_team_name(request, team_name),
+                benchmark_names_json=[settings.eval_benchmark],
                 status="queued",
             )
             session.add(submission)
+            artifact_row = persist_stored_artifact(
+                session,
+                artifact,
+                storage_backend=settings.artifact_storage_backend,
+                submission_id=submission.id,
+                meta_json={
+                    "checkpoint_path": str(artifact.checkpoint_path) if artifact.checkpoint_path else None,
+                    "extracted_root": str(artifact.extracted_root) if artifact.extracted_root else None,
+                },
+            )
+            submission.submission_artifact_id = artifact_row.id
+        if repo_full_name and pr_number is not None and submission.submission_artifact_id is not None:
+            submission.status = "queued"
+            submission.latest_score = None
+            submission.latest_eval_id = None
+            submission.best_eval_id = None
+        if submission.submission_artifact_id is not None and not settings.sync_eval_on_submit:
+            enqueue_submission_job(
+                session,
+                submission,
+                payload_json={
+                    "submission_id": submission.id,
+                    "benchmark_names": submission.benchmark_names_json,
+                    "source": submission.source,
+                },
+            )
         session.flush()
         session.commit()
 
@@ -203,14 +327,47 @@ async def submit(
 
         session.refresh(submission)
         evaluation = None
-        if submission.best_run_id:
-            run = session.get(EvaluationRun, submission.best_run_id)
+        if submission.best_eval_id:
+            run = session.get(EvaluationRun, submission.best_eval_id)
             if run is not None:
                 evaluation = _evaluation_to_schema(run)
         return SubmissionCreateResponse(
             submission=_submission_to_schema(submission),
             evaluation=evaluation,
         )
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        session.close()
+
+
+@router.post("/api/trains", response_model=TrainCreateResponse)
+def create_train_job(
+    request: Request,
+    payload: TrainCreateRequest,
+    settings: Settings = Depends(get_settings),
+) -> TrainCreateResponse:
+    session = get_session(request)
+    try:
+        submission = session.get(Submission, payload.submission_id) if payload.submission_id else None
+        train = TrainRun(
+            submission_id=payload.submission_id,
+            source="manual",
+            benchmark_names_json=payload.benchmark_names or [settings.train_benchmark],
+            warmstart_artifact_id=payload.warmstart_artifact_id,
+            status="queued",
+            phase="queued",
+            message="train job queued",
+        )
+        session.add(train)
+        session.flush()
+        enqueue_train_job(session, train, payload_json=payload.model_dump())
+        if submission is not None:
+            submission.latest_train_id = train.id
+            submission.updated_at = _utcnow()
+        session.commit()
+        return TrainCreateResponse(train=_train_to_schema(train), job_id=str(train.id))
     except Exception as exc:
         session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -280,15 +437,31 @@ async def github_submission_upload(
             team_name=team_name,
         )
         artifact = store_upload(file, settings, submission.id)
-        submission.artifact_name = artifact.name
-        submission.artifact_path = str(artifact.path)
-        submission.artifact_sha256 = artifact.sha256
-        submission.checkpoint_path = str(artifact.checkpoint_path) if artifact.checkpoint_path else None
-        submission.benchmark = settings.eval_benchmark
         submission.status = "queued"
         submission.latest_score = None
-        submission.best_run_id = None
-        submission.updated_at = _utcnow()
+        submission.latest_eval_id = None
+        submission.best_eval_id = None
+        artifact_row = persist_stored_artifact(
+            session,
+            artifact,
+            storage_backend=settings.artifact_storage_backend,
+            submission_id=submission.id,
+            meta_json={
+                "checkpoint_path": str(artifact.checkpoint_path) if artifact.checkpoint_path else None,
+                "extracted_root": str(artifact.extracted_root) if artifact.extracted_root else None,
+            },
+        )
+        submission.submission_artifact_id = artifact_row.id
+        if not settings.sync_eval_on_submit:
+            enqueue_submission_job(
+                session,
+                submission,
+                payload_json={
+                    "submission_id": submission.id,
+                    "benchmark_names": submission.benchmark_names_json,
+                    "source": submission.source,
+                },
+            )
         session.commit()
         return SubmissionCreateResponse(submission=_submission_to_schema(submission), evaluation=None)
     except HTTPException:
@@ -309,7 +482,11 @@ def get_submission(request: Request, submission_id: str) -> SubmissionOut:
             session.execute(
                 select(Submission)
                 .where(Submission.id == submission_id)
-                .options(selectinload(Submission.evaluations))
+                .options(
+                    selectinload(Submission.evaluations),
+                    selectinload(Submission.trains),
+                    selectinload(Submission.submission_artifact),
+                )
             )
             .scalars()
             .one()
@@ -339,23 +516,27 @@ def leaderboard(request: Request, limit: int = 100) -> LeaderboardResponse:
     try:
         stmt = (
             select(Submission)
-            .where(Submission.source == "seed")
-            .order_by(Submission.latest_score.desc().nullslast(), Submission.created_at.asc())
+            .where(
+                Submission.status == "completed",
+                Submission.latest_score.isnot(None),
+            )
+            .order_by(Submission.latest_score.desc(), Submission.created_at.asc())
             .limit(max(1, min(limit, 500)))
         )
         items = session.execute(stmt).scalars().all()
         board: list[LeaderboardEntry] = []
         for idx, submission in enumerate(items, start=1):
             metrics: dict[str, Any] = {}
-            if submission.best_run_id:
-                run = session.get(EvaluationRun, submission.best_run_id)
+            if submission.best_eval_id:
+                run = session.get(EvaluationRun, submission.best_eval_id)
                 if run and run.metrics_json:
                     metrics = json.loads(run.metrics_json)
             board.append(
                 LeaderboardEntry(
                     rank=idx,
                     submission_id=submission.id,
-                    team=submission.team_name or submission.repo_full_name or submission.id[:8],
+                    team=submission.miner_id or submission.repo_full_name or submission.id[:8],
+                    miner_id=submission.miner_id,
                     accuracy=submission.latest_score,
                     gsm8k=_metric_value(metrics, "gsm8k"),
                     mmlu=_metric_value(metrics, "mmlu"),

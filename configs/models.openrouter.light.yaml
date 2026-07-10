@@ -1,0 +1,34 @@
+# Light OpenRouter pool config for minirouter.
+# Smaller / cheaper pool for quick evals and smoke runs, still using the
+# OpenRouter OpenAI-compatible API.
+
+providers:
+  openrouter:
+    base_url: "https://openrouter.ai/api/v1"
+    api_key_env: "OPENROUTER_API_KEY"
+    timeout_s: 180
+    max_retries: 10
+    max_concurrency: 8
+    reasoning_param: "reasoning_effort"
+    extra_headers:
+      HTTP-Referer: "https://github.com/tmimmanuel/tiny-router-works"
+      X-OpenRouter-Title: "minirouter"
+
+pool:
+  - name: nemotron-3-super
+    provider: openrouter
+    id: "nvidia/nemotron-3-super-120b-a12b:free"
+  - name: gemma-4-31b
+    provider: openrouter
+    id: "google/gemma-4-31b-it:free"
+  - name: gpt-oss-120b
+    provider: openrouter
+    id: "openai/gpt-oss-120b:free"
+  - name: qwen3-coder-480b-a35b
+    provider: openrouter
+    id: "qwen/qwen3-coder:free"
+
+decoding:
+  thinker:   { temperature: 0.7, top_p: 0.95, max_tokens: 4096 }
+  worker:    { temperature: 0.2, top_p: 0.95, max_tokens: 4096 }
+  verifier:  { temperature: 0.0, top_p: 1.0,  max_tokens: 2048 }

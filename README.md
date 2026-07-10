@@ -22,7 +22,7 @@ rebuilt from scratch with an open model pool and the miner-facing competition to
 - Implemented the full coordinator: the 0.6B encoder feature, the ~10K routing head, the three roles,
   the multi-turn loop (up to 5 turns, terminated by a Verifier accept), and the sep-CMA-ES trainer.
 - Wired a 3-model open-source pool plus an automatic grader (exact-match for math, letter-match for
-  MMLU) that produces the binary reward.
+  MMLU, pass@1 code execution for LiveCodeBench) that produces the binary reward.
 - Trained per-task coordinators by evolution: breed thousands of candidate heads, keep the ones that
   route best, repeat.
 - Evaluated rigorously on 120 held-out questions, with every single-model baseline averaged over 3 runs
@@ -208,6 +208,18 @@ git push origin sn74-your-github-username
 
 Open a pull request from your branch. The validator and maintainer workflow will pick up the bundle
 from the PR, evaluate it, and record the result.
+
+## Continuous integration
+
+The CI workflow lives in `.github/workflows/ci.yml` and runs on every pull request and on push to
+`main`. It does not require any secrets or a database.
+
+- root package: `pip install -e ".[dev]"` then `pytest tests -q`
+- `validator/`: `pip install -e ".[dev]"` then `pytest -q`
+- `web/`: `npm ci`, `npm run build` (type-checks via `tsc -b`), `npm run lint`
+
+This catches a broken test suite or web build on the PR itself, instead of only after merge when
+`deploy-web.yml` runs against `main`.
 
 ## PR automation
 

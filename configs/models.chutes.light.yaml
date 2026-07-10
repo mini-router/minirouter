@@ -1,6 +1,6 @@
-# Chutes pool config for minirouter.
-# Same logical pool names as the Fireworks default, but routed through
-# Chutes' OpenAI-compatible API.
+# Light Chutes pool config for minirouter.
+# Smaller / cheaper pool for quick evals and smoke runs, still using the
+# Chutes OpenAI-compatible API.
 
 providers:
   chutes:
@@ -12,15 +12,15 @@ providers:
     reasoning_param: null
 
 pool:
-  - name: deepseek-v3p2
+  - name: minimax-m2p5
     provider: chutes
-    id: "deepseek-ai/DeepSeek-V3.2-TEE"
-  - name: glm-5
+    id: "MiniMaxAI/MiniMax-M2.5-TEE"
+  - name: gemma4-31b-turbo
     provider: chutes
-    id: "zai-org/GLM-5-TEE"
-  - name: kimi-k2p5
+    id: "google/gemma-4-31B-turbo-TEE"
+  - name: qwen3-32b
     provider: chutes
-    id: "moonshotai/Kimi-K2.5-TEE"
+    id: "Qwen/Qwen3-32B-TEE"
 
 decoding:
   thinker:   { temperature: 0.7, top_p: 0.95, max_tokens: 4096 }

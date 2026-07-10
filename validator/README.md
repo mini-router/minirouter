@@ -48,6 +48,7 @@ PYTHONPATH=src python -m trinity.eval --submission-only \
   --device cuda:0 \
   --dtype bfloat16 \
   --max-items {max_items} \
+  --batch-size {eval_batch_size} \
   --theta {checkpoint_path} \
   --out {results_path}
 ```
@@ -77,6 +78,9 @@ Run the API and the worker as separate processes. The API only stores queued
 submissions; the worker claims them and advances the progress fields.
 The submission API exposes the current phase, message, and item counters so the
 GitHub workflow can show live status while it waits.
+Set `EVAL_BATCH_SIZE` to control how many benchmark items the evaluator runs
+concurrently. The worker passes it through to both remote GPU and local fallback
+commands.
 
 Example `DATABASE_URL`:
 
