@@ -11,6 +11,7 @@ Design constraints (see docs/SPEC.md §6, §8):
 - ``load_tasks`` is deterministic given ``seed``: shuffling/truncation use a seeded
   ``random.Random`` so two calls with the same arguments return identical lists.
 - The ``answer`` field is whatever ``reward.score`` needs for that benchmark:
+    * rlpr        -> prompt metadata with source benchmark + ground-truth
     * math500 / aime  -> reference answer string (boxed-answer / last-number match)
     * mmlu / gpqa     -> the correct option LETTER ("A".."D")
     * livecodebench   -> a dict test spec {"tests": [...], "fn_name": ...}
@@ -22,6 +23,7 @@ Public API
 - ``SUPPORTED_BENCHMARKS`` (tuple[str, ...])
 
 The HuggingFace dataset ids used (when ``datasets`` + network are available):
+- rlpr          : ``openbmb/RLPR-Evaluation``
 - math500       : ``HuggingFaceH4/MATH-500`` (fallback ``qwedsacf/competition_math``)
 - mmlu          : ``cais/mmlu`` (config ``all``)
 - gpqa          : ``Idavidrein/gpqa`` (config ``gpqa_diamond``)
@@ -30,6 +32,7 @@ The HuggingFace dataset ids used (when ``datasets`` + network are available):
 from __future__ import annotations
 
 import random
+from functools import lru_cache
 from typing import Any
 
 from trinity.types import Task
@@ -37,6 +40,7 @@ from trinity.types import Task
 __all__ = ["load_tasks", "sample_minibatch", "SUPPORTED_BENCHMARKS"]
 
 SUPPORTED_BENCHMARKS: tuple[str, ...] = (
+    "rlpr",
     "math500",
     "mmlu",
     "gpqa",
@@ -45,6 +49,25 @@ SUPPORTED_BENCHMARKS: tuple[str, ...] = (
 
 # Letters used for multiple-choice option indexing (MMLU/GPQA).
 _CHOICE_LETTERS: tuple[str, ...] = ("A", "B", "C", "D", "E", "F", "G", "H")
+_RLPR_FILE_SPECS: dict[str, dict[str, str]] = {
+    "Math-500_Avg2.parquet": {"kind": "math", "data_source": "Math-500_Avg2"},
+    "Minerva_Avg4.parquet": {"kind": "math", "data_source": "Minerva_Avg4"},
+    "AIME2024_Avg16.parquet": {"kind": "math", "data_source": "AIME2024_Avg16"},
+    "MMLUPro-1000_Avg2.parquet": {"kind": "choice", "data_source": "MMLUPro-1000_Avg2"},
+    "gpqa_diamond_Avg4.parquet": {"kind": "choice", "data_source": "gpqa_diamond_Avg4"},
+    "TheoremQA_Avg2.parquet": {"kind": "math", "data_source": "TheoremQA_Avg2"},
+    "WebInstruct-verified-val_Avg2.parquet": {
+        "kind": "choice",
+        "data_source": "WebInstruct-verified-val_Avg2",
+    },
+}
+_RLPR_MATH_SOURCES: frozenset[str] = frozenset(
+    {spec["data_source"] for spec in _RLPR_FILE_SPECS.values() if spec["kind"] == "math"}
+)
+_RLPR_CHOICE_SOURCES: frozenset[str] = frozenset(
+    {spec["data_source"] for spec in _RLPR_FILE_SPECS.values() if spec["kind"] == "choice"}
+)
+_RLPR_RAW_BASE = "https://huggingface.co/datasets/openbmb/RLPR-Evaluation/resolve/main/"
 
 
 # --------------------------------------------------------------------------- #
@@ -106,9 +129,93 @@ def _row_get(row: Any, *keys: str, default: Any = None) -> Any:
     return default
 
 
+@lru_cache(maxsize=None)
+def _try_load_parquet(url: str) -> Any | None:
+    """Attempt ``datasets.load_dataset('parquet', ...)`` against a single URL."""
+    try:
+        from datasets import load_dataset  # type: ignore import-not-found
+    except Exception:
+        return None
+    try:
+        return load_dataset("parquet", data_files=[url], split="train")
+    except Exception:
+        return None
+
+
+def _render_rlpr_prompt(messages: Any) -> str:
+    """Render RLPR chat-style prompts into a flat text transcript."""
+    parts: list[str] = []
+    if isinstance(messages, list):
+        for msg in messages:
+            role = str(_row_get(msg, "role", default="")).strip().upper()
+            content = str(_row_get(msg, "content", default="")).strip()
+            if not content:
+                continue
+            if role:
+                parts.append(f"{role}: {content}")
+            else:
+                parts.append(content)
+    else:
+        text = str(messages or "").strip()
+        if text:
+            parts.append(text)
+    return "\n\n".join(parts).strip()
+
+
 # --------------------------------------------------------------------------- #
 # Per-benchmark HuggingFace parsers (return list[Task] or None on failure)
 # --------------------------------------------------------------------------- #
+def _load_rlpr_hf(split: str) -> list[Task] | None:
+    """Load the RLPR evaluation suite from the official parquet files.
+
+    The dataset is a multi-benchmark evaluation suite, so the logical ``split``
+    is ignored. Each row already carries the source benchmark in ``data_source``
+    and benchmark-specific metadata in ``extra_info`` / ``reward_model``.
+    """
+    tasks: list[Task] = []
+    for filename, spec in _RLPR_FILE_SPECS.items():
+        ds = _try_load_parquet(_RLPR_RAW_BASE + filename)
+        if ds is None:
+            continue
+        source = spec["data_source"]
+        kind = spec["kind"]
+        for i, row in enumerate(ds):
+            prompt = _render_rlpr_prompt(_row_get(row, "prompt", default=[]))
+            reward_model = _row_get(row, "reward_model", default={})
+            if not prompt or not isinstance(reward_model, dict):
+                continue
+            ground_truth = str(_row_get(reward_model, "ground_truth", default="")).strip()
+            if not ground_truth:
+                continue
+            ability = str(_row_get(row, "ability", default="")).strip()
+            extra_info = _row_get(row, "extra_info", default={})
+            uid = str(_row_get(row, "uid", default=f"{source}-{i}"))
+            tasks.append(
+                Task(
+                    task_id=uid,
+                    benchmark="rlpr",
+                    prompt=prompt,
+                    answer={
+                        "ground_truth": ground_truth,
+                        "source": source,
+                        "style": _row_get(reward_model, "style"),
+                        "ability": ability,
+                        "extra_info": extra_info,
+                    },
+                    meta={
+                        "source": "openbmb/RLPR-Evaluation",
+                        "data_source": source,
+                        "file": filename,
+                        "kind": kind,
+                        "ability": ability,
+                        "extra_info": extra_info,
+                        "uid": uid,
+                    },
+                )
+            )
+    return tasks or None
+
+
 def _load_math500_hf(split: str) -> list[Task] | None:
     """MATH-500 loader. answer = reference final answer string."""
     ds = _try_load_hf("HuggingFaceH4/MATH-500", split=split or "test")
@@ -467,12 +574,55 @@ def _toy_tasks(benchmark: str) -> list[Task]:
                 meta={"source": "toy"},
             ),
         ]
+    if benchmark == "rlpr":
+        return [
+            Task(
+                task_id="rlpr-toy-0",
+                benchmark="rlpr",
+                prompt=(
+                    "SYSTEM: A conversation between User and Assistant. The user asks a question, "
+                    "and the Assistant solves it. The assistant first thinks about the reasoning process "
+                    "in the mind and then provides the user with the answer. The reasoning process and "
+                    "answer are enclosed within <think> </think> and <answer> </answer> tags.\n\n"
+                    "USER: Convert the point (0,3) in rectangular coordinates to polar coordinates."
+                ),
+                answer={
+                    "ground_truth": r"\left( 3, \frac{\pi}{2} \right)",
+                    "source": "Math-500_Avg2",
+                    "style": "rule",
+                    "ability": "math",
+                    "extra_info": {"split": "test"},
+                },
+                meta={"source": "toy", "data_source": "Math-500_Avg2", "kind": "math"},
+            ),
+            Task(
+                task_id="rlpr-toy-1",
+                benchmark="rlpr",
+                prompt=(
+                    "SYSTEM: A conversation between User and Assistant. The user asks a question, "
+                    "and the Assistant solves it. The assistant first thinks about the reasoning process "
+                    "in the mind and then provides the user with the answer. The reasoning process and "
+                    "answer are enclosed within <think> </think> and <answer> </answer> tags.\n\n"
+                    "USER: Complete the sentence. Body temperature on the average is 98.6°F. "
+                    "What is this on the Celsius scale and the Kelvin scale?"
+                ),
+                answer={
+                    "ground_truth": "A",
+                    "source": "MMLUPro-1000_Avg2",
+                    "style": "rule",
+                    "ability": "mmlu_pro",
+                    "extra_info": {"split": None},
+                },
+                meta={"source": "toy", "data_source": "MMLUPro-1000_Avg2", "kind": "choice"},
+            ),
+        ]
     raise ValueError(
         f"Unknown benchmark {benchmark!r}. Supported: {SUPPORTED_BENCHMARKS}"
     )
 
 
 _HF_LOADERS = {
+    "rlpr": _load_rlpr_hf,
     "math500": _load_math500_hf,
     "mmlu": _load_mmlu_hf,
     "gpqa": _load_gpqa_hf,

@@ -1028,3 +1028,15 @@ Per user request (document everything + structured output):
   nondeterminism), best math (full_pilot) + best MMLU (mmlu_s1) coordinators → definitive numbers.
 - Cost ~$22 (ledger-tracked). No GPU was empty (other tenants), but evals are light (~4 GB) so they
   coexist on a shared H200.
+
+## 2026-07-10 — RLPR benchmark wiring added  #decision #repro
+
+Implemented a new `rlpr` benchmark loader/facade for the OpenBMB RLPR-Evaluation suite.
+
+- The loader reads the seven official parquet files directly from the Hugging Face dataset repo.
+- Each row is converted to a `Task` with the chat prompt flattened into text and the benchmark-specific
+  `ground_truth` stored in `Task.answer`.
+- The reward path routes RLPR items to the existing math or multiple-choice graders based on the source
+  file (`Math-500`, `Minerva`, `AIME2024`, `TheoremQA` vs `MMLUPro`, `gpqa_diamond`, `WebInstruct`).
+
+This suite is mixed-format, so the benchmark itself is the routing layer rather than a single scorer.
