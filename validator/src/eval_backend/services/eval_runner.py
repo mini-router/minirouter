@@ -87,6 +87,97 @@ _PROGRESS_DONE_RE = re.compile(
 _PROGRESS_INIT_RE = re.compile(r"^\[submission\] model initiated(?: (.+))?$")
 _PROGRESS_COMPLETE_RE = re.compile(r"^\[submission\] completed score=([0-9.]+)")
 
+_COST_PRICES: dict[str, tuple[float, float]] = {
+    "fireworks:accounts/fireworks/models/deepseek-v4-pro": (1.74, 3.48),
+    "fireworks:accounts/fireworks/models/glm-5p2": (1.40, 4.40),
+    "fireworks:accounts/fireworks/models/kimi-k2p6": (0.95, 4.00),
+    "openrouter:nvidia/nemotron-3-super-120b-a12b:free": (0.0, 0.0),
+    "openrouter:google/gemma-4-31b-it:free": (0.0, 0.0),
+    "openrouter:openai/gpt-oss-120b:free": (0.0, 0.0),
+    "openrouter:qwen/qwen3-coder:free": (0.0, 0.0),
+    "chutes:deepseek-ai/DeepSeek-V3.2-TEE": (1.00, 1.00),
+    "chutes:zai-org/GLM-5-TEE": (1.40, 4.40),
+    "chutes:moonshotai/Kimi-K2.5-TEE": (0.66, 3.50),
+    "chutes:MiniMaxAI/MiniMax-M2.5-TEE": (0.15, 1.20),
+    "chutes:google/gemma-4-31B-turbo-TEE": (0.12, 0.37),
+    "chutes:Qwen/Qwen3-32B-TEE": (0.10, 0.42),
+}
+
+
+def _cost_key(provider: str, model: str) -> str:
+    return f"{provider}:{model}"
+
+
+def _ledger_cost_report(ledger_path: Path) -> dict[str, Any]:
+    if not ledger_path.exists():
+        return {
+            "cost_usd": 0.0,
+            "cost_missing": True,
+            "cost_ledger": str(ledger_path),
+        }
+
+    per_model: dict[str, dict[str, float | int]] = {}
+    total = 0.0
+    prompt_tokens = 0
+    completion_tokens = 0
+    calls = 0
+    with ledger_path.open("r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            provider = str(row.get("provider", "")).strip()
+            model = str(row.get("m", "")).strip()
+            pt = int(row.get("p", 0) or 0)
+            ct = int(row.get("c", 0) or 0)
+            pin, pout = _COST_PRICES.get(_cost_key(provider, model), (0.0, 0.0))
+            usd = pt / 1e6 * pin + ct / 1e6 * pout
+            total += usd
+            prompt_tokens += pt
+            completion_tokens += ct
+            calls += 1
+            bucket = per_model.setdefault(
+                _cost_key(provider, model),
+                {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0, "usd": 0.0},
+            )
+            bucket["prompt_tokens"] = int(bucket["prompt_tokens"]) + pt
+            bucket["completion_tokens"] = int(bucket["completion_tokens"]) + ct
+            bucket["calls"] = int(bucket["calls"]) + 1
+            bucket["usd"] = float(bucket["usd"]) + usd
+
+    return {
+        "cost_usd": round(total, 4),
+        "cost_missing": False,
+        "cost_ledger": str(ledger_path),
+        "cost_calls": calls,
+        "cost_prompt_tokens": prompt_tokens,
+        "cost_completion_tokens": completion_tokens,
+        "cost_per_model": {
+            key: {
+                "prompt_tokens": int(row["prompt_tokens"]),
+                "completion_tokens": int(row["completion_tokens"]),
+                "calls": int(row["calls"]),
+                "usd": round(float(row["usd"]), 4),
+            }
+            for key, row in sorted(per_model.items())
+        },
+    }
+
+
+def _attach_runtime_metrics(metrics: dict[str, Any], *, run: EvaluationRun, ledger_path: Path) -> dict[str, Any]:
+    out = dict(metrics)
+    if run.started_at and run.finished_at:
+        out["duration_seconds"] = round(
+            max(0.0, (run.finished_at - run.started_at).total_seconds()),
+            2,
+        )
+    out.update(_ledger_cost_report(ledger_path))
+    return out
+
 
 def _touch_progress(
     session: Session,
@@ -267,6 +358,7 @@ def _format_command(
     provider: str,
     models_config: str,
     max_items: int,
+    eval_batch_size: int,
 ) -> str:
     return template.format(
         repo_dir=str(repo_dir),
@@ -278,6 +370,7 @@ def _format_command(
         provider=provider,
         models_config=models_config,
         max_items=max_items,
+        eval_batch_size=eval_batch_size,
     )
 
 
@@ -343,6 +436,7 @@ def _build_remote_command(
     settings: Settings,
     checkpoint_path: Path,
     results_path: Path,
+    ledger_path: Path,
     workspace: Path,
 ) -> str:
     repo_dir = Path(settings.trinity_remote_dir).expanduser()
@@ -356,8 +450,11 @@ def _build_remote_command(
         provider=settings.eval_provider,
         models_config=settings.eval_models_config,
         max_items=settings.eval_max_items,
+        eval_batch_size=settings.eval_batch_size,
     )
     return (
+        f"mkdir -p {shlex.quote(str(ledger_path.parent))} && : > {shlex.quote(str(ledger_path))} && "
+        f"export TRINITY_COST_LEDGER={shlex.quote(str(ledger_path))}; "
         f"export TRINITY_REMOTE_DIR={shlex.quote(str(repo_dir))}; "
         f"export TRINITY_GPU_INDEX={shlex.quote(str(getattr(settings, 'trinity_gpu_index', 5)))}; "
         f"cd {shlex.quote(str(repo_dir))} && "
@@ -371,6 +468,7 @@ def _build_local_command(
     settings: Settings,
     checkpoint_path: Path,
     results_path: Path,
+    ledger_path: Path,
     workspace: Path,
 ) -> str:
     repo_dir = Path(settings.local_repo_dir).expanduser().resolve()
@@ -384,14 +482,20 @@ def _build_local_command(
         provider=settings.eval_provider,
         models_config=settings.eval_models_config,
         max_items=settings.eval_max_items,
+        eval_batch_size=settings.eval_batch_size,
     )
-    return f"cd {shlex.quote(str(repo_dir))} && source .venv/bin/activate && {formatted}"
+    return (
+        f"mkdir -p {shlex.quote(str(ledger_path.parent))} && : > {shlex.quote(str(ledger_path))} && "
+        f"export TRINITY_COST_LEDGER={shlex.quote(str(ledger_path))}; "
+        f"cd {shlex.quote(str(repo_dir))} && source .venv/bin/activate && {formatted}"
+    )
 
 
 def _remote_attempt(
     settings: Settings,
     checkpoint_path: Path,
     local_results_path: Path,
+    local_ledger_path: Path,
     submission_id: str,
     env: dict[str, str],
     *,
@@ -401,8 +505,15 @@ def _remote_attempt(
     remote_workspace = _remote_workspace(settings, submission_id)
     remote_checkpoint = remote_workspace / checkpoint_path.name
     remote_results = remote_workspace / local_results_path.name
+    remote_ledger = remote_workspace / local_ledger_path.name
 
-    remote_command = _build_remote_command(settings, remote_checkpoint, remote_results, remote_workspace)
+    remote_command = _build_remote_command(
+        settings,
+        remote_checkpoint,
+        remote_results,
+        remote_ledger,
+        remote_workspace,
+    )
     subprocess.run(["ssh", host, "mkdir", "-p", _remote_path(remote_workspace)], check=True)
     subprocess.run(["rsync", "-az", str(checkpoint_path), f"{host}:{_remote_path(remote_checkpoint)}"], check=True)
     master_fd, slave_fd = pty.openpty()
@@ -471,12 +582,19 @@ def _local_attempt(
     settings: Settings,
     checkpoint_path: Path,
     local_results_path: Path,
+    local_ledger_path: Path,
     submission_id: str,
     env: dict[str, str],
 ) -> tuple[str, int, str, str]:
     local_workspace = _local_workspace(settings, submission_id)
     local_workspace.mkdir(parents=True, exist_ok=True)
-    local_command = _build_local_command(settings, checkpoint_path, local_results_path, local_workspace)
+    local_command = _build_local_command(
+        settings,
+        checkpoint_path,
+        local_results_path,
+        local_ledger_path,
+        local_workspace,
+    )
     rc, out, err = _run_bash_stream(
         local_command,
         cwd=Path(settings.local_repo_dir).expanduser().resolve(),
@@ -499,6 +617,7 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
     local_workspace = _local_workspace(settings, submission.id)
     local_workspace.mkdir(parents=True, exist_ok=True)
     local_results_path = local_workspace / "results.json"
+    local_cost_ledger_path = local_workspace / "cost_ledger.jsonl"
 
     run = EvaluationRun(
         submission_id=submission.id,
@@ -524,13 +643,21 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
         run.message = error
         run.error = error
         run.finished_at = _utcnow()
-        run.metrics_json = json.dumps({"missing_checkpoint": True}, ensure_ascii=False, sort_keys=True)
+        run.metrics_json = json.dumps(
+            _attach_runtime_metrics(
+                {"missing_checkpoint": True},
+                run=run,
+                ledger_path=local_cost_ledger_path,
+            ),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
         submission.status = "failed"
         session.flush()
         return EvaluationResult(
             run=run,
             score=None,
-            metrics={"missing_checkpoint": True},
+            metrics=json.loads(run.metrics_json),
             stdout="",
             stderr=error,
         )
@@ -541,6 +668,8 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
     env["TRINITY_SECRETS_FILE"] = settings.trinity_secrets_file
     env["EVAL_BENCHMARK"] = settings.eval_benchmark
     env["EVAL_MAX_ITEMS"] = str(settings.eval_max_items)
+    env["EVAL_BATCH_SIZE"] = str(settings.eval_batch_size)
+    env["TRINITY_COST_LEDGER"] = str(local_cost_ledger_path.resolve())
     env["CHECKPOINT_PATH"] = str(checkpoint_path)
     env["RESULTS_PATH"] = str(local_results_path.resolve())
     env["WORKSPACE_ROOT"] = str(settings.workspace_root.expanduser().resolve())
@@ -569,6 +698,7 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
                 settings,
                 checkpoint_path,
                 local_results_path,
+                local_cost_ledger_path,
                 submission.id,
                 env,
                 on_line=lambda line: _consume_progress_line(line, session, run, submission),
@@ -593,12 +723,16 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
         run.finished_at = _utcnow()
         run.command = " || ".join(attempts) if attempts else ""
         run.metrics_json = json.dumps(
-            {
-                "results_missing": True,
-                "execution_mode": "remote_gpu",
-                "local_fallback": False,
-                "remote_error": remote_error,
-            },
+            _attach_runtime_metrics(
+                {
+                    "results_missing": True,
+                    "execution_mode": "remote_gpu",
+                    "local_fallback": False,
+                    "remote_error": remote_error,
+                },
+                run=run,
+                ledger_path=local_cost_ledger_path,
+            ),
             ensure_ascii=False,
             sort_keys=True,
         )
@@ -607,12 +741,7 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
         return EvaluationResult(
             run=run,
             score=None,
-            metrics={
-                "results_missing": True,
-                "execution_mode": "remote_gpu",
-                "local_fallback": False,
-                "remote_error": remote_error,
-            },
+            metrics=json.loads(run.metrics_json),
             stdout=stdout,
             stderr=stderr,
         )
@@ -636,6 +765,7 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
                 settings,
                 checkpoint_path,
                 local_results_path,
+                local_cost_ledger_path,
                 submission.id,
                 env,
             )
@@ -655,12 +785,16 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
             run.stderr = stderr
             run.finished_at = _utcnow()
             run.metrics_json = json.dumps(
-                {
-                    "results_missing": True,
-                    "execution_mode": execution_mode,
-                    "local_fallback": bool(remote_error),
-                    "remote_error": remote_error,
-                },
+                _attach_runtime_metrics(
+                    {
+                        "results_missing": True,
+                        "execution_mode": execution_mode,
+                        "local_fallback": bool(remote_error),
+                        "remote_error": remote_error,
+                    },
+                    run=run,
+                    ledger_path=local_cost_ledger_path,
+                ),
                 ensure_ascii=False,
                 sort_keys=True,
             )
@@ -669,21 +803,22 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
             return EvaluationResult(
                 run=run,
                 score=None,
-                metrics={
-                    "results_missing": True,
-                    "execution_mode": execution_mode,
-                    "local_fallback": bool(remote_error),
-                    "remote_error": remote_error,
-                },
+                metrics=json.loads(run.metrics_json),
                 stdout=stdout,
                 stderr=stderr,
             )
+
+    run.status = "completed"
+    run.phase = "completed"
+    run.finished_at = _utcnow()
+    run.command = " || ".join(attempts) if attempts else ""
 
     metrics, score = _prepare_results(local_results_path, settings=settings)
     metrics["execution_mode"] = execution_mode
     metrics["local_fallback"] = bool(remote_error)
     if remote_error:
         metrics["remote_error"] = remote_error
+    metrics = _attach_runtime_metrics(metrics, run=run, ledger_path=local_cost_ledger_path)
     if _is_missing_results_payload(metrics):
         error = "evaluation did not produce results.json"
         run.status = "failed"
@@ -704,8 +839,6 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
         session.flush()
         return EvaluationResult(run=run, score=None, metrics=metrics, stdout=stdout, stderr=stderr)
 
-    run.status = "completed"
-    run.phase = "completed"
     if score is not None and remote_error:
         run.message = f"completed with local fallback score={score:.4f}"
     elif score is not None:
@@ -715,11 +848,10 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
     else:
         run.message = "completed"
     run.score = score
-    run.metrics_json = json.dumps(metrics, ensure_ascii=False, sort_keys=True)
     run.stdout = stdout
     run.stderr = stderr
-    run.finished_at = _utcnow()
-    run.command = " || ".join(attempts) if attempts else ""
+    run.metrics_json = json.dumps(metrics, ensure_ascii=False, sort_keys=True)
+
     submission.status = "completed"
     submission.latest_score = score
     submission.best_run_id = run.id

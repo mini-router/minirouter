@@ -36,6 +36,36 @@ entries fail closed as misses so the hot path never raises. 10 offline tests, in
 end-to-end assertion that a seeded hit short-circuits the network.
 **Follow-up:** enabling the cache makes `temperature>0` requests deterministic across runs
 (intended for cost/repro) — keep it OFF during sampling-noise studies that need fresh draws.
+## 2026-07-09 — Submission eval now batches benchmark items + host alias fixed  #fix #perf #validator
+**Context:** validator submission eval was still processing benchmark items one by one, and the remote
+GPU host field used by the worker did not match the config dataclass.
+**Expected:** operators should be able to tune concurrent benchmark-item evaluation with `--batch-size`
+or `EVAL_BATCH_SIZE`, and the worker should resolve the remote host from the configured settings.
+**Actual:** `trinity.eval` ran each item sequentially, which made Chutes/OpenRouter smoke tests slow; the
+worker also referenced `settings.trinity_gpu_host` even though the config exposed `trinity_remote_host`.
+**Root cause:** task-level concurrency had never been wired into the eval entrypoint, and the config field
+name drifted between the settings loader and the runner.
+**Fix / decision:** evaluate benchmark items in bounded async batches, expose the knob in the CLI and the
+worker env/template, add a compatibility alias for the host setting, and keep the default batch size
+conservative so operators can opt up explicitly.
+**Follow-up:** none.
+
+## 2026-07-09 — LiveCodeBench benchmark facade and regression tests added  #decision #repro
+**Context:** the core dataset loader and reward checker already handled LiveCodeBench, but the repo
+still only exposed a stub benchmark package and the high-level README did not describe the code
+benchmark path.
+**Expected:** the config-facing benchmark registry should have a concrete LiveCodeBench module, and
+the behavior should be covered by offline tests.
+**Actual:** `benchmarks/livecodebench.py` did not exist, so `configs/benchmarks.yaml` pointed at a
+module name with no implementation.
+**Root cause:** the internal loader/scorer landed before the public benchmark facade.
+**Fix / decision:** add `benchmarks/livecodebench.py` as a thin wrapper around
+`trinity.orchestration.dataset.load_tasks("livecodebench", ...)`, add tests for facade delegation,
+HF row parsing, and pass@1 scoring, and update the README to call out LiveCodeBench explicitly in the
+automatic grader description.
+**Follow-up:** if we later wire `configs/benchmarks.yaml` into a runtime loader, the module is now in
+place.
+
 ## 2026-07-09 — role prompt assembly unit tests  #decision #repro
 **Context:** ``roles/prompts.py`` implements SPEC §4.4 system contracts and the
 ``render_transcript`` / ``build_messages`` helpers used by the inner loop, but had
@@ -46,6 +76,7 @@ and role-specific system prompts cannot drift silently.
 **Root cause:** small pure-string module shipped without pytest coverage.
 **Fix / decision:** add offline tests for empty/single/multi-turn transcript rendering,
 verifier verdict surfacing, and OpenAI-style message layout per role.
+
 ## 2026-07-09 — async batch gather unit tests  #decision #repro
 **Context:** ``orchestration/async_utils.gather_in_batches`` bounds fan-out for large
 benchmark sweeps but had no dedicated offline tests.
@@ -155,8 +186,6 @@ made it fail-safe — a missing/empty choice (or missing `message`) yields an em
 (`text=""`, `finish_reason="error"`) while still accounting `usage`, mirroring the null-`content`
 handling. Added `tests/test_pool_parse.py` (7 cases). Scoped to the parsing path only (not the imports)
 so it stays independent of the separate `import sys` --selftest fix (#25).
-**Follow-up:** none — self-contained client-robustness fix.
-
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
 fell back to local CPU and still reported completion.

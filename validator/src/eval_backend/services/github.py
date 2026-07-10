@@ -100,7 +100,24 @@ def create_pr_submission(
 
 def _format_metrics_table(metrics: dict[str, Any]) -> str:
     rows: list[str] = []
-    priority_keys = ["accuracy", "score", "overall", "macro_avg", "gsm8k", "mmlu", "math", "humaneval", "bbh", "params"]
+    priority_keys = [
+        "accuracy",
+        "score",
+        "overall",
+        "macro_avg",
+        "gsm8k",
+        "mmlu",
+        "math",
+        "humaneval",
+        "bbh",
+        "params",
+        "duration_seconds",
+        "cost_usd",
+        "cost_calls",
+        "cost_prompt_tokens",
+        "cost_completion_tokens",
+        "cost_missing",
+    ]
     seen: set[str] = set()
 
     def add_row(key: str, value: Any) -> None:
@@ -109,6 +126,10 @@ def _format_metrics_table(metrics: dict[str, Any]) -> str:
         if isinstance(value, (int, float)):
             if key in {"accuracy", "score", "overall", "macro_avg", "gsm8k", "mmlu", "math", "humaneval", "bbh"}:
                 display = f"{value:.4f} ({value * 100:.2f}%)"
+            elif key == "duration_seconds":
+                display = f"{value:.2f}s"
+            elif key == "cost_usd":
+                display = f"${value:.4f}"
             elif key == "params":
                 display = f"{int(value):,}"
             else:
