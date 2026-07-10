@@ -33,16 +33,42 @@ def ensure_schema(engine) -> None:
     # Minimal, Postgres-only schema upgrades for the running validator.
     with engine.begin() as conn:
         conn.exec_driver_sql(
-            "ALTER TABLE evaluation_runs ADD COLUMN IF NOT EXISTS phase VARCHAR(64)"
+            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS miner_id VARCHAR(255)"
         )
         conn.exec_driver_sql(
-            "ALTER TABLE evaluation_runs ADD COLUMN IF NOT EXISTS message TEXT"
+            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS benchmark_names_json JSON"
         )
         conn.exec_driver_sql(
-            "ALTER TABLE evaluation_runs ADD COLUMN IF NOT EXISTS progress_current INTEGER"
+            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS submission_artifact_id VARCHAR(36)"
         )
         conn.exec_driver_sql(
-            "ALTER TABLE evaluation_runs ADD COLUMN IF NOT EXISTS progress_total INTEGER"
+            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS latest_train_id INTEGER"
+        )
+        conn.exec_driver_sql(
+            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS latest_eval_id INTEGER"
+        )
+        conn.exec_driver_sql(
+            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS best_eval_id INTEGER"
+        )
+        conn.exec_driver_sql(
+            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ"
+        )
+        conn.exec_driver_sql(
+            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS duration_seconds DOUBLE PRECISION"
+        )
+        conn.exec_driver_sql("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS cost_usd DOUBLE PRECISION")
+        conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN artifact_name DROP NOT NULL")
+        conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN artifact_path DROP NOT NULL")
+        conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN artifact_sha256 DROP NOT NULL")
+        conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN checkpoint_path DROP NOT NULL")
+        conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN benchmark DROP NOT NULL")
+        conn.exec_driver_sql(
+            "UPDATE submissions SET miner_id = COALESCE(miner_id, team_name) "
+            "WHERE miner_id IS NULL AND team_name IS NOT NULL"
+        )
+        conn.exec_driver_sql(
+            "UPDATE submissions SET benchmark_names_json = COALESCE(benchmark_names_json, json_build_array(benchmark)) "
+            "WHERE benchmark_names_json IS NULL AND benchmark IS NOT NULL"
         )
 
 
