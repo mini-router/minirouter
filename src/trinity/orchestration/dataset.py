@@ -11,6 +11,7 @@ Design constraints (see docs/SPEC.md §6, §8):
 - ``load_tasks`` is deterministic given ``seed``: shuffling/truncation use a seeded
   ``random.Random`` so two calls with the same arguments return identical lists.
 - The ``answer`` field is whatever ``reward.score`` needs for that benchmark:
+    * bfcl          -> a JSON-serializable ground-truth function-call schema
     * math500 / aime  -> reference answer string (boxed-answer / last-number match)
     * mmlu / gpqa     -> the correct option LETTER ("A".."D")
     * livecodebench   -> a dict test spec {"tests": [...], "fn_name": ...}
@@ -22,6 +23,7 @@ Public API
 - ``SUPPORTED_BENCHMARKS`` (tuple[str, ...])
 
 The HuggingFace dataset ids used (when ``datasets`` + network are available):
+- bfcl          : BFCL v4 JSON files from the official Gorilla repository
 - math500       : ``HuggingFaceH4/MATH-500`` (fallback ``qwedsacf/competition_math``)
 - mmlu          : ``cais/mmlu`` (config ``all``)
 - gpqa          : ``Idavidrein/gpqa`` (config ``gpqa_diamond``)
@@ -29,7 +31,10 @@ The HuggingFace dataset ids used (when ``datasets`` + network are available):
 """
 from __future__ import annotations
 
+import json
 import random
+import urllib.request
+from functools import lru_cache
 from typing import Any
 
 from trinity.types import Task
@@ -37,6 +42,7 @@ from trinity.types import Task
 __all__ = ["load_tasks", "sample_minibatch", "SUPPORTED_BENCHMARKS"]
 
 SUPPORTED_BENCHMARKS: tuple[str, ...] = (
+    "bfcl",
     "math500",
     "mmlu",
     "gpqa",
@@ -45,6 +51,22 @@ SUPPORTED_BENCHMARKS: tuple[str, ...] = (
 
 # Letters used for multiple-choice option indexing (MMLU/GPQA).
 _CHOICE_LETTERS: tuple[str, ...] = ("A", "B", "C", "D", "E", "F", "G", "H")
+
+_BFCL_SUPPORTED_FILES: tuple[str, ...] = (
+    "BFCL_v4_simple_python.json",
+    "BFCL_v4_simple_javascript.json",
+    "BFCL_v4_simple_java.json",
+    "BFCL_v4_multiple.json",
+    "BFCL_v4_parallel.json",
+    "BFCL_v4_parallel_multiple.json",
+    "BFCL_v4_live_simple.json",
+    "BFCL_v4_live_multiple.json",
+    "BFCL_v4_live_parallel.json",
+    "BFCL_v4_live_parallel_multiple.json",
+)
+_BFCL_FILE_TO_CATEGORY: dict[str, str] = {
+    name: name.removeprefix("BFCL_v4_").removesuffix(".json") for name in _BFCL_SUPPORTED_FILES
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -104,6 +126,138 @@ def _row_get(row: Any, *keys: str, default: Any = None) -> Any:
             # Non-mapping row; give up.
             break
     return default
+
+
+@lru_cache(maxsize=None)
+def _fetch_jsonl_rows(url: str) -> list[dict[str, Any]] | None:
+    """Fetch a JSONL file from ``url`` and return parsed rows, or ``None``.
+
+    BFCL's official repository stores question files and possible-answer files as
+    JSONL blobs in GitHub raw URLs, so we fetch them directly instead of relying
+    on ``datasets.load_dataset``.
+    """
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            text = response.read().decode("utf-8")
+    except Exception:
+        return None
+
+    rows: list[dict[str, Any]] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except Exception:
+            return None
+        if isinstance(item, dict):
+            rows.append(item)
+    return rows or None
+
+
+def _bfcl_categories_for_split(split: str) -> list[str]:
+    s = (split or "").strip().lower()
+    if s in {"simple", "single", "single_turn"}:
+        return [
+            "BFCL_v4_simple_python.json",
+            "BFCL_v4_simple_javascript.json",
+            "BFCL_v4_simple_java.json",
+        ]
+    if s in {"live"}:
+        return [
+            "BFCL_v4_live_simple.json",
+            "BFCL_v4_live_multiple.json",
+            "BFCL_v4_live_parallel.json",
+            "BFCL_v4_live_parallel_multiple.json",
+        ]
+    # Default: the single-turn BFCL v4 suite that is fully comparable as one-shot
+    # function-call output.
+    return list(_BFCL_SUPPORTED_FILES)
+
+
+def _extract_bfcl_question(row: Any) -> str:
+    """Extract the first user message from a BFCL question row."""
+    question = _row_get(row, "question", default=[])
+    try:
+        # BFCL stores the question as [[{"role": "user", "content": "..."}], ...]
+        messages = question[0]
+        for msg in messages:
+            if _row_get(msg, "role", default="") == "user":
+                content = _row_get(msg, "content", default="")
+                if content:
+                    return str(content)
+    except Exception:
+        pass
+    return str(_row_get(row, "prompt", "question_text", default="")).strip()
+
+
+def _format_bfcl_prompt(question: str, functions: list[dict[str, Any]], category: str) -> str:
+    """Render a BFCL question into a compact function-call prompt."""
+    lines = [
+        "You are a function-calling assistant.",
+        "Return the best function call(s) as JSON only.",
+        f"Category: {category}",
+        "",
+        "User request:",
+        question.strip(),
+        "",
+        "Available functions:",
+        json.dumps(functions, indent=2, ensure_ascii=False),
+        "",
+        "Return a JSON object or array of objects with keys `name` and `arguments`.",
+    ]
+    return "\n".join(lines)
+
+
+def _load_bfcl_hf(split: str) -> list[Task] | None:
+    """Load the official BFCL v4 single-turn JSONL files from GitHub raw URLs."""
+    files = _bfcl_categories_for_split(split)
+    tasks: list[Task] = []
+    for filename in files:
+        category = _BFCL_FILE_TO_CATEGORY.get(filename, filename)
+        question_url = (
+            "https://raw.githubusercontent.com/ShishirPatil/gorilla/main/"
+            f"berkeley-function-call-leaderboard/bfcl_eval/data/{filename}"
+        )
+        answer_url = (
+            "https://raw.githubusercontent.com/ShishirPatil/gorilla/main/"
+            f"berkeley-function-call-leaderboard/bfcl_eval/data/possible_answer/{filename}"
+        )
+        questions = _fetch_jsonl_rows(question_url)
+        answers = _fetch_jsonl_rows(answer_url)
+        if not questions or not answers:
+            continue
+
+        answer_by_id = {str(row.get("id", "")): row for row in answers if row.get("id")}
+        for i, row in enumerate(questions):
+            row_id = str(row.get("id", f"{category}-{i}"))
+            gold = answer_by_id.get(row_id)
+            if gold is None:
+                continue
+            question = _extract_bfcl_question(row)
+            functions = list(_row_get(row, "function", default=[]))
+            ground_truth = gold.get("ground_truth", [])
+            tasks.append(
+                Task(
+                    task_id=row_id,
+                    benchmark="bfcl",
+                    prompt=_format_bfcl_prompt(question, functions, category),
+                    answer={
+                        "ground_truth": ground_truth,
+                        "category": category,
+                        "functions": functions,
+                        "question": question,
+                        "source": "ShishirPatil/gorilla",
+                    },
+                    meta={
+                        "source": "ShishirPatil/gorilla",
+                        "category": category,
+                        "file": filename,
+                    },
+                )
+            )
+    return tasks or None
 
 
 # --------------------------------------------------------------------------- #
@@ -467,12 +621,45 @@ def _toy_tasks(benchmark: str) -> list[Task]:
                 meta={"source": "toy"},
             ),
         ]
+    if benchmark == "bfcl":
+        return [
+            Task(
+                task_id="bfcl-toy-0",
+                benchmark="bfcl",
+                prompt=(
+                    "You can use calculate_triangle_area(base, height, unit) to "
+                    "compute triangle area. Return only the JSON function call."
+                ),
+                answer={
+                    "ground_truth": [
+                        {
+                            "calculate_triangle_area": {
+                                "base": [10],
+                                "height": [5],
+                                "unit": ["units", ""],
+                            }
+                        }
+                    ],
+                    "category": "simple_python",
+                    "functions": [
+                        {
+                            "name": "calculate_triangle_area",
+                            "description": "Calculate the area of a triangle given its base and height.",
+                        }
+                    ],
+                    "question": "Find the area of a triangle with a base of 10 units and height of 5 units.",
+                    "source": "toy",
+                },
+                meta={"source": "toy", "category": "simple_python"},
+            )
+        ]
     raise ValueError(
         f"Unknown benchmark {benchmark!r}. Supported: {SUPPORTED_BENCHMARKS}"
     )
 
 
 _HF_LOADERS = {
+    "bfcl": _load_bfcl_hf,
     "math500": _load_math500_hf,
     "mmlu": _load_mmlu_hf,
     "gpqa": _load_gpqa_hf,

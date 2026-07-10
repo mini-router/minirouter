@@ -38,6 +38,10 @@ ood:
     loader: "benchmarks.domain_knowledge"
     split: "test"
     metric: "accuracy"
+  - name: bfcl
+    loader: "benchmarks.bfcl"
+    split: "test"
+    metric: "accuracy"
 
 evaluation:
   seeds: [0]

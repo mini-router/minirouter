@@ -1028,3 +1028,11 @@ Per user request (document everything + structured output):
   nondeterminism), best math (full_pilot) + best MMLU (mmlu_s1) coordinators → definitive numbers.
 - Cost ~$22 (ledger-tracked). No GPU was empty (other tenants), but evals are light (~4 GB) so they
   coexist on a shared H200.
+
+## 2026-07-10 — BFCL benchmark wiring added  #decision #repro
+
+Implemented a new `bfcl` benchmark loader/facade:
+- BFCL loads the official v4 JSONL question/answer files directly from the Gorilla repo raw URLs.
+- Reward support is now routed through `trinity.orchestration.reward.score_text` for BFCL.
+
+Scoring is exact JSON function-call matching against the official ground-truth schema.
