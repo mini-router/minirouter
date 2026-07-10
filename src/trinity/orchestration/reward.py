@@ -7,7 +7,7 @@ correct?", dispatched on ``Trajectory.task.benchmark``.
 
 Supported benchmarks
 --------------------
-* ``math500`` / ``aime``
+* ``math500`` / ``aime`` / ``gsm8k``
     Extract a ``\\boxed{...}`` answer (else the last number) from the final
     answer, normalize, and compare to ``task.answer``. Symbolic equality via
     ``sympy`` when importable, otherwise a numeric/string fallback.
@@ -15,10 +15,14 @@ Supported benchmarks
     Extract a single multiple-choice letter ``A-D`` (robust to phrasings such
     as ``"the answer is (B)"``, ``"B)"``, ``"B."``) and compare to
     ``task.answer``.
-* ``livecodebench`` / ``bigcodebench``
+* ``livecodebench`` / ``bigcodebench`` / ``humaneval``
     Execute candidate code against the task's tests in a subprocess sandbox
     with a timeout (``run_pass_at_1``). Never ``exec`` untrusted code in
     process.
+* ``bbh``
+    Extract the trailing ``"Answer: ..."`` line, then compare either as a
+    ``"(X)"`` multiple-choice letter or as normalized free-form text,
+    depending on the shape of the gold target (see ``_check_bbh``).
 
 Design contract
 ---------------
@@ -53,19 +57,25 @@ __all__ = [
     "math_equal",
     "extract_choice_letter",
     "extract_code",
+    "extract_bbh_answer",
     "run_pass_at_1",
     "MATH_BENCHMARKS",
     "CHOICE_BENCHMARKS",
     "CODE_BENCHMARKS",
+    "TEXT_BENCHMARKS",
 ]
 
 # Benchmark routing tables. Keys are matched case-insensitively against
 # ``Task.benchmark`` (which the dataset loaders set, e.g. "math500").
-MATH_BENCHMARKS: frozenset[str] = frozenset({"math500", "math", "aime", "aime2025"})
+MATH_BENCHMARKS: frozenset[str] = frozenset({"math500", "math", "aime", "aime2025", "gsm8k"})
 CHOICE_BENCHMARKS: frozenset[str] = frozenset({"mmlu", "gpqa", "gpqa-diamond", "gpqa_diamond"})
 CODE_BENCHMARKS: frozenset[str] = frozenset(
-    {"livecodebench", "lcb", "bigcodebench", "bigcode"}
+    {"livecodebench", "lcb", "bigcodebench", "bigcode", "humaneval"}
 )
+# Free-form / mixed-choice text benchmarks (BIG-Bench Hard): graded by
+# extracting a trailing "Answer: ..." line and comparing either as a "(X)"
+# multiple-choice letter or normalized free text (see _check_bbh).
+TEXT_BENCHMARKS: frozenset[str] = frozenset({"bbh"})
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +158,8 @@ def has_answer(benchmark: str, text: str) -> bool:
         return extract_boxed(text) is not None or extract_last_number(text) is not None
     if key in CODE_BENCHMARKS:
         return "```" in text or "def " in text or "import " in text
+    if key in TEXT_BENCHMARKS:
+        return extract_bbh_answer(text) is not None
     return False
 
 
@@ -178,6 +190,8 @@ def score_text(benchmark: str, candidate: str, reference: object) -> float:
         return 1.0 if _check_choice(candidate, reference) else 0.0
     if key in CODE_BENCHMARKS:
         return 1.0 if _check_code(candidate, reference) else 0.0
+    if key in TEXT_BENCHMARKS:
+        return 1.0 if _check_bbh(candidate, reference) else 0.0
     raise ValueError(
         f"Unknown benchmark {benchmark!r}. "
         f"Known: math={sorted(MATH_BENCHMARKS)}, "
@@ -510,6 +524,72 @@ def _normalize_reference_letter(reference: object) -> str | None:
             return "ABCD"[reference]
         return None
     return None
+
+
+# ---------------------------------------------------------------------------
+# Text / mixed-choice: BIG-Bench Hard
+# ---------------------------------------------------------------------------
+_BBH_ANSWER_LINE_RE = re.compile(r"answer\s*:\s*(.+)", re.I)
+_BBH_CHOICE_RE = re.compile(r"^\(([A-Za-z])\)$")
+_BBH_CHOICE_ANYWHERE_RE = re.compile(r"\(([A-Za-z])\)")
+
+
+def extract_bbh_answer(text: str) -> str | None:
+    """Extract the model's final BBH answer.
+
+    BBH prompts (``dataset._format_bbh_prompt``) ask for a trailing
+    ``"Answer: <answer>"`` line. Prefer the LAST such line (in case the model
+    restates the format while reasoning); fall back to the last non-empty line
+    verbatim if no explicit ``Answer:`` marker is present.
+
+    Args:
+        text: Arbitrary model output.
+
+    Returns:
+        The extracted answer text (stripped), or ``None`` if ``text`` is empty.
+    """
+    if not text:
+        return None
+    matches = _BBH_ANSWER_LINE_RE.findall(text)
+    if matches:
+        return matches[-1].strip()
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    return lines[-1] if lines else None
+
+
+def _check_bbh(candidate: str, reference: object) -> bool:
+    """True iff the extracted BBH answer matches the (normalized) gold target.
+
+    BBH gold targets come in two shapes: a ``"(X)"`` multiple-choice letter
+    (the lettered options are already embedded in the question text for those
+    subtasks) or free-form text (a word, phrase, "True"/"False", etc.).
+    Choice-shaped targets are compared by letter, case-insensitively and
+    tolerant of the model repeating the option text alongside the letter;
+    everything else falls back to whitespace/punctuation-normalized exact
+    match.
+    """
+    ref = reference if isinstance(reference, str) else _ref_to_str(reference)
+    ref = ref.strip()
+    extracted = extract_bbh_answer(candidate)
+    if extracted is None or not ref:
+        return False
+
+    ref_choice = _BBH_CHOICE_RE.match(ref)
+    if ref_choice:
+        letter = ref_choice.group(1).upper()
+        found = _BBH_CHOICE_ANYWHERE_RE.search(extracted)
+        if found:
+            return found.group(1).upper() == letter
+        bare = re.fullmatch(r"[A-Za-z]", extracted.strip())
+        return bare is not None and bare.group(0).upper() == letter
+
+    return _normalize_bbh_text(extracted) == _normalize_bbh_text(ref)
+
+
+def _normalize_bbh_text(s: str) -> str:
+    """Lowercase, strip surrounding quotes/punctuation, collapse whitespace."""
+    s = s.strip().strip(".").strip('"').strip("'").strip()
+    return re.sub(r"\s+", " ", s).lower()
 
 
 # ---------------------------------------------------------------------------

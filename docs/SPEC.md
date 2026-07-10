@@ -344,14 +344,23 @@ MATH500, MMLU, RLPR, LiveCodeBench. **Train per-task, eval on the matching test 
 - **LiveCodeBench (exact split):** train on **V1 (400 samples)**, eval on **V6 newly-introduced (175 samples)**, Jan–Apr 2025.
 - Combined training pool ≈ **7,000 datapoints**; SFT oracle used **3 seeds**.
 - **[OUR CHOICE] Split sizes for MATH500/MMLU/RLPR** (paper says "official splits where available" but gives no numbers): use official train/test; if none, hold out a fixed 20% as test, seed=0. Document actual sizes used.
+- **[OUR CHOICE] Two additions beyond the paper's four tasks:** GSM8K (`benchmarks.gsm8k`, official train/test splits) trains/evals per-task exactly like MATH500. HumanEval (`benchmarks.humaneval`) evaluates only — the upstream dataset ships a single 164-item `test` split with no `train` split.
 
 ### 6.2 Held-out / zero-shot transfer (no retraining)
 AIME2025, BigCodeBench, MT-Bench(-101), GPQA-Diamond. Same K=5 / 4096-token settings assumed.
+- **[OUR CHOICE]** BIG-Bench Hard (`benchmarks.bbh`, all 27 subtasks pooled) added as a further zero-shot
+  generalization check: it exercises reasoning shapes (multi-step arithmetic, logical deduction, temporal
+  reasoning, etc.) disjoint from the four in-distribution tasks, directly probing replication claim R5
+  (generalization to held-out/OOD tasks) from `AGENTS.md` §1.
 
 ### 6.3 Metrics
 - LiveCodeBench: **pass@1** (execute tests).
 - MATH500 / GPQA-D / AIME: exact answer-match accuracy.
 - MMLU / BigCodeBench: accuracy / pass@1.
+- **[OUR CHOICE]** GSM8K: exact answer-match accuracy (same math grading path as MATH500). HumanEval:
+  pass@1 (execute the model's completion against the dataset's `check(candidate)` harness, same sandboxed
+  executor as LiveCodeBench). BBH: exact-match accuracy over the extracted `"Answer: ..."` line, compared
+  either as a multiple-choice letter or normalized free-form text depending on the subtask's target shape.
 - MT-Bench: ~10-point LLM-judge score (**[OUR CHOICE]** judge = strongest pool model, GPT-4-class rubric; keep separate from accuracy averages).
 - Reward `R(τ) ∈ {0,1}` per atomic eval (correctness checker per task above).
 - **Relative Error Reduction:** `RER = (Z − S*)/(1 − S*)` where Z = coordinated score, S* = best single-agent on subset.

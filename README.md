@@ -45,6 +45,28 @@ rebuilt from scratch with an open model pool and the miner-facing competition to
 - `web/` - public competition site and leaderboard frontend
 - `docs/` - research notes, results, and implementation notes
 
+## Supported benchmarks
+
+`trinity.orchestration.dataset.load_tasks` (and the matching `benchmarks/*.py` facades) currently support:
+
+| benchmark | HF dataset | metric | notes |
+| --- | --- | --- | --- |
+| `math500` | `HuggingFaceH4/MATH-500` | exact-match | in-distribution |
+| `mmlu` | `cais/mmlu` | letter-match | in-distribution |
+| `gpqa` | `Idavidrein/gpqa` (`gpqa_diamond`) | letter-match | held-out / zero-shot |
+| `livecodebench` | `lighteval/code_generation_lite` | pass@1 | in-distribution (V1 train / V6 eval) |
+| `gsm8k` | `openai/gsm8k` (`main`) | exact-match | in-distribution |
+| `humaneval` | `openai/openai_humaneval` | pass@1 | eval-only (164-item `test` split, no `train` split upstream) |
+| `bbh` | `lukaemon/bbh` (all 27 subtasks) | exact-match | held-out / zero-shot generalization suite |
+
+Every loader falls back to a tiny built-in offline toy set when `datasets`/network are unavailable, so the
+CPU smoke tests (`tests/smoke/run_smoke.py --cpu`) run with zero network.
+
+BBH pools 27 distinct subtasks into a single score, which can hide large per-subtask swings. Pass
+`--breakdown-out path.json` to `trinity.eval` to also write a per-item record (`task_id`, `benchmark`,
+`subtask`, `score`), then run `python scripts/subtask_breakdown.py path.json` for a per-subtask accuracy
+table instead of trusting the pooled average blindly.
+
 ## Miner workflow
 
 Miners should work in their own branch, keep changes scoped, and open PRs for review. The branch

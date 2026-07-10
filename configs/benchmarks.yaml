@@ -16,6 +16,10 @@ train:
     loader: "benchmarks.reasoning"
     split: "train"
     max_items: 256
+  - name: gsm8k                        # [OUR CHOICE] added beyond the paper's four tasks; see AGENTS.md §1
+    loader: "benchmarks.gsm8k"
+    split: "train"
+    max_items: 256
 
 # Held-in evaluation (same distribution as train, disjoint items).
 eval:
@@ -31,11 +35,23 @@ eval:
     loader: "benchmarks.reasoning"
     split: "test"
     metric: "accuracy"
+  - name: gsm8k                        # [OUR CHOICE]
+    loader: "benchmarks.gsm8k"
+    split: "test"
+    metric: "accuracy"
+  - name: humaneval                    # [OUR CHOICE] no train split exists upstream (164-item test-only set)
+    loader: "benchmarks.humaneval"
+    split: "test"
+    metric: "pass@1"
 
 # Out-of-distribution tasks to test generalization (never seen during evolution).
 ood:
   - name: domain_knowledge
     loader: "benchmarks.domain_knowledge"
+    split: "test"
+    metric: "accuracy"
+  - name: bbh                          # [OUR CHOICE] 27-subtask generalization suite; replication claim R5
+    loader: "benchmarks.bbh"
     split: "test"
     metric: "accuracy"
 

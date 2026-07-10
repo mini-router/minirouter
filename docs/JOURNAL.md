@@ -18,6 +18,52 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-10 — Added GSM8K, HumanEval, and BBH benchmark support end-to-end  #decision #repro #finding
+**Context:** the leaderboard schema, mock data, and web frontend types already carried `gsm8k` /
+`humaneval` / `bbh` as metric fields (`validator/src/eval_backend/schemas.py`, `mock_leaderboard.py`,
+`web/src/types/index.ts`), but nothing in `dataset.py` / `reward.py` / `configs/benchmarks.yaml` ever
+produced those scores — every leaderboard row showed them as permanently `null`. See
+[mini-router/minirouter#99](https://github.com/mini-router/minirouter/issues/99).
+**Expected:** wiring in real loaders + graders should let a miner train/eval a coordinator against these
+three benchmarks and have the score flow through the existing (already generic) leaderboard/results-table
+plumbing with zero changes to those layers.
+**Actual:** confirmed both `scripts/results_table.py` and the validator `/api/leaderboard` endpoint read
+benchmark names generically out of `metrics_json` / eval JSON — they needed no changes at all once a real
+`gsm8k`/`humaneval`/`bbh` score exists.
+**Fix / decision:**
+- GSM8K (`openai/gsm8k`, config `main`) — added to `MATH_BENCHMARKS` in `reward.py`; the existing
+  boxed/last-number extraction + `math_equal` comparison needed no new grading code, only a loader that
+  strips the canonical `#### <answer>` suffix.
+- HumanEval (`openai/openai_humaneval`) — added to `CODE_BENCHMARKS`; the loader wraps each row's
+  `test`/`entry_point` fields into a single assert-style test string (`{test}\ncheck({entry_point})\n`)
+  consumed by the *existing* subprocess-sandboxed `run_pass_at_1` — no sandbox/executor changes.
+  **[OUR CHOICE]** HumanEval only ships a 164-item `test` split upstream (no `train` split exists), so it
+  is wired into `configs/benchmarks.yaml` under `eval` only, not `train` — deliberately avoiding the
+  `train`-split-silently-falls-back-to-toy failure mode already tracked in issue #44 for MMLU.
+- BBH (`lukaemon/bbh`, all 27 canonical subtasks pooled into one `bbh` benchmark) — genuinely new grading
+  path: targets are either a `"(X)"` multiple-choice letter (options embedded directly in the question
+  text for those subtasks) or free-form text. Added a new `TEXT_BENCHMARKS` category, `extract_bbh_answer`
+  (reads the model's instructed trailing `"Answer: ..."` line), and `_check_bbh` (letter compare for
+  choice-shaped targets, normalized exact-match text compare otherwise). Wired into the `ood` section of
+  `configs/benchmarks.yaml` alongside `domain_knowledge` — BBH is a real generalization test of whether a
+  coordinator trained on math/code/knowledge transfers to 27 unseen reasoning shapes (replication claim R5
+  in `AGENTS.md`).
+- Added `benchmarks/gsm8k.py`, `benchmarks/humaneval.py`, `benchmarks/bbh.py` thin facades mirroring the
+  existing `benchmarks/livecodebench.py` pattern.
+- **Bonus diagnostic:** pooling BBH's 27 subtasks into one score is exactly the kind of thing that hides
+  signal (a coordinator could ace `multistep_arithmetic_two` and totally fail `temporal_sequences` while
+  still posting a middling pooled average) — the same spirit as the existing oracle-ceiling diagnostic and
+  the open per-question-agreement-diagnostic issue (#60). Added an *opt-in*, purely additive
+  `--breakdown-out PATH` flag to `trinity.eval` (`_score_policy` / `_score_submission_policy` now take an
+  optional `records` list they append `{task_id, benchmark, subtask, score}` into; default behavior and
+  return values are unchanged when the flag is absent) plus `scripts/subtask_breakdown.py` to re-group a
+  breakdown file by `subtask` (falling back to `benchmark`) and render a per-group accuracy table.
+**Follow-up:** `configs/benchmarks.yaml` itself is not actually read by any runtime code path today (train/
+eval take `--benchmark <name>` directly on the CLI) — confirmed this is a pre-existing gap (the file's
+`benchmarks.math` / `benchmarks.reasoning` / `benchmarks.domain_knowledge` loader references don't
+correspond to real modules either), not something introduced or fixed here. A real miner run against these
+three still needs `datasets`/network on the GPU box; the offline toy fallbacks only cover the CPU smoke path.
+
 ## 2026-07-09 — Submission eval now batches benchmark items + host alias fixed  #fix #perf #validator
 **Context:** validator submission eval was still processing benchmark items one by one, and the remote
 GPU host field used by the worker did not match the config dataclass.

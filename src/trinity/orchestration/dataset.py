@@ -11,9 +11,10 @@ Design constraints (see docs/SPEC.md §6, §8):
 - ``load_tasks`` is deterministic given ``seed``: shuffling/truncation use a seeded
   ``random.Random`` so two calls with the same arguments return identical lists.
 - The ``answer`` field is whatever ``reward.score`` needs for that benchmark:
-    * math500 / aime  -> reference answer string (boxed-answer / last-number match)
+    * math500 / aime / gsm8k -> reference answer string (boxed-answer / last-number match)
     * mmlu / gpqa     -> the correct option LETTER ("A".."D")
-    * livecodebench   -> a dict test spec {"tests": [...], "fn_name": ...}
+    * livecodebench / humaneval -> a dict test spec {"tests": [...], "fn_name": ...}
+    * bbh             -> raw gold target text (a "(X)" choice or free-form string)
 
 Public API
 ----------
@@ -26,6 +27,9 @@ The HuggingFace dataset ids used (when ``datasets`` + network are available):
 - mmlu          : ``cais/mmlu`` (config ``all``)
 - gpqa          : ``Idavidrein/gpqa`` (config ``gpqa_diamond``)
 - livecodebench : ``lighteval/code_generation_lite`` (V1 train / V6 eval; parquet mirror)
+- gsm8k         : ``openai/gsm8k`` (config ``main``)
+- humaneval     : ``openai/openai_humaneval`` (single ``test`` split, 164 items)
+- bbh           : ``lukaemon/bbh`` (27 subtask configs, see ``BBH_SUBTASKS``)
 """
 from __future__ import annotations
 
@@ -41,10 +45,46 @@ SUPPORTED_BENCHMARKS: tuple[str, ...] = (
     "mmlu",
     "gpqa",
     "livecodebench",
+    "gsm8k",
+    "humaneval",
+    "bbh",
 )
 
 # Letters used for multiple-choice option indexing (MMLU/GPQA).
 _CHOICE_LETTERS: tuple[str, ...] = ("A", "B", "C", "D", "E", "F", "G", "H")
+
+# The 27 canonical BIG-Bench Hard subtasks (each a separate ``lukaemon/bbh``
+# dataset config). Fixed, well-known list -- see the BBH paper (Suzgun et al.,
+# 2022) appendix / the ``lukaemon/bbh`` dataset card for the enumeration.
+BBH_SUBTASKS: tuple[str, ...] = (
+    "boolean_expressions",
+    "causal_judgement",
+    "date_understanding",
+    "disambiguation_qa",
+    "dyck_languages",
+    "formal_fallacies",
+    "geometric_shapes",
+    "hyperbaton",
+    "logical_deduction_five_objects",
+    "logical_deduction_seven_objects",
+    "logical_deduction_three_objects",
+    "movie_recommendation",
+    "multistep_arithmetic_two",
+    "navigate",
+    "object_counting",
+    "penguins_in_a_table",
+    "reasoning_about_colored_objects",
+    "ruin_names",
+    "salient_translation_error_detection",
+    "snarks",
+    "sports_understanding",
+    "temporal_sequences",
+    "tracking_shuffled_objects_five_objects",
+    "tracking_shuffled_objects_seven_objects",
+    "tracking_shuffled_objects_three_objects",
+    "web_of_lies",
+    "word_sorting",
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -280,6 +320,132 @@ def _load_livecodebench_hf(split: str) -> list[Task] | None:
     return tasks or None
 
 
+def _load_gsm8k_hf(split: str) -> list[Task] | None:
+    """GSM8K loader. answer = the final numeric answer after the ``####`` marker."""
+    ds = _try_load_hf("openai/gsm8k", name="main", split=split or "test")
+    if ds is None:
+        ds = _try_load_hf("gsm8k", name="main", split=split or "test")
+    if ds is None:
+        return None
+    tasks: list[Task] = []
+    for i, row in enumerate(ds):
+        question = _row_get(row, "question", default="")
+        raw_answer = _row_get(row, "answer", default="")
+        if not question or not raw_answer:
+            continue
+        final = _gsm8k_final_answer(str(raw_answer))
+        if final is None:
+            continue
+        tasks.append(
+            Task(
+                task_id=f"gsm8k-{i}",
+                benchmark="gsm8k",
+                prompt=f"{question}\n\nGive the final answer in \\boxed{{}}.",
+                answer=final,
+                meta={"source": "openai/gsm8k", "rationale": str(raw_answer)},
+            )
+        )
+    return tasks or None
+
+
+def _gsm8k_final_answer(answer_text: str) -> str | None:
+    """Extract the ``#### <number>`` final answer GSM8K appends to every rationale."""
+    marker = "####"
+    idx = answer_text.rfind(marker)
+    if idx == -1:
+        return None
+    tail = answer_text[idx + len(marker):].strip().replace(",", "")
+    return tail or None
+
+
+def _load_humaneval_hf(split: str) -> list[Task] | None:
+    """HumanEval loader. answer = an assert-based test spec for ``run_pass_at_1``.
+
+    HumanEval ships a single 164-item ``test`` split (no train split exists).
+    Each row's ``test`` field defines a ``check(candidate)`` function; we wrap it
+    into the same ``{"tests": [...]}`` contract the code-execution reward checker
+    (``reward.run_pass_at_1``) already understands for assert-style tests, calling
+    ``check(<entry_point>)`` against whatever the model defines in its completion.
+    """
+    ds = _try_load_hf("openai/openai_humaneval", split="test")
+    if ds is None:
+        ds = _try_load_hf("openai_humaneval", split="test")
+    if ds is None:
+        return None
+    tasks: list[Task] = []
+    for i, row in enumerate(ds):
+        prompt = _row_get(row, "prompt", default="")
+        entry_point = _row_get(row, "entry_point", default="")
+        test_code = _row_get(row, "test", default="")
+        task_id = _row_get(row, "task_id", default=f"HumanEval/{i}")
+        if not prompt or not entry_point or not test_code:
+            continue
+        harness = f"{test_code}\ncheck({entry_point})\n"
+        tasks.append(
+            Task(
+                task_id=str(task_id),
+                benchmark="humaneval",
+                prompt=_format_humaneval_prompt(str(prompt)),
+                answer={
+                    "tests": [harness],
+                    "fn_name": entry_point,
+                    "starter_code": str(prompt),
+                },
+                meta={"source": "openai/openai_humaneval", "entry_point": entry_point},
+            )
+        )
+    return tasks or None
+
+
+def _format_humaneval_prompt(signature: str) -> str:
+    """Wrap a HumanEval function signature/docstring into a completion prompt."""
+    return (
+        f"{signature}\n\n"
+        "Complete the function above. Reply with the FULL function definition "
+        "(signature, docstring, and body) inside a single ```python code fence."
+    )
+
+
+def _load_bbh_hf(split: str) -> list[Task] | None:
+    """BIG-Bench Hard loader across all 27 ``BBH_SUBTASKS`` configs.
+
+    Each subtask is a separate ``lukaemon/bbh`` dataset config with a single
+    ``test`` split. ``answer`` is the raw gold ``target`` text: either a
+    ``"(X)"``-shaped multiple-choice letter (already embedded as lettered
+    options inside ``input`` for those subtasks) or free-form text (a word,
+    phrase, "True"/"False", etc.) for the rest. See ``reward._check_bbh``.
+    """
+    tasks: list[Task] = []
+    for subtask in BBH_SUBTASKS:
+        ds = _try_load_hf("lukaemon/bbh", name=subtask, split="test")
+        if ds is None:
+            continue
+        for i, row in enumerate(ds):
+            question = _row_get(row, "input", default="")
+            target = _row_get(row, "target", default="")
+            if not question or not target:
+                continue
+            tasks.append(
+                Task(
+                    task_id=f"bbh-{subtask}-{i}",
+                    benchmark="bbh",
+                    prompt=_format_bbh_prompt(str(question)),
+                    answer=str(target).strip(),
+                    meta={"source": "lukaemon/bbh", "subtask": subtask},
+                )
+            )
+    return tasks or None
+
+
+def _format_bbh_prompt(question: str) -> str:
+    """Wrap a BBH question with an instruction for a single, parseable final line."""
+    return (
+        f"{question.strip()}\n\n"
+        "End your response with a final line in the exact form:\n"
+        "Answer: <answer>"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
@@ -467,6 +633,97 @@ def _toy_tasks(benchmark: str) -> list[Task]:
                 meta={"source": "toy"},
             ),
         ]
+    if benchmark == "gsm8k":
+        return [
+            Task(
+                task_id="gsm8k-toy-0",
+                benchmark="gsm8k",
+                prompt=(
+                    "Natalia sold clips to 12 of her friends in April, and then she sold "
+                    "half as many clips in May. How many clips did Natalia sell "
+                    "altogether in April and May? Give the final answer in \\boxed{}."
+                ),
+                answer="18",
+                meta={"source": "toy"},
+            ),
+            Task(
+                task_id="gsm8k-toy-1",
+                benchmark="gsm8k",
+                prompt=(
+                    "A robe takes 2 bolts of blue fiber and half that much white fiber. "
+                    "How many bolts of fiber does it take in total? "
+                    "Give the final answer in \\boxed{}."
+                ),
+                answer="3",
+                meta={"source": "toy"},
+            ),
+        ]
+    if benchmark == "humaneval":
+        return [
+            Task(
+                task_id="HumanEval/toy-0",
+                benchmark="humaneval",
+                prompt=_format_humaneval_prompt(
+                    'def add(a: int, b: int) -> int:\n    """Return the sum of a and b."""\n'
+                ),
+                answer={
+                    "tests": [
+                        "def check(candidate):\n"
+                        "    assert candidate(2, 3) == 5\n"
+                        "    assert candidate(-1, 1) == 0\n"
+                        "check(add)\n"
+                    ],
+                    "fn_name": "add",
+                    "starter_code": (
+                        'def add(a: int, b: int) -> int:\n    """Return the sum of a and b."""\n'
+                    ),
+                },
+                meta={"source": "toy", "entry_point": "add"},
+            ),
+            Task(
+                task_id="HumanEval/toy-1",
+                benchmark="humaneval",
+                prompt=_format_humaneval_prompt(
+                    'def is_even(n: int) -> bool:\n    """Return True if n is even, else False."""\n'
+                ),
+                answer={
+                    "tests": [
+                        "def check(candidate):\n"
+                        "    assert candidate(4) is True\n"
+                        "    assert candidate(7) is False\n"
+                        "check(is_even)\n"
+                    ],
+                    "fn_name": "is_even",
+                    "starter_code": (
+                        'def is_even(n: int) -> bool:\n'
+                        '    """Return True if n is even, else False."""\n'
+                    ),
+                },
+                meta={"source": "toy", "entry_point": "is_even"},
+            ),
+        ]
+    if benchmark == "bbh":
+        return [
+            Task(
+                task_id="bbh-toy-0",
+                benchmark="bbh",
+                prompt=_format_bbh_prompt(
+                    "Is the following sentence plausible? "
+                    '"John threw a touchdown pass."\n(A) plausible\n(B) implausible'
+                ),
+                answer="(A)",
+                meta={"source": "toy", "subtask": "sports_understanding"},
+            ),
+            Task(
+                task_id="bbh-toy-1",
+                benchmark="bbh",
+                prompt=_format_bbh_prompt(
+                    "Sort the following words alphabetically: banana, apple, cherry."
+                ),
+                answer="apple banana cherry",
+                meta={"source": "toy", "subtask": "word_sorting"},
+            ),
+        ]
     raise ValueError(
         f"Unknown benchmark {benchmark!r}. Supported: {SUPPORTED_BENCHMARKS}"
     )
@@ -477,6 +734,9 @@ _HF_LOADERS = {
     "mmlu": _load_mmlu_hf,
     "gpqa": _load_gpqa_hf,
     "livecodebench": _load_livecodebench_hf,
+    "gsm8k": _load_gsm8k_hf,
+    "humaneval": _load_humaneval_hf,
+    "bbh": _load_bbh_hf,
 }
 
 

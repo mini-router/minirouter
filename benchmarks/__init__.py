@@ -1,4 +1,4 @@
-"""Benchmark dataset loaders (LiveCodeBench, math, reasoning, domain knowledge).
+"""Benchmark dataset loaders (LiveCodeBench, GSM8K, HumanEval, BBH, math, ...).
 
 Each loader exposes load(split, **kw) -> list[Task], where a Task carries the
 prompt, the reference/answer or test harness, and a score(prediction) -> float.

@@ -139,6 +139,25 @@ class RandomPolicy:
         return self.rng.randrange(self.n_models), self.rng.choice(ROLE_ORDER)
 
 
+def _task_record(traj) -> dict:
+    """Per-item breakdown record: which task, which subtask (if any), what score.
+
+    Benchmarks that pool many distinct subtasks into one score (BBH pools 27)
+    can hide large per-subtask swings behind a middling average. Recording one
+    row per item lets ``scripts/subtask_breakdown.py`` re-group by
+    ``task.meta["subtask"]`` after the fact, without changing how the pooled
+    score itself is computed.
+    """
+    task = traj.task
+    meta = task.meta if isinstance(task.meta, dict) else {}
+    return {
+        "task_id": task.task_id,
+        "benchmark": task.benchmark,
+        "subtask": meta.get("subtask"),
+        "score": R.score(traj),
+    }
+
+
 async def _score_policy(
     tasks,
     policy,
@@ -147,6 +166,7 @@ async def _score_policy(
     *,
     sample,
     batch_size: int = 1,
+    records: list[dict] | None = None,
     **run_kwargs,
 ) -> float:
     import httpx
@@ -173,6 +193,8 @@ async def _score_policy(
             [one(task, i) for i, task in enumerate(tasks, start=1)],
             batch_size=batch_size,
         )
+    if records is not None:
+        records.extend(_task_record(t) for t in trajs)
     return float(mean(R.score(t) for t in trajs))
 
 
@@ -184,6 +206,7 @@ async def _score_submission_policy(
     *,
     sample,
     batch_size: int = 1,
+    records: list[dict] | None = None,
     **run_kwargs,
 ) -> float:
     import httpx
@@ -217,6 +240,8 @@ async def _score_submission_policy(
             [one(task, i) for i, task in enumerate(tasks, start=1)],
             batch_size=batch_size,
         )
+    if records is not None:
+        records.extend(_task_record(t) for t in trajs)
     score = float(mean(R.score(t) for t in trajs)) if trajs else 0.0
     print(f"[submission] completed score={score:.4f}", flush=True)
     return score
@@ -279,6 +304,8 @@ async def evaluate(args) -> dict:
     )
     run_kwargs = dict(max_turns=args.max_turns, max_tokens=args.max_tokens, reasoning=args.reasoning)
 
+    breakdown_records: list[dict] = [] if args.breakdown_out else None
+
     if args.submission_only:
         cfg = yaml.safe_load(Path(args.config).read_text())["coordinator"]
         device, dtype = resolve_device_dtype(
@@ -304,6 +331,7 @@ async def evaluate(args) -> dict:
             pool_models,
             sample=False,
             batch_size=batch_size,
+            records=breakdown_records,
             **run_kwargs,
         )
         results = {"TRINITY": s_trinity}
@@ -320,6 +348,9 @@ async def evaluate(args) -> dict:
         if args.out:
             Path(args.out).parent.mkdir(parents=True, exist_ok=True)
             Path(args.out).write_text(json.dumps(out, indent=2))
+        if args.breakdown_out:
+            Path(args.breakdown_out).parent.mkdir(parents=True, exist_ok=True)
+            Path(args.breakdown_out).write_text(json.dumps(breakdown_records, indent=2))
         return out
 
     results: dict[str, float] = {}
@@ -364,6 +395,7 @@ async def evaluate(args) -> dict:
         pool_models,
         sample=False,
         batch_size=batch_size,
+        records=breakdown_records,
         **run_kwargs,
     )
     results["TRINITY"] = s_trinity
@@ -404,6 +436,9 @@ async def evaluate(args) -> dict:
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out).write_text(json.dumps(out, indent=2))
+    if args.breakdown_out:
+        Path(args.breakdown_out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.breakdown_out).write_text(json.dumps(breakdown_records, indent=2))
     return out
 
 
@@ -432,6 +467,14 @@ def main() -> None:
         help="number of benchmark items to evaluate concurrently",
     )
     ap.add_argument("--out", default="")
+    ap.add_argument(
+        "--breakdown-out",
+        default="",
+        dest="breakdown_out",
+        help="optional path to write a per-item JSON breakdown (task_id/benchmark/subtask/"
+        "score) for TRINITY's run -- useful for pooled multi-subtask benchmarks like BBH; "
+        "post-process with scripts/subtask_breakdown.py",
+    )
     ap.add_argument("--trace-llm", action="store_true",
                     help="emit per-request OpenRouter/LLM trace logs")
     ap.add_argument("--submission-only", action="store_true",
