@@ -55,9 +55,21 @@ def test_remote_failure_records_local_fallback_metadata(tmp_path, monkeypatch):
     def _fake_remote_attempt(*args, **kwargs):
         raise RuntimeError("ssh failed")
 
-    def _fake_local_attempt(settings, checkpoint_path, local_results_path, submission_id, env):
+    def _fake_local_attempt(
+        settings,
+        checkpoint_path,
+        local_results_path,
+        local_ledger_path,
+        submission_id,
+        env,
+    ):
         local_results_path.write_text(
             json.dumps({"results": {"TRINITY": {"accuracy": 0.9}}}),
+            encoding="utf-8",
+        )
+        local_ledger_path.write_text(
+            json.dumps({"provider": "chutes", "m": "google/gemma-4-31B-turbo-TEE", "p": 100, "c": 50})
+            + "\n",
             encoding="utf-8",
         )
         return ("local-command", 0, "stdout", "")
@@ -101,10 +113,28 @@ def test_remote_success_marks_remote_execution_mode(tmp_path, monkeypatch):
     checkpoint_path.write_bytes(b"theta")
     submission = _add_submission(session, checkpoint_path)
 
-    def _fake_remote_attempt(settings, checkpoint_path, local_results_path, submission_id, env, on_line=None):
+    def _fake_remote_attempt(
+        settings,
+        checkpoint_path,
+        local_results_path,
+        local_ledger_path,
+        submission_id,
+        env,
+        on_line=None,
+    ):
         local_results_path.parent.mkdir(parents=True, exist_ok=True)
         local_results_path.write_text(
             json.dumps({"results": {"TRINITY": {"accuracy": 0.6}}}),
+            encoding="utf-8",
+        )
+        local_ledger_path.write_text(
+            "\n".join(
+                [
+                    json.dumps({"provider": "chutes", "m": "google/gemma-4-31B-turbo-TEE", "p": 1000, "c": 500}),
+                    json.dumps({"provider": "chutes", "m": "Qwen/Qwen3-32B-TEE", "p": 2000, "c": 750}),
+                ]
+            )
+            + "\n",
             encoding="utf-8",
         )
         return ("remote-command", 0, "stdout", "")
@@ -121,3 +151,19 @@ def test_remote_success_marks_remote_execution_mode(tmp_path, monkeypatch):
     assert result.metrics["execution_mode"] == "remote_gpu"
     assert result.metrics["local_fallback"] is False
     assert "remote_error" not in result.metrics
+    assert result.metrics["duration_seconds"] >= 0
+    assert result.metrics["cost_usd"] > 0
+    assert result.metrics["cost_calls"] == 2
+
+
+def test_remote_command_includes_batch_size(tmp_path):
+    settings = _build_settings(tmp_path, allow_local_fallback=True)
+    settings.eval_batch_size = 4
+    command = eval_runner._build_remote_command(
+        settings,
+        tmp_path / "theta.npy",
+        tmp_path / "results.json",
+        tmp_path / "ledger.jsonl",
+        tmp_path / "workspace",
+    )
+    assert "--batch-size 4" in command
