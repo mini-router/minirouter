@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import errno
@@ -20,12 +21,22 @@ from sqlalchemy.orm import Session
 
 from ..core.config import Settings
 from ..models import EvaluationRun, Submission
+from .artifacts import persist_stored_artifact
+from .storage import StoredArtifact
 
 logger = logging.getLogger("eval_backend.eval_runner")
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _pointer_lookup(payload: Any, pointer: str) -> Any:
@@ -491,6 +502,10 @@ def _build_local_command(
     )
 
 
+class RemoteConnectionError(RuntimeError):
+    """Raised when the remote GPU host cannot be reached or prepared."""
+
+
 def _remote_attempt(
     settings: Settings,
     checkpoint_path: Path,
@@ -514,8 +529,11 @@ def _remote_attempt(
         remote_ledger,
         remote_workspace,
     )
-    subprocess.run(["ssh", host, "mkdir", "-p", _remote_path(remote_workspace)], check=True)
-    subprocess.run(["rsync", "-az", str(checkpoint_path), f"{host}:{_remote_path(remote_checkpoint)}"], check=True)
+    try:
+        subprocess.run(["ssh", host, "mkdir", "-p", _remote_path(remote_workspace)], check=True)
+        subprocess.run(["rsync", "-az", str(checkpoint_path), f"{host}:{_remote_path(remote_checkpoint)}"], check=True)
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise RemoteConnectionError(f"remote ssh setup failed: {exc}") from exc
     master_fd, slave_fd = pty.openpty()
     proc = subprocess.Popen(
         ["ssh", "-tt", host, "bash", "-lc", remote_command],
@@ -613,7 +631,15 @@ class EvaluationResult:
     stderr: str
 
 
-def evaluate_submission(session: Session, submission: Submission, settings: Settings) -> EvaluationResult:
+def evaluate_submission(
+    session: Session,
+    submission: Submission,
+    settings: Settings,
+    *,
+    checkpoint_path_override: Path | None = None,
+    train_id: int | None = None,
+    input_artifact_id: str | None = None,
+) -> EvaluationResult:
     local_workspace = _local_workspace(settings, submission.id)
     local_workspace.mkdir(parents=True, exist_ok=True)
     local_results_path = local_workspace / "results.json"
@@ -621,6 +647,16 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
 
     run = EvaluationRun(
         submission_id=submission.id,
+        train_id=train_id,
+        input_artifact_id=input_artifact_id,
+        benchmark_names_json=list(submission.benchmark_names_json or []),
+        provider=settings.eval_provider,
+        models_config=settings.eval_models_config,
+        execution_mode=settings.eval_execution_mode,
+        device="cpu" if settings.eval_execution_mode == "local_cpu" else "cuda:0",
+        dtype="float32" if settings.eval_execution_mode == "local_cpu" else "bfloat16",
+        batch_size=settings.eval_batch_size,
+        max_items=settings.eval_max_items,
         status="running",
         phase="processing",
         message="worker claimed submission",
@@ -636,23 +672,26 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
     submission.updated_at = _utcnow()
     session.flush()
 
-    if not submission.checkpoint_path:
+    checkpoint_source = checkpoint_path_override or (
+        Path(submission.checkpoint_path).expanduser().resolve() if submission.checkpoint_path else None
+    )
+    if not checkpoint_source:
         error = f"submission {submission.id} does not have a checkpoint to evaluate"
         run.status = "failed"
         run.phase = "failed"
         run.message = error
         run.error = error
         run.finished_at = _utcnow()
-        run.metrics_json = json.dumps(
-            _attach_runtime_metrics(
-                {"missing_checkpoint": True},
-                run=run,
-                ledger_path=local_cost_ledger_path,
-            ),
-            ensure_ascii=False,
-            sort_keys=True,
-        )
+        metrics = _attach_runtime_metrics({"missing_checkpoint": True}, run=run, ledger_path=local_cost_ledger_path)
+        run.cost_usd = metrics.get("cost_usd") if isinstance(metrics.get("cost_usd"), (int, float)) else None
+        run.duration_seconds = metrics.get("duration_seconds") if isinstance(metrics.get("duration_seconds"), (int, float)) else None
+        run.metrics_json = json.dumps(metrics, ensure_ascii=False, sort_keys=True)
         submission.status = "failed"
+        submission.latest_eval_id = run.id
+        submission.latest_score = None
+        submission.finished_at = run.finished_at
+        submission.duration_seconds = run.duration_seconds
+        submission.cost_usd = run.cost_usd
         session.flush()
         return EvaluationResult(
             run=run,
@@ -662,7 +701,7 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
             stderr=error,
         )
 
-    checkpoint_path = Path(submission.checkpoint_path).expanduser().resolve()
+    checkpoint_path = Path(checkpoint_source).expanduser().resolve()
 
     env = os.environ.copy()
     env["TRINITY_SECRETS_FILE"] = settings.trinity_secrets_file
@@ -680,6 +719,7 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
     stdout = ""
     stderr = ""
     remote_error: str | None = None
+    remote_connection_error: str | None = None
     execution_mode = settings.eval_execution_mode if settings.eval_execution_mode == "local_cpu" else "remote_gpu"
 
     attempts: list[str] = []
@@ -710,8 +750,49 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
                 raise subprocess.CalledProcessError(
                     completed, command, output=out, stderr=err
                 )
+        except RemoteConnectionError as exc:
+            remote_connection_error = f"remote gpu connection failed: {exc}"
+            remote_error = remote_connection_error
         except Exception as exc:
             remote_error = f"remote gpu attempt failed: {exc}"
+
+    if remote_connection_error:
+        run.status = "failed"
+        run.phase = "failed"
+        run.message = remote_connection_error
+        run.error = remote_connection_error
+        run.stdout = stdout
+        run.stderr = stderr
+        run.finished_at = _utcnow()
+        run.command = " || ".join(attempts) if attempts else ""
+        metrics = _attach_runtime_metrics(
+            {
+                "results_missing": True,
+                "execution_mode": "remote_gpu",
+                "local_fallback": False,
+                "remote_error": remote_error,
+                "remote_connection_error": remote_connection_error,
+            },
+            run=run,
+            ledger_path=local_cost_ledger_path,
+        )
+        run.cost_usd = metrics.get("cost_usd") if isinstance(metrics.get("cost_usd"), (int, float)) else None
+        run.duration_seconds = metrics.get("duration_seconds") if isinstance(metrics.get("duration_seconds"), (int, float)) else None
+        run.metrics_json = json.dumps(metrics, ensure_ascii=False, sort_keys=True)
+        submission.status = "failed"
+        submission.latest_eval_id = run.id
+        submission.latest_score = None
+        submission.finished_at = run.finished_at
+        submission.duration_seconds = run.duration_seconds
+        submission.cost_usd = run.cost_usd
+        session.flush()
+        return EvaluationResult(
+            run=run,
+            score=None,
+            metrics=json.loads(run.metrics_json),
+            stdout=stdout,
+            stderr=stderr,
+        )
 
     if remote_error and not settings.eval_allow_local_fallback:
         run.status = "failed"
@@ -722,21 +803,25 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
         run.stderr = stderr
         run.finished_at = _utcnow()
         run.command = " || ".join(attempts) if attempts else ""
-        run.metrics_json = json.dumps(
-            _attach_runtime_metrics(
-                {
-                    "results_missing": True,
-                    "execution_mode": "remote_gpu",
-                    "local_fallback": False,
-                    "remote_error": remote_error,
-                },
-                run=run,
-                ledger_path=local_cost_ledger_path,
-            ),
-            ensure_ascii=False,
-            sort_keys=True,
+        metrics = _attach_runtime_metrics(
+            {
+                "results_missing": True,
+                "execution_mode": "remote_gpu",
+                "local_fallback": False,
+                "remote_error": remote_error,
+            },
+            run=run,
+            ledger_path=local_cost_ledger_path,
         )
+        run.cost_usd = metrics.get("cost_usd") if isinstance(metrics.get("cost_usd"), (int, float)) else None
+        run.duration_seconds = metrics.get("duration_seconds") if isinstance(metrics.get("duration_seconds"), (int, float)) else None
+        run.metrics_json = json.dumps(metrics, ensure_ascii=False, sort_keys=True)
         submission.status = "failed"
+        submission.latest_eval_id = run.id
+        submission.latest_score = None
+        submission.finished_at = run.finished_at
+        submission.duration_seconds = run.duration_seconds
+        submission.cost_usd = run.cost_usd
         session.flush()
         return EvaluationResult(
             run=run,
@@ -784,21 +869,27 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
             run.stdout = stdout
             run.stderr = stderr
             run.finished_at = _utcnow()
-            run.metrics_json = json.dumps(
-                _attach_runtime_metrics(
-                    {
-                        "results_missing": True,
-                        "execution_mode": execution_mode,
-                        "local_fallback": bool(remote_error),
-                        "remote_error": remote_error,
-                    },
-                    run=run,
-                    ledger_path=local_cost_ledger_path,
-                ),
-                ensure_ascii=False,
-                sort_keys=True,
+            metrics = _attach_runtime_metrics(
+                {
+                    "results_missing": True,
+                    "execution_mode": execution_mode,
+                    "local_fallback": bool(remote_error),
+                    "remote_error": remote_error,
+                },
+                run=run,
+                ledger_path=local_cost_ledger_path,
             )
+            run.cost_usd = metrics.get("cost_usd") if isinstance(metrics.get("cost_usd"), (int, float)) else None
+            run.duration_seconds = (
+                metrics.get("duration_seconds") if isinstance(metrics.get("duration_seconds"), (int, float)) else None
+            )
+            run.metrics_json = json.dumps(metrics, ensure_ascii=False, sort_keys=True)
             submission.status = "failed"
+            submission.latest_eval_id = run.id
+            submission.latest_score = None
+            submission.finished_at = run.finished_at
+            submission.duration_seconds = run.duration_seconds
+            submission.cost_usd = run.cost_usd
             session.flush()
             return EvaluationResult(
                 run=run,
@@ -827,6 +918,10 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
         run.error = error
         run.score = None
         run.metrics_json = json.dumps(metrics, ensure_ascii=False, sort_keys=True)
+        run.cost_usd = metrics.get("cost_usd") if isinstance(metrics.get("cost_usd"), (int, float)) else None
+        run.duration_seconds = (
+            metrics.get("duration_seconds") if isinstance(metrics.get("duration_seconds"), (int, float)) else None
+        )
         run.stdout = stdout
         run.stderr = stderr
         run.finished_at = _utcnow()
@@ -836,6 +931,10 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
         run.progress_current = run.progress_total
         submission.status = "failed"
         submission.latest_score = None
+        submission.latest_eval_id = run.id
+        submission.finished_at = run.finished_at
+        submission.duration_seconds = run.duration_seconds
+        submission.cost_usd = run.cost_usd
         session.flush()
         return EvaluationResult(run=run, score=None, metrics=metrics, stdout=stdout, stderr=stderr)
 
@@ -851,13 +950,35 @@ def evaluate_submission(session: Session, submission: Submission, settings: Sett
     run.stdout = stdout
     run.stderr = stderr
     run.metrics_json = json.dumps(metrics, ensure_ascii=False, sort_keys=True)
+    run.cost_usd = metrics.get("cost_usd") if isinstance(metrics.get("cost_usd"), (int, float)) else None
+    run.duration_seconds = (
+        metrics.get("duration_seconds") if isinstance(metrics.get("duration_seconds"), (int, float)) else None
+    )
 
     submission.status = "completed"
     submission.latest_score = score
-    submission.best_run_id = run.id
+    submission.latest_eval_id = run.id
+    submission.best_eval_id = run.id
+    submission.finished_at = run.finished_at
+    submission.duration_seconds = run.duration_seconds
+    submission.cost_usd = run.cost_usd
     if run.progress_total is None:
         run.progress_total = settings.eval_max_items
     run.progress_current = run.progress_total
+
+    if local_results_path.exists():
+        result_artifact = persist_stored_artifact(
+            session,
+            StoredArtifact(
+                name=local_results_path.name,
+                path=local_results_path,
+                sha256=_sha256_file(local_results_path),
+            ),
+            storage_backend=settings.artifact_storage_backend,
+            evaluation_id=run.id,
+            meta_json={"results_path": str(local_results_path)},
+        )
+        run.results_artifact_id = result_artifact.id
 
     session.flush()
     return EvaluationResult(run=run, score=score, metrics=metrics, stdout=stdout, stderr=stderr)

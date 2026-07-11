@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from eval_backend.core.config import Settings
-from eval_backend.models import Submission
+from eval_backend.models import Artifact, Submission
 from eval_backend.services import eval_runner
 
 
@@ -19,17 +19,27 @@ def _build_settings(tmp_path: Path) -> Settings:
 
 
 def _add_submission(session, checkpoint_path: Path) -> Submission:
+    artifact = Artifact(
+        id="artifact-sub-1",
+        storage_backend="local",
+        storage_uri=str(checkpoint_path),
+        file_names_json=[checkpoint_path.name],
+        sha256="abc123",
+        size_bytes=checkpoint_path.stat().st_size,
+        mime_type="application/octet-stream",
+        submission_id="sub-1",
+        meta_json={"checkpoint_path": str(checkpoint_path)},
+    )
     submission = Submission(
         id="sub-1",
         source="upload",
-        artifact_name="bundle.zip",
-        artifact_path=str(checkpoint_path),
-        artifact_sha256="abc123",
-        checkpoint_path=str(checkpoint_path),
-        benchmark="math500",
+        miner_id="miner-a",
+        benchmark_names_json=["math500"],
         status="queued",
     )
+    session.add(artifact)
     session.add(submission)
+    submission.submission_artifact_id = artifact.id
     session.flush()
     return submission
 

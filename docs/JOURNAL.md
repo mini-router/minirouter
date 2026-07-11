@@ -33,6 +33,23 @@ was `False`; nonzero seeds were reproducible.
 use it when building the pycma opts. Now `seed=0` is deterministic and distinct seeds still
 differ. Added `tests/test_sep_cmaes_seed.py` (cma-gated via `importorskip`).
 **Follow-up:** none; nonzero seeds are unaffected, so existing configs keep their behavior.
+## 2026-07-09 — MMLU training silently trained on the 2-item toy set  #mistake #repro
+**Context:** issue #44 — auditing the data path for `python -m trinity.train --benchmark mmlu`.
+**Expected:** training draws minibatches from the real MMLU dataset.
+**Actual:** every minibatch came from the 2-item MMLU *toy set*, with no error or warning.
+**Root cause:** `train.py` calls `load_tasks(benchmark, "train", ...)`, and `_load_mmlu_hf`
+passed `split="train"` straight to `load_dataset("cais/mmlu", "all", split="train")`. But
+`cais/mmlu` has no `train` split (only `auxiliary_train`, `dev`, `validation`, `test`), so the
+load raised, `_try_load_hf` swallowed it and returned `None`, and `load_tasks` silently fell
+back to `_toy_tasks("mmlu")`. The load failed even with `datasets`+network available. (Eval is
+fine — it requests `"test"`. GPQA/LCB/math500 use split names that exist or map correctly.)
+**Fix / decision:** add `_mmlu_split_for_split` (mirroring `_lcb_version_for_split`) mapping
+`train` -> `auxiliary_train` (MMLU's designated training pool, same row schema as `test`) and
+passing `test`/`validation`/`dev` through, then route `_load_mmlu_hf` through it. Added
+`tests/test_dataset_mmlu_split.py` (offline) asserting the mapping never yields a non-existent
+split name.
+**Follow-up:** complementary to #7 (fail-loud-on-toy-fallback); this fixes the *reason* the MMLU
+load failed rather than only surfacing it.
 
 ## 2026-07-09 — Submission eval now batches benchmark items + host alias fixed  #fix #perf #validator
 **Context:** validator submission eval was still processing benchmark items one by one, and the remote

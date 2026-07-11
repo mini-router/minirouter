@@ -53,7 +53,7 @@ export default function LeaderboardPreview() {
                     <td className="p-4">
                       <span className={`rank-badge ${rankClass} bg-white/5`}>{entry.rank}</span>
                     </td>
-                    <td className="p-4 font-medium text-text">{entry.team}</td>
+                    <td className="p-4 font-medium text-text">{entry.miner_id || entry.team}</td>
                     <td className="p-4 text-right font-mono">
                       {entry.accuracy == null ? '—' : `${(entry.accuracy * 100).toFixed(1)}%`}
                     </td>
