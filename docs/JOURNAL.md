@@ -18,6 +18,14 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-10 — MC grading took the FIRST stated letter, not the model's final choice  #mistake #repro
+**Context:** `extract_choice_letter` grades MMLU/GPQA answers into the binary reward (issue #29).
+**Expected:** `"The answer is A.\nActually, the answer is C."` grades as `C` — the "final answer comes last" convention used everywhere else in `reward.py` (`extract_boxed`, `extract_last_number`, `extract_code`, and this function's own fallback).
+**Actual:** it returned `A`: `pat.search()` grabs the first occurrence, so a self-correcting model was graded against its abandoned answer, corrupting the training/eval reward signal.
+**Root cause:** first-match `search()` instead of last-match over the highest-priority pattern.
+**Fix / decision:** take the **last** occurrence of the highest-priority matching pattern (`finditer()[-1]`); pattern priority order is unchanged, so an explicit "answer is X" earlier still beats a lower-priority "Option Y" later. Regression tests in `tests/test_reward_choice.py`.
+**Follow-up:** none.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.
