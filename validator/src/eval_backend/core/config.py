@@ -42,6 +42,15 @@ def _resolve_repo_path(root: Path, raw: str) -> Path:
     return (root / path).resolve()
 
 
+def _normalize_pipeline_mode(raw: str) -> str:
+    mode = raw.strip().lower()
+    if mode in {"submission", "submission_eval", "eval", "checkpoint_eval"}:
+        return PIPELINE_SUBMISSION_EVAL
+    if mode in {"train", "train_eval", "pr_train_eval", "code_train"}:
+        return PIPELINE_TRAIN_EVAL
+    return DEFAULT_PIPELINE_MODE
+
+
 DEFAULT_DATABASE_URL = "postgresql+psycopg://minirouter:minirouter@127.0.0.1:5432/minirouter"
 DEFAULT_ARTIFACT_ROOT = Path("./data/artifacts")
 DEFAULT_WORKSPACE_ROOT = Path("./data/workspaces")
@@ -59,6 +68,9 @@ DEFAULT_ARTIFACT_STORAGE_BACKEND = "huggingface"
 DEFAULT_TRINITY_REMOTE_DIR = "trinity"
 DEFAULT_TRINITY_REMOTE_WORKSPACE_ROOT = "~/trinity-eval-workspaces"
 DEFAULT_TRINITY_GPU_INDEX = 5
+PIPELINE_SUBMISSION_EVAL = "submission_eval"
+PIPELINE_TRAIN_EVAL = "train_eval"
+DEFAULT_PIPELINE_MODE = PIPELINE_SUBMISSION_EVAL
 DEFAULT_REMOTE_EVAL_COMMAND_TEMPLATE = (
     "PYTHONPATH=src "
     "PYTHONUNBUFFERED=1 python -u -m trinity.eval --submission-only "
@@ -132,6 +144,7 @@ class Settings:
     eval_timeout_seconds: int = DEFAULT_EVAL_TIMEOUT_SECONDS
     eval_execution_mode: str = DEFAULT_EVAL_EXECUTION_MODE
     eval_allow_local_fallback: bool = DEFAULT_EVAL_ALLOW_LOCAL_FALLBACK
+    pipeline_mode: str = DEFAULT_PIPELINE_MODE
     train_provider: str = DEFAULT_TRAIN_PROVIDER
     train_models_config: str = DEFAULT_TRAIN_MODELS_CONFIG
     train_config: str = DEFAULT_TRAIN_CONFIG
@@ -207,6 +220,7 @@ class Settings:
             eval_execution_mode=get("EVAL_EXECUTION_MODE", DEFAULT_EVAL_EXECUTION_MODE),
             eval_allow_local_fallback=get("EVAL_ALLOW_LOCAL_FALLBACK", "true").lower()
             in {"1", "true", "yes", "on"},
+            pipeline_mode=_normalize_pipeline_mode(get("PIPELINE_MODE", DEFAULT_PIPELINE_MODE)),
             train_provider=get("TRAIN_PROVIDER", DEFAULT_TRAIN_PROVIDER),
             train_models_config=get("TRAIN_MODELS_CONFIG", DEFAULT_TRAIN_MODELS_CONFIG),
             train_config=get("TRAIN_CONFIG", DEFAULT_TRAIN_CONFIG),
@@ -226,6 +240,10 @@ class Settings:
     def trinity_gpu_host(self) -> str:
         """Backward-compatible alias for the remote GPU host setting."""
         return self.trinity_remote_host
+
+    @property
+    def uses_train_pipeline(self) -> bool:
+        return self.pipeline_mode == PIPELINE_TRAIN_EVAL
 
     def ensure_dirs(self) -> None:
         self.artifact_root.mkdir(parents=True, exist_ok=True)

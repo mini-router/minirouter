@@ -27,7 +27,7 @@ from ..schemas import (
 from ..services.eval_runner import evaluate_submission
 from ..services.github import create_pr_submission
 from ..services.artifacts import persist_stored_artifact
-from ..services.queue import enqueue_submission_job
+from ..services.queue import enqueue_submission_pipeline_job
 from ..services.queue import enqueue_train_job
 from ..services.storage import store_upload
 
@@ -307,10 +307,13 @@ async def submit(
             submission.latest_score = None
             submission.latest_eval_id = None
             submission.best_eval_id = None
-        if submission.submission_artifact_id is not None and not settings.sync_eval_on_submit:
-            enqueue_submission_job(
+        if submission.submission_artifact_id is not None and (
+            not settings.sync_eval_on_submit or settings.uses_train_pipeline
+        ):
+            enqueue_submission_pipeline_job(
                 session,
                 submission,
+                settings,
                 payload_json={
                     "submission_id": submission.id,
                     "benchmark_names": submission.benchmark_names_json,
@@ -320,7 +323,7 @@ async def submit(
         session.flush()
         session.commit()
 
-        if settings.sync_eval_on_submit:
+        if settings.sync_eval_on_submit and not settings.uses_train_pipeline:
             session.refresh(submission)
             evaluate_submission(session, submission, settings)
             session.commit()
@@ -452,10 +455,11 @@ async def github_submission_upload(
             },
         )
         submission.submission_artifact_id = artifact_row.id
-        if not settings.sync_eval_on_submit:
-            enqueue_submission_job(
+        if not settings.sync_eval_on_submit or settings.uses_train_pipeline:
+            enqueue_submission_pipeline_job(
                 session,
                 submission,
+                settings,
                 payload_json={
                     "submission_id": submission.id,
                     "benchmark_names": submission.benchmark_names_json,

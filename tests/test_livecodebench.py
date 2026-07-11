@@ -8,8 +8,8 @@ import trinity.orchestration.reward as R
 def test_livecodebench_facade_delegates(monkeypatch):
     seen = {}
 
-    def fake_load_tasks(benchmark, split, max_items, seed):
-        seen["args"] = (benchmark, split, max_items, seed)
+    def fake_load_tasks(split, *, max_items=None, seed=0, allow_toy_fallback=False):
+        seen["args"] = (split, max_items, seed, allow_toy_fallback)
         return ["ok"]
 
     monkeypatch.setattr(LCB, "load_tasks", fake_load_tasks)
@@ -17,7 +17,7 @@ def test_livecodebench_facade_delegates(monkeypatch):
     out = LCB.load("test", max_items=3, seed=7)
 
     assert out == ["ok"]
-    assert seen["args"] == ("livecodebench", "test", 3, 7)
+    assert seen["args"] == ("test", 3, 7, False)
 
 
 def test_livecodebench_facade_forwards_allow_toy_fallback(monkeypatch):

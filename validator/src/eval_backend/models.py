@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -108,7 +109,10 @@ class Submission(Base):
         checkpoint_path = meta.get("checkpoint_path")
         if isinstance(checkpoint_path, str) and checkpoint_path.strip():
             return checkpoint_path
-        return artifact.storage_uri
+        storage_uri = artifact.storage_uri or ""
+        if Path(storage_uri).suffix.lower() in {".npy", ".pt", ".pth"}:
+            return storage_uri
+        return None
 
 
 class Artifact(Base):
