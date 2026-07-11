@@ -18,6 +18,15 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-10 — pycma silently ignores seed=0, so our documented reproducible default wasn't  #mistake #gotcha #repro
+**Context:** `SepCMAES` and `trinity.train` both default to `seed=0` and document it as reproducible (issue #54).
+**Expected:** two `seed=0` runs produce identical populations.
+**Actual:** `first_pop(0) != first_pop(0)` — every default-seed training run was unrepeatable (can't reproduce a `best_theta.npy`, re-run an ablation, or bisect a regression). Nonzero seeds were fine.
+**Root cause:** pycma's documented behavior: "cma ignores if seed==0" — it leaves numpy's global RNG unseeded in that case. `SepCMAES.__init__` forwarded the raw 0.
+**Fix / decision:** remap `seed==0` to a fixed nonzero constant in pycma's valid range `[1, 2**32-1]` before building `CMAEvolutionStrategy`; all other seeds unchanged, `self.seed` still reports the caller's value. cma-gated offline tests in `tests/test_sep_cmaes_seed.py` (skip when pycma absent).
+**Gotcha:** any library that treats 0 as "no seed" turns a conventional default into silent nondeterminism — check the seed contract when wrapping RNG-bearing libs.
+**Follow-up:** none.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.
