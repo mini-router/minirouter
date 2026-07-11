@@ -1,14 +1,14 @@
 {
   "benchmark": "math500",
   "pool": [
-    "deepseek-v4-pro",
-    "glm-5p2",
-    "kimi-k2p6"
+    "deepseek-v3p2",
+    "glm-5",
+    "kimi-k2p5"
   ],
   "n_total": 13312,
-  "popsize": 2,
-  "m_cma": 1,
-  "generations": 1,
-  "best_fitness": 1.0,
-  "run_dir": "/home/ubuntu/codes/tmimmanuel/tiny-router-works/minirouter/experiments/math500/local-openrouter-mini"
+  "popsize": 4,
+  "m_cma": 2,
+  "generations": 4,
+  "best_fitness": 1.0332482462108714,
+  "run_dir": "/root/gittensor-workspace/minirouter/experiments/math500/kiannidev-king"
 }
