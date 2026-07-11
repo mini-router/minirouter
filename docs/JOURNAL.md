@@ -18,6 +18,14 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-10 — results_table multi-task summary crashed on a missing baseline; `or 0` would have been worse  #mistake #decision #repro
+**Context:** `scripts/results_table.py` renders the R1/R2/R4 verdicts (issue #81).
+**Expected:** an eval*.json missing `random_routing` (a legitimately optional key — `load_rows` reads it with `.get()`) degrades gracefully like the per-coordinator table already does.
+**Actual:** the multi-task summary summed/maxed the raw values: `TypeError: unsupported operand type(s) for +: 'int' and 'NoneType'`, killing the entire report including tables already built.
+**Root cause:** `trin_avg`/`rand_avg` never got the null-safe treatment `single_avg()` directly above them already had.
+**Fix / decision:** aggregate TRINITY/random with the same pattern as `single_avg` (drop nulls per bench, skip empty benches, `None` when never measured). Deliberately did NOT coerce with `or 0`: a missing random baseline would print `R4 ✅ HOLDS` against a baseline that was never measured — a fabricated win. Unmeasured values render as `—` and verdicts print `⚠️ N/A — baseline unmeasured` via the new `_verdict()` helper. Regression tests added to `tests/test_results_table.py`.
+**Follow-up:** none.
+
 ## 2026-07-09 — MMLU training silently trained on the 2-item toy set  #mistake #repro
 **Context:** issue #44 — auditing the data path for `python -m trinity.train --benchmark mmlu`.
 **Expected:** training draws minibatches from the real MMLU dataset.
