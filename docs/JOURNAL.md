@@ -18,6 +18,15 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-10 — livecodebench.load() raised TypeError on every call; its test hid the bug  #mistake #repro #gotcha
+**Context:** the config-facing LiveCodeBench facade (issue #86). `benchmarks/__init__.py` promises `load(split, **kw)` and `configs/benchmarks.yaml` registers `benchmarks.livecodebench` as the loader.
+**Expected:** `LCB.load("test", max_items=1)` returns tasks.
+**Actual:** `TypeError: load_tasks() takes 1 positional argument but 2 positional arguments ... were given` — on **every** call, before any dataset work.
+**Root cause:** `load()` passed two positionals (`"livecodebench"`, split) to the *sibling* `load_tasks(split, *, ...)`; the benchmark-name positional belongs to the imported `_load_tasks`. CI stayed green because the facade test monkeypatched `LCB.load_tasks` with a 4-positional fake — it tested the mock, not the code.
+**Fix / decision:** `load()` now delegates `load_tasks(split, ...)` (which injects the benchmark name) and forwards `allow_toy_fallback`. The test was repointed at the real dependency (`_load_tasks`) so it exercises the actual call path; verified it fails on the old source.
+**Gotcha for future tests:** monkeypatch the *imported underlying dependency*, never the sibling function under test — otherwise the test can green-light a dead entrypoint.
+**Follow-up:** `allow_toy_fallback` is still a no-op end to end; making the toy fallback loud is issue #65.
+
 ## 2026-07-09 — MMLU training silently trained on the 2-item toy set  #mistake #repro
 **Context:** issue #44 — auditing the data path for `python -m trinity.train --benchmark mmlu`.
 **Expected:** training draws minibatches from the real MMLU dataset.
