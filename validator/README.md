@@ -89,6 +89,13 @@ DATABASE_URL=postgresql+psycopg://minirouter:minirouter@127.0.0.1:5432/miniroute
 ```
 
 For workflow smoke checks, set `EVAL_MAX_ITEMS=1` in the repo-root `secrets.env`.
+Set `PIPELINE_MODE=submission_eval` to keep the current "submit a trained
+checkpoint and evaluate it" path, or `PIPELINE_MODE=train_eval` to switch the
+backend into the PR-code training path. In train mode, the uploaded archive is
+treated as source code, the worker trains a router on the server, and the
+resulting checkpoint is evaluated afterward. The automation should upload
+`submissions/final_model/` in submission mode and the PR source bundle in train
+mode.
 
 GitHub PR automation uses the repo-root `GITHUB_WEBHOOK_SECRET` plus the optional
 `GITHUB_ACCESS_TOKEN`. Set `PUBLIC_SITE_URL` if the public frontend moves to a different domain.

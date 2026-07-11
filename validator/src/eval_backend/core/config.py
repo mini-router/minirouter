@@ -42,6 +42,15 @@ def _resolve_repo_path(root: Path, raw: str) -> Path:
     return (root / path).resolve()
 
 
+def _normalize_pipeline_mode(raw: str) -> str:
+    mode = raw.strip().lower()
+    if mode in {"submission", "submission_eval", "eval", "checkpoint_eval"}:
+        return PIPELINE_SUBMISSION_EVAL
+    if mode in {"train", "train_eval", "pr_train_eval", "code_train"}:
+        return PIPELINE_TRAIN_EVAL
+    return DEFAULT_PIPELINE_MODE
+
+
 DEFAULT_DATABASE_URL = "postgresql+psycopg://minirouter:minirouter@127.0.0.1:5432/minirouter"
 DEFAULT_ARTIFACT_ROOT = Path("./data/artifacts")
 DEFAULT_WORKSPACE_ROOT = Path("./data/workspaces")
@@ -55,9 +64,13 @@ DEFAULT_GITHUB_MERGE_METHOD = "merge"
 DEFAULT_ALLOWED_REPO = "mini-router/minirouter"
 DEFAULT_MINER_REPO_URL = "https://github.com/mini-router/minirouter"
 DEFAULT_PUBLIC_SITE_URL = "https://minirouter.work.gd"
+DEFAULT_ARTIFACT_STORAGE_BACKEND = "huggingface"
 DEFAULT_TRINITY_REMOTE_DIR = "trinity"
 DEFAULT_TRINITY_REMOTE_WORKSPACE_ROOT = "~/trinity-eval-workspaces"
 DEFAULT_TRINITY_GPU_INDEX = 5
+PIPELINE_SUBMISSION_EVAL = "submission_eval"
+PIPELINE_TRAIN_EVAL = "train_eval"
+DEFAULT_PIPELINE_MODE = PIPELINE_SUBMISSION_EVAL
 DEFAULT_REMOTE_EVAL_COMMAND_TEMPLATE = (
     "PYTHONPATH=src "
     "PYTHONUNBUFFERED=1 python -u -m trinity.eval --submission-only "
@@ -84,6 +97,17 @@ DEFAULT_TRINITY_SECRETS_FILE = "./secrets.env"
 DEFAULT_EVAL_TIMEOUT_SECONDS = 1800
 DEFAULT_EVAL_EXECUTION_MODE = "remote_gpu"
 DEFAULT_EVAL_ALLOW_LOCAL_FALLBACK = True
+DEFAULT_TRAIN_PROVIDER = DEFAULT_EVAL_PROVIDER
+DEFAULT_TRAIN_MODELS_CONFIG = DEFAULT_EVAL_MODELS_CONFIG
+DEFAULT_TRAIN_CONFIG = "configs/trinity.yaml"
+DEFAULT_TRAIN_DEVICE = "cuda:0"
+DEFAULT_TRAIN_DTYPE = "bfloat16"
+DEFAULT_TRAIN_MAX_ITEMS = 256
+DEFAULT_TRAIN_GENERATIONS = 60
+DEFAULT_TRAIN_POPSIZE = 0
+DEFAULT_TRAIN_M_CMA = 16
+DEFAULT_TRAIN_RUN_NAME_PREFIX = "train"
+DEFAULT_TRAIN_BENCHMARK = DEFAULT_EVAL_BENCHMARK
 
 
 @dataclass(slots=True)
@@ -100,6 +124,7 @@ class Settings:
     allowed_repo: str = DEFAULT_ALLOWED_REPO
     miner_repo_url: str = DEFAULT_MINER_REPO_URL
     public_site_url: str = DEFAULT_PUBLIC_SITE_URL
+    artifact_storage_backend: str = DEFAULT_ARTIFACT_STORAGE_BACKEND
     local_repo_dir: Path = field(default_factory=lambda: DEFAULT_LOCAL_REPO_DIR)
     trinity_remote_host: str = "trinity-gpu"
     trinity_remote_dir: str = DEFAULT_TRINITY_REMOTE_DIR
@@ -119,6 +144,18 @@ class Settings:
     eval_timeout_seconds: int = DEFAULT_EVAL_TIMEOUT_SECONDS
     eval_execution_mode: str = DEFAULT_EVAL_EXECUTION_MODE
     eval_allow_local_fallback: bool = DEFAULT_EVAL_ALLOW_LOCAL_FALLBACK
+    pipeline_mode: str = DEFAULT_PIPELINE_MODE
+    train_provider: str = DEFAULT_TRAIN_PROVIDER
+    train_models_config: str = DEFAULT_TRAIN_MODELS_CONFIG
+    train_config: str = DEFAULT_TRAIN_CONFIG
+    train_device: str = DEFAULT_TRAIN_DEVICE
+    train_dtype: str = DEFAULT_TRAIN_DTYPE
+    train_max_items: int = DEFAULT_TRAIN_MAX_ITEMS
+    train_generations: int = DEFAULT_TRAIN_GENERATIONS
+    train_popsize: int = DEFAULT_TRAIN_POPSIZE
+    train_m_cma: int = DEFAULT_TRAIN_M_CMA
+    train_run_name_prefix: str = DEFAULT_TRAIN_RUN_NAME_PREFIX
+    train_benchmark: str = DEFAULT_TRAIN_BENCHMARK
     sync_eval_on_submit: bool = False
 
     @classmethod
@@ -154,6 +191,9 @@ class Settings:
             allowed_repo=get("ALLOWED_REPO", DEFAULT_ALLOWED_REPO),
             miner_repo_url=get("MINER_REPO_URL", DEFAULT_MINER_REPO_URL),
             public_site_url=get("PUBLIC_SITE_URL", DEFAULT_PUBLIC_SITE_URL),
+            artifact_storage_backend=get(
+                "ARTIFACT_STORAGE_BACKEND", DEFAULT_ARTIFACT_STORAGE_BACKEND
+            ),
             local_repo_dir=_resolve_repo_path(root, get("MINIROUTER_REPO_DIR", str(DEFAULT_LOCAL_REPO_DIR))),
             trinity_remote_host=get("TRINITY_GPU_HOST", "trinity-gpu"),
             trinity_remote_dir=get("TRINITY_REMOTE_DIR", DEFAULT_TRINITY_REMOTE_DIR),
@@ -180,6 +220,18 @@ class Settings:
             eval_execution_mode=get("EVAL_EXECUTION_MODE", DEFAULT_EVAL_EXECUTION_MODE),
             eval_allow_local_fallback=get("EVAL_ALLOW_LOCAL_FALLBACK", "true").lower()
             in {"1", "true", "yes", "on"},
+            pipeline_mode=_normalize_pipeline_mode(get("PIPELINE_MODE", DEFAULT_PIPELINE_MODE)),
+            train_provider=get("TRAIN_PROVIDER", DEFAULT_TRAIN_PROVIDER),
+            train_models_config=get("TRAIN_MODELS_CONFIG", DEFAULT_TRAIN_MODELS_CONFIG),
+            train_config=get("TRAIN_CONFIG", DEFAULT_TRAIN_CONFIG),
+            train_device=get("TRAIN_DEVICE", DEFAULT_TRAIN_DEVICE),
+            train_dtype=get("TRAIN_DTYPE", DEFAULT_TRAIN_DTYPE),
+            train_max_items=int(get("TRAIN_MAX_ITEMS", str(DEFAULT_TRAIN_MAX_ITEMS))),
+            train_generations=int(get("TRAIN_GENERATIONS", str(DEFAULT_TRAIN_GENERATIONS))),
+            train_popsize=int(get("TRAIN_POPSIZE", str(DEFAULT_TRAIN_POPSIZE))),
+            train_m_cma=int(get("TRAIN_M_CMA", str(DEFAULT_TRAIN_M_CMA))),
+            train_run_name_prefix=get("TRAIN_RUN_NAME_PREFIX", DEFAULT_TRAIN_RUN_NAME_PREFIX),
+            train_benchmark=get("TRAIN_BENCHMARK", DEFAULT_TRAIN_BENCHMARK),
             sync_eval_on_submit=get("SYNC_EVAL_ON_SUBMIT", "false").lower()
             in {"1", "true", "yes", "on"},
         )
@@ -189,9 +241,14 @@ class Settings:
         """Backward-compatible alias for the remote GPU host setting."""
         return self.trinity_remote_host
 
+    @property
+    def uses_train_pipeline(self) -> bool:
+        return self.pipeline_mode == PIPELINE_TRAIN_EVAL
+
     def ensure_dirs(self) -> None:
         self.artifact_root.mkdir(parents=True, exist_ok=True)
         self.workspace_root.mkdir(parents=True, exist_ok=True)
         (self.artifact_root / "uploads").mkdir(parents=True, exist_ok=True)
         (self.artifact_root / "extracted").mkdir(parents=True, exist_ok=True)
         (self.workspace_root / "submissions").mkdir(parents=True, exist_ok=True)
+        (self.workspace_root / "trains").mkdir(parents=True, exist_ok=True)

@@ -59,6 +59,9 @@ No separate GitHub bot is required for that flow.
 
 The validator backend stores submissions and evaluation runs in Postgres. Set
 `DATABASE_URL` in the repo-root `secrets.env` before starting the API or worker.
+Use `PIPELINE_MODE=submission_eval` for the current checkpoint-evaluation flow, or
+`PIPELINE_MODE=train_eval` to switch the validator into the server-side
+train-then-evaluate flow for PR code submissions.
 
 ## Model pool
 

@@ -21,17 +21,18 @@ def seed_mock_leaderboard(session) -> int:
         submission = Submission(
             id=entry.submission_id,
             source="seed",
-            team_name=entry.team,
+            miner_id=entry.miner_id or entry.team,
             repo_full_name=None,
             pr_number=None,
             head_sha=None,
-            artifact_name="readme-mock-data",
-            artifact_path=f"seed://leaderboard/{entry.submission_id}.json",
-            artifact_sha256="0" * 64,
-            checkpoint_path=None,
-            benchmark="combined",
+            benchmark_names_json=["combined"],
             status="completed",
             latest_score=entry.accuracy,
+            latest_eval_id=None,
+            best_eval_id=None,
+            finished_at=entry.submitted,
+            duration_seconds=None,
+            cost_usd=None,
             created_at=entry.submitted,
             updated_at=entry.submitted,
         )
@@ -52,6 +53,7 @@ def seed_mock_leaderboard(session) -> int:
             message="seeded from README results table",
             progress_current=1,
             progress_total=1,
+            benchmark_names_json=["combined"],
             metrics_json=json.dumps(metrics),
             command="seed://readme-results",
             stdout="seeded from README results table\n",
@@ -64,7 +66,8 @@ def seed_mock_leaderboard(session) -> int:
         )
         session.add(run)
         session.flush()
-        submission.best_run_id = run.id
+        submission.latest_eval_id = run.id
+        submission.best_eval_id = run.id
         created += 1
 
     session.commit()
