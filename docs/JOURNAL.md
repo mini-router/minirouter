@@ -40,6 +40,53 @@ left alone here since the toy-set fallback behaviour is tracked separately in #6
 
 ---
 
+## 2026-07-09 — MMLU training silently trained on the 2-item toy set  #mistake #repro
+**Context:** issue #44 — auditing the data path for `python -m trinity.train --benchmark mmlu`.
+**Expected:** training draws minibatches from the real MMLU dataset.
+**Actual:** every minibatch came from the 2-item MMLU *toy set*, with no error or warning.
+**Root cause:** `train.py` calls `load_tasks(benchmark, "train", ...)`, and `_load_mmlu_hf`
+passed `split="train"` straight to `load_dataset("cais/mmlu", "all", split="train")`. But
+`cais/mmlu` has no `train` split (only `auxiliary_train`, `dev`, `validation`, `test`), so the
+load raised, `_try_load_hf` swallowed it and returned `None`, and `load_tasks` silently fell
+back to `_toy_tasks("mmlu")`. The load failed even with `datasets`+network available. (Eval is
+fine — it requests `"test"`. GPQA/LCB/math500 use split names that exist or map correctly.)
+**Fix / decision:** add `_mmlu_split_for_split` (mirroring `_lcb_version_for_split`) mapping
+`train` -> `auxiliary_train` (MMLU's designated training pool, same row schema as `test`) and
+passing `test`/`validation`/`dev` through, then route `_load_mmlu_hf` through it. Added
+`tests/test_dataset_mmlu_split.py` (offline) asserting the mapping never yields a non-existent
+split name.
+**Follow-up:** complementary to #7 (fail-loud-on-toy-fallback); this fixes the *reason* the MMLU
+load failed rather than only surfacing it.
+
+## 2026-07-09 — Submission eval now batches benchmark items + host alias fixed  #fix #perf #validator
+**Context:** validator submission eval was still processing benchmark items one by one, and the remote
+GPU host field used by the worker did not match the config dataclass.
+**Expected:** operators should be able to tune concurrent benchmark-item evaluation with `--batch-size`
+or `EVAL_BATCH_SIZE`, and the worker should resolve the remote host from the configured settings.
+**Actual:** `trinity.eval` ran each item sequentially, which made Chutes/OpenRouter smoke tests slow; the
+worker also referenced `settings.trinity_gpu_host` even though the config exposed `trinity_remote_host`.
+**Root cause:** task-level concurrency had never been wired into the eval entrypoint, and the config field
+name drifted between the settings loader and the runner.
+**Fix / decision:** evaluate benchmark items in bounded async batches, expose the knob in the CLI and the
+worker env/template, add a compatibility alias for the host setting, and keep the default batch size
+conservative so operators can opt up explicitly.
+**Follow-up:** none.
+
+## 2026-07-09 — LiveCodeBench benchmark facade and regression tests added  #decision #repro
+**Context:** the core dataset loader and reward checker already handled LiveCodeBench, but the repo
+still only exposed a stub benchmark package and the high-level README did not describe the code
+benchmark path.
+**Expected:** the config-facing benchmark registry should have a concrete LiveCodeBench module, and
+the behavior should be covered by offline tests.
+**Actual:** `benchmarks/livecodebench.py` did not exist, so `configs/benchmarks.yaml` pointed at a
+module name with no implementation.
+**Root cause:** the internal loader/scorer landed before the public benchmark facade.
+**Fix / decision:** add `benchmarks/livecodebench.py` as a thin wrapper around
+`trinity.orchestration.dataset.load_tasks("livecodebench", ...)`, add tests for facade delegation,
+HF row parsing, and pass@1 scoring, and update the README to call out LiveCodeBench explicitly in the
+automatic grader description.
+**Follow-up:** if we later wire `configs/benchmarks.yaml` into a runtime loader, the module is now in
+place.
 ## 2026-07-09 — role prompt assembly unit tests  #decision #repro
 **Context:** ``roles/prompts.py`` implements SPEC §4.4 system contracts and the
 ``render_transcript`` / ``build_messages`` helpers used by the inner loop, but had
@@ -50,6 +97,7 @@ and role-specific system prompts cannot drift silently.
 **Root cause:** small pure-string module shipped without pytest coverage.
 **Fix / decision:** add offline tests for empty/single/multi-turn transcript rendering,
 verifier verdict surfacing, and OpenAI-style message layout per role.
+
 ## 2026-07-09 — async batch gather unit tests  #decision #repro
 **Context:** ``orchestration/async_utils.gather_in_batches`` bounds fan-out for large
 benchmark sweeps but had no dedicated offline tests.
@@ -160,6 +208,18 @@ made it fail-safe — a missing/empty choice (or missing `message`) yields an em
 handling. Added `tests/test_pool_parse.py` (7 cases). Scoped to the parsing path only (not the imports)
 so it stays independent of the separate `import sys` --selftest fix (#25).
 **Follow-up:** none — self-contained client-robustness fix.
+## 2026-07-08 — Remote eval used nonexistent settings.trinity_gpu_host  #mistake #fix
+**Context:** issue #46 reported that validator remote GPU evaluation failed before SSH with
+`AttributeError: 'Settings' object has no attribute 'trinity_gpu_host'`.
+**Expected:** `_remote_attempt()` should read the configured remote host from `Settings.trinity_remote_host`
+(`TRINITY_GPU_HOST` env).
+**Actual:** `eval_runner.py` referenced `settings.trinity_gpu_host`, which is not defined on `Settings`.
+**Root cause:** field rename/typo — config exposes `trinity_remote_host` but the runner still used the old name.
+**Fix / decision:** replaced both `trinity_gpu_host` references in `eval_runner.py` with
+`trinity_remote_host`; added `validator/tests/test_eval_runner_remote_host.py` to assert SSH host resolution
+uses the real Settings field.
+**Follow-up:** none.
+
 
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
