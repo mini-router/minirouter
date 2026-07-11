@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..core.config import Settings
 from ..models import EvaluationRun, Submission
 from .eval_runner import EvaluationResult
+from .artifacts import persist_stored_artifact
 from .storage import StoredArtifact
 
 GITHUB_API_BASE = "https://api.github.com"
@@ -57,44 +58,62 @@ def create_pr_submission(
 ) -> Submission:
     existing = _submission_query(session, repo_full_name, pr_number)
     if existing is not None:
-        existing.team_name = team_name or existing.team_name
         changed = False
+        if team_name and team_name != existing.miner_id:
+            existing.miner_id = team_name
+            changed = True
         if head_sha and head_sha != existing.head_sha:
             existing.head_sha = head_sha
             changed = True
         if artifact is not None:
-            existing.artifact_name = artifact.name
-            existing.artifact_path = str(artifact.path)
-            existing.artifact_sha256 = artifact.sha256
-            existing.checkpoint_path = (
-                str(artifact.checkpoint_path) if artifact.checkpoint_path else None
+            artifact_row = persist_stored_artifact(
+                session,
+                artifact,
+                storage_backend=settings.artifact_storage_backend,
+                submission_id=existing.id,
+                meta_json={
+                    "checkpoint_path": str(artifact.checkpoint_path)
+                    if artifact.checkpoint_path
+                    else None,
+                    "extracted_root": str(artifact.extracted_root) if artifact.extracted_root else None,
+                },
             )
+            existing.submission_artifact_id = artifact_row.id
             changed = True
         if changed:
-            existing.status = "queued"
+            existing.status = "queued" if artifact is not None else existing.status or "awaiting_upload"
             existing.latest_score = None
-            existing.best_run_id = None
+            existing.latest_eval_id = None
+            existing.best_eval_id = None
             existing.updated_at = _utcnow()
         return existing
 
     submission = Submission(
         id=str(uuid4()),
         source="github_pr",
-        team_name=team_name,
+        miner_id=team_name,
         repo_full_name=repo_full_name,
         pr_number=pr_number,
         head_sha=head_sha,
-        artifact_name=(artifact.name if artifact else "github-pr"),
-        artifact_path=(str(artifact.path) if artifact else ""),
-        artifact_sha256=(artifact.sha256 if artifact else ""),
-        checkpoint_path=(str(artifact.checkpoint_path) if artifact and artifact.checkpoint_path else None),
-        benchmark=settings.eval_benchmark,
-        status="queued",
+        benchmark_names_json=[settings.eval_benchmark],
+        status="queued" if artifact is not None else "awaiting_upload",
         created_at=_utcnow(),
         updated_at=_utcnow(),
     )
     session.add(submission)
     session.flush()
+    if artifact is not None:
+        artifact_row = persist_stored_artifact(
+            session,
+            artifact,
+            storage_backend=settings.artifact_storage_backend,
+            submission_id=submission.id,
+            meta_json={
+                "checkpoint_path": str(artifact.checkpoint_path) if artifact.checkpoint_path else None,
+                "extracted_root": str(artifact.extracted_root) if artifact.extracted_root else None,
+            },
+        )
+        submission.submission_artifact_id = artifact_row.id
     return submission
 
 
@@ -164,12 +183,12 @@ def build_submission_summary_markdown(
         score_text = f"{evaluation.score:.4f} ({evaluation.score * 100:.2f}%)"
 
     summary_line = (
-        f"Submission for **{submission.team_name or submission.repo_full_name or submission.id}** "
+        f"Submission for **{submission.miner_id or submission.repo_full_name or submission.id}** "
         f"on **{submission.benchmark}** completed with status **{evaluation.status}**."
     )
     if evaluation.status == "failed" and evaluation.error:
         summary_line = (
-            f"Submission for **{submission.team_name or submission.repo_full_name or submission.id}** "
+            f"Submission for **{submission.miner_id or submission.repo_full_name or submission.id}** "
             f"on **{submission.benchmark}** failed during evaluation."
         )
 

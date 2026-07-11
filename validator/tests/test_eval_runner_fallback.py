@@ -3,19 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
 from eval_backend.core.config import Settings
-from eval_backend.db import Base
-from eval_backend.models import Submission
+from eval_backend.models import Artifact, Submission
 from eval_backend.services import eval_runner
-
-
-def _build_session():
-    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
-    Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)()
 
 
 def _build_settings(tmp_path: Path, *, allow_local_fallback: bool) -> Settings:
@@ -30,23 +20,33 @@ def _build_settings(tmp_path: Path, *, allow_local_fallback: bool) -> Settings:
 
 
 def _add_submission(session, checkpoint_path: Path) -> Submission:
+    artifact = Artifact(
+        id="artifact-fallback",
+        storage_backend="local",
+        storage_uri=str(checkpoint_path),
+        file_names_json=[checkpoint_path.name],
+        sha256="abc123",
+        size_bytes=checkpoint_path.stat().st_size,
+        mime_type="application/octet-stream",
+        submission_id="sub-fallback",
+        meta_json={"checkpoint_path": str(checkpoint_path)},
+    )
     submission = Submission(
         id="sub-fallback",
         source="upload",
-        artifact_name="bundle.zip",
-        artifact_path=str(checkpoint_path),
-        artifact_sha256="abc123",
-        checkpoint_path=str(checkpoint_path),
-        benchmark="math500",
+        miner_id="miner-a",
+        benchmark_names_json=["math500"],
         status="queued",
     )
+    session.add(artifact)
     session.add(submission)
+    submission.submission_artifact_id = artifact.id
     session.flush()
     return submission
 
 
-def test_remote_failure_records_local_fallback_metadata(tmp_path, monkeypatch):
-    session = _build_session()
+def test_remote_failure_records_local_fallback_metadata(validator_session, tmp_path, monkeypatch):
+    session = validator_session
     settings = _build_settings(tmp_path, allow_local_fallback=True)
     checkpoint_path = tmp_path / "theta.npy"
     checkpoint_path.write_bytes(b"theta")
@@ -85,8 +85,8 @@ def test_remote_failure_records_local_fallback_metadata(tmp_path, monkeypatch):
     assert "remote gpu attempt failed" in result.metrics["remote_error"]
 
 
-def test_remote_failure_fails_when_local_fallback_disabled(tmp_path, monkeypatch):
-    session = _build_session()
+def test_remote_failure_fails_when_local_fallback_disabled(validator_session, tmp_path, monkeypatch):
+    session = validator_session
     settings = _build_settings(tmp_path, allow_local_fallback=False)
     checkpoint_path = tmp_path / "theta.npy"
     checkpoint_path.write_bytes(b"theta")
@@ -106,8 +106,34 @@ def test_remote_failure_fails_when_local_fallback_disabled(tmp_path, monkeypatch
     assert "remote gpu attempt failed" in result.metrics["remote_error"]
 
 
-def test_remote_success_marks_remote_execution_mode(tmp_path, monkeypatch):
-    session = _build_session()
+def test_remote_connection_failure_aborts_without_local_fallback(validator_session, tmp_path, monkeypatch):
+    session = validator_session
+    settings = _build_settings(tmp_path, allow_local_fallback=True)
+    checkpoint_path = tmp_path / "theta.npy"
+    checkpoint_path.write_bytes(b"theta")
+    submission = _add_submission(session, checkpoint_path)
+
+    def _fake_remote_attempt(*args, **kwargs):
+        raise eval_runner.RemoteConnectionError("ssh refused")
+
+    def _fake_local_attempt(*args, **kwargs):
+        raise AssertionError("local fallback must not run after remote connection failure")
+
+    monkeypatch.setattr(eval_runner, "_remote_attempt", _fake_remote_attempt)
+    monkeypatch.setattr(eval_runner, "_local_attempt", _fake_local_attempt)
+
+    result = eval_runner.evaluate_submission(session, submission, settings)
+
+    assert result.run.status == "failed"
+    assert submission.status == "failed"
+    assert result.metrics["execution_mode"] == "remote_gpu"
+    assert result.metrics["local_fallback"] is False
+    assert "remote gpu connection failed" in result.metrics["remote_connection_error"]
+    assert result.run.error and "remote gpu connection failed" in result.run.error
+
+
+def test_remote_success_marks_remote_execution_mode(validator_session, tmp_path, monkeypatch):
+    session = validator_session
     settings = _build_settings(tmp_path, allow_local_fallback=True)
     checkpoint_path = tmp_path / "theta.npy"
     checkpoint_path.write_bytes(b"theta")

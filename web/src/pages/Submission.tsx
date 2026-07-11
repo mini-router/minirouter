@@ -2,9 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import PageHeader from '../components/PageHeader'
-import { fetchSubmission } from '../lib/api'
+import {
+  fetchSubmission,
+  type BackendEvaluationOut,
+  type BackendSubmissionOut,
+  type BackendTrainOut,
+} from '../lib/api'
 
-type SubmissionResponse = Awaited<ReturnType<typeof fetchSubmission>>
+type SubmissionResponse = BackendSubmissionOut
 
 function formatDate(value: string | null | undefined) {
   if (!value) return '—'
@@ -15,6 +20,21 @@ function formatDate(value: string | null | undefined) {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function formatMoney(value: number | null | undefined) {
+  if (value == null) return '—'
+  return `$${value.toFixed(4)}`
+}
+
+function formatSeconds(value: number | null | undefined) {
+  if (value == null) return '—'
+  return `${value.toFixed(2)}s`
+}
+
+function formatPercent(value: number | null | undefined) {
+  if (value == null) return 'Pending'
+  return `${(value * 100).toFixed(2)}%`
 }
 
 function formatMetricValue(value: unknown) {
@@ -35,6 +55,154 @@ function formatMetricValue(value: unknown) {
 
 function isStructuredMetric(value: unknown) {
   return typeof value === 'object' && value !== null
+}
+
+function RunMetaGrid({
+  items,
+}: {
+  items: Array<[string, string]>
+}) {
+  return (
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      {items.map(([label, value]) => (
+        <div key={label} className="rounded-xl border border-white/8 bg-white/4 p-4">
+          <div className="meta-label">{label}</div>
+          <div className="mt-2 break-words text-sm text-text">{value}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function MetricsGrid({
+  metrics,
+}: {
+  metrics: Record<string, unknown>
+}) {
+  const entries = Object.entries(metrics)
+  if (entries.length === 0) return null
+
+  return (
+    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {entries.map(([key, value]) => (
+        <div key={key} className="rounded-xl border border-white/8 bg-surface-900/70 p-3">
+          <div className="text-xs uppercase tracking-[0.22em] text-text-dim">{key}</div>
+          {isStructuredMetric(value) ? (
+            <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-text">
+              {formatMetricValue(value)}
+            </pre>
+          ) : (
+            <div className="mt-2 font-mono text-sm text-text">{formatMetricValue(value)}</div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function RunCard({
+  title,
+  kind,
+  id,
+  status,
+  score,
+  startedAt,
+  finishedAt,
+  createdAt,
+  progressCurrent,
+  progressTotal,
+  costUsd,
+  durationSeconds,
+  benchmarkNames,
+  phase,
+  message,
+  command,
+  error,
+  metrics,
+  artifactLabel,
+  artifactId,
+}: {
+  title: string
+  kind: string
+  id: string | number
+  status: string
+  score?: number | null
+  startedAt?: string | null
+  finishedAt?: string | null
+  createdAt?: string
+  progressCurrent?: number | null
+  progressTotal?: number | null
+  costUsd?: number | null
+  durationSeconds?: number | null
+  benchmarkNames?: string[]
+  phase?: string | null
+  message?: string | null
+  command?: string | null
+  error?: string | null
+  metrics: Record<string, unknown>
+  artifactLabel: string
+  artifactId?: string | null
+}) {
+  return (
+    <div className="rounded-2xl border border-white/8 bg-white/4 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-sm text-text-dim">{title}</div>
+          <div className="mt-1 text-base font-medium text-text">
+            {kind} #{id}
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-sm text-text-dim">Status</div>
+          <div className="mt-1 font-mono text-text">{status}</div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {[
+          ['Score', formatPercent(score ?? null)],
+          ['Started', formatDate(startedAt)],
+          ['Finished', formatDate(finishedAt)],
+          ['Created', formatDate(createdAt)],
+          ['Progress', `${progressCurrent ?? 'n/a'}/${progressTotal ?? 'n/a'}`],
+          ['Duration', formatSeconds(durationSeconds)],
+          ['Cost', formatMoney(costUsd)],
+          ['Phase', phase || '—'],
+          ['Benchmarks', benchmarkNames?.length ? benchmarkNames.join(', ') : '—'],
+          ['Artifact', artifactId || '—'],
+          ['Artifact kind', artifactLabel],
+          ['Message', message || '—'],
+        ].map(([label, value]) => (
+          <div key={label as string} className="rounded-xl border border-white/8 bg-surface-900/70 p-3">
+            <div className="text-xs uppercase tracking-[0.22em] text-text-dim">{label}</div>
+            <div className="mt-2 break-words text-sm text-text">{value as string}</div>
+          </div>
+        ))}
+      </div>
+
+      {command && (
+        <div className="mt-4 rounded-xl border border-white/8 bg-surface-900/70 p-4">
+          <div className="text-xs uppercase tracking-[0.22em] text-text-dim">Command</div>
+          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-text">
+            {command}
+          </pre>
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-100">
+          {error}
+        </div>
+      )}
+
+      <MetricsGrid metrics={metrics} />
+    </div>
+  )
+}
+
+function pickRunById<T extends { id: number; created_at: string }>(runs: T[], id: number | null) {
+  if (id == null) return null
+  return runs.find((run) => run.id === id) ?? null
 }
 
 export default function Submission() {
@@ -73,16 +241,24 @@ export default function Submission() {
     }
   }, [id])
 
-  const bestEvaluation = useMemo(() => {
+  const latestTrain = useMemo<BackendTrainOut | null>(() => {
+    if (!submission?.trains?.length) return null
+    return pickRunById(submission.trains, submission.latest_train_id) ?? submission.trains.at(-1) ?? null
+  }, [submission])
+
+  const bestEvaluation = useMemo<BackendEvaluationOut | null>(() => {
     if (!submission?.evaluations?.length) return null
-    return [...submission.evaluations].sort((a, b) => (b.score ?? -1) - (a.score ?? -1))[0]
+    return (
+      pickRunById(submission.evaluations, submission.best_eval_id) ??
+      [...submission.evaluations].sort((a, b) => (b.score ?? -1) - (a.score ?? -1))[0]
+    )
   }, [submission])
 
   return (
     <>
       <PageHeader
         title="Submission Report"
-        subtitle="A structured view of the uploaded checkpoint, evaluation runs, and scoring output."
+        subtitle="A structured view of the uploaded checkpoint, train runs, evaluation runs, and stored metrics."
         eyebrow="MiniRouter Challenge"
       />
 
@@ -113,13 +289,15 @@ export default function Submission() {
                   <div className="max-w-3xl">
                     <p className="meta-label">Submission {submission.id}</p>
                     <h2 className="mt-2 text-2xl font-semibold text-text">
-                      {submission.team_name || submission.repo_full_name || 'Unnamed submission'}
+                      {submission.team_name || submission.miner_id || submission.repo_full_name || 'Unnamed submission'}
                     </h2>
                     <p className="mt-2 text-sm text-text-dim">
-                      Source: {submission.source} · Benchmark: {submission.benchmark} · Status: {submission.status}
+                      Source: {submission.source} · Benchmarks:{' '}
+                      {submission.benchmarks.length > 0 ? submission.benchmarks.join(', ') : submission.benchmark}{' '}
+                      · Status: {submission.status}
                     </p>
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-2 lg:min-w-[320px]">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:min-w-[360px]">
                     <div className="rounded-xl border border-white/8 bg-white/4 p-4">
                       <div className="meta-label">Latest score</div>
                       <div className="mt-2 text-2xl font-semibold text-text">
@@ -129,9 +307,21 @@ export default function Submission() {
                       </div>
                     </div>
                     <div className="rounded-xl border border-white/8 bg-white/4 p-4">
-                      <div className="meta-label">Evaluations</div>
+                      <div className="meta-label">Runs</div>
                       <div className="mt-2 text-2xl font-semibold text-text">
-                        {submission.evaluations.length}
+                        {submission.evaluations.length} eval / {submission.trains.length} train
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-white/8 bg-white/4 p-4">
+                      <div className="meta-label">Total duration</div>
+                      <div className="mt-2 text-2xl font-semibold text-text">
+                        {formatSeconds(submission.duration_seconds)}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-white/8 bg-white/4 p-4">
+                      <div className="meta-label">Total cost</div>
+                      <div className="mt-2 text-2xl font-semibold text-text">
+                        {formatMoney(submission.cost_usd)}
                       </div>
                     </div>
                   </div>
@@ -142,7 +332,18 @@ export default function Submission() {
                     ['Repository', submission.repo_full_name || '—'],
                     ['PR', submission.pr_number ? `#${submission.pr_number}` : '—'],
                     ['Head SHA', submission.head_sha || '—'],
-                    ['Artifact', submission.artifact_name],
+                    ['Submission artifact', submission.submission_artifact_id || '—'],
+                    ['Latest train id', submission.latest_train_id == null ? '—' : `#${submission.latest_train_id}`],
+                    ['Latest eval id', submission.latest_eval_id == null ? '—' : `#${submission.latest_eval_id}`],
+                    ['Best eval id', submission.best_eval_id == null ? '—' : `#${submission.best_eval_id}`],
+                    ['Current phase', submission.current_phase || '—'],
+                    ['Current message', submission.current_message || '—'],
+                    [
+                      'Current progress',
+                      `${submission.current_progress_current ?? 'n/a'}/${submission.current_progress_total ?? 'n/a'}`,
+                    ],
+                    ['Finished', formatDate(submission.finished_at)],
+                    ['Updated', formatDate(submission.updated_at)],
                   ].map(([label, value]) => (
                     <div key={label} className="rounded-xl border border-white/8 bg-white/4 p-4">
                       <div className="meta-label">{label}</div>
@@ -167,49 +368,72 @@ export default function Submission() {
                     <span className="ui-chip">{bestEvaluation.status}</span>
                   </div>
 
-                  <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                    {[
-                      ['Score', bestEvaluation.score == null ? 'Pending' : `${(bestEvaluation.score * 100).toFixed(2)}%`],
+                  <RunMetaGrid
+                    items={[
+                      ['Score', formatPercent(bestEvaluation.score)],
                       ['Started', formatDate(bestEvaluation.started_at)],
                       ['Finished', formatDate(bestEvaluation.finished_at)],
                       ['Created', formatDate(bestEvaluation.created_at)],
-                    ].map(([label, value]) => (
-                      <div key={label} className="rounded-xl border border-white/8 bg-white/4 p-4">
-                        <div className="meta-label">{label}</div>
-                        <div className="mt-2 text-sm text-text">{value}</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {Object.keys(bestEvaluation.metrics).length > 0 && (
-                    <div className="mt-6">
-                      <div className="meta-label">Metrics</div>
-                      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                        {Object.entries(bestEvaluation.metrics).map(([key, value]) => (
-                          <div key={key} className="rounded-xl border border-white/8 bg-white/4 p-4">
-                            <div className="text-xs uppercase tracking-[0.22em] text-text-dim">
-                              {key}
-                            </div>
-                            {isStructuredMetric(value) ? (
-                              <pre className="mt-2 max-h-44 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-text">
-                                {formatMetricValue(value)}
-                              </pre>
-                            ) : (
-                              <div className="mt-2 font-mono text-sm text-text">
-                                {formatMetricValue(value)}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                      ['Benchmark', bestEvaluation.benchmark_names.length ? bestEvaluation.benchmark_names.join(', ') : '—'],
+                      ['Provider', bestEvaluation.provider || '—'],
+                      ['Models config', bestEvaluation.models_config || '—'],
+                      ['Execution mode', bestEvaluation.execution_mode || '—'],
+                      ['Device / dtype', `${bestEvaluation.device || '—'} / ${bestEvaluation.dtype || '—'}`],
+                      ['Batch size', bestEvaluation.batch_size == null ? '—' : bestEvaluation.batch_size.toString()],
+                      ['Max items', bestEvaluation.max_items == null ? '—' : bestEvaluation.max_items.toString()],
+                      ['Cost', formatMoney(bestEvaluation.cost_usd)],
+                    ]}
+                  />
 
                   {bestEvaluation.error && (
                     <div className="mt-6 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-100">
                       {bestEvaluation.error}
                     </div>
                   )}
+
+                  <MetricsGrid metrics={bestEvaluation.metrics} />
+                </motion.div>
+              )}
+
+              {latestTrain && (
+                <motion.div
+                  className="panel p-7 md:p-8"
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.35, delay: 0.08 }}
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="meta-label">Latest train</p>
+                      <h3 className="mt-2 text-xl font-semibold text-text">Training run details</h3>
+                    </div>
+                    <span className="ui-chip">{latestTrain.status}</span>
+                  </div>
+
+                  <RunMetaGrid
+                    items={[
+                      ['Train id', `#${latestTrain.id}`],
+                      ['Started', formatDate(latestTrain.started_at)],
+                      ['Finished', formatDate(latestTrain.finished_at)],
+                      ['Created', formatDate(latestTrain.created_at)],
+                      ['Benchmark', latestTrain.benchmark_names.length ? latestTrain.benchmark_names.join(', ') : '—'],
+                      ['Warmstart artifact', latestTrain.warmstart_artifact_id || '—'],
+                      ['Output artifact', latestTrain.output_artifact_id || '—'],
+                      ['Cost', formatMoney(latestTrain.cost_usd)],
+                      ['Duration', formatSeconds(latestTrain.duration_seconds)],
+                      ['Progress', `${latestTrain.progress_current ?? 'n/a'}/${latestTrain.progress_total ?? 'n/a'}`],
+                      ['Phase', latestTrain.phase || '—'],
+                      ['Message', latestTrain.message || '—'],
+                    ]}
+                  />
+
+                  {latestTrain.error && (
+                    <div className="mt-6 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-100">
+                      {latestTrain.error}
+                    </div>
+                  )}
+
+                  <MetricsGrid metrics={latestTrain.metrics} />
                 </motion.div>
               )}
 
@@ -219,8 +443,8 @@ export default function Submission() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.35, delay: 0.1 }}
               >
-                <p className="meta-label">Evaluations</p>
-                <h3 className="mt-2 text-xl font-semibold text-text">All recorded runs</h3>
+                <p className="meta-label">Evaluation history</p>
+                <h3 className="mt-2 text-xl font-semibold text-text">All recorded evaluation runs</h3>
 
                 <div className="mt-6 space-y-4">
                   {submission.evaluations.length === 0 ? (
@@ -229,67 +453,72 @@ export default function Submission() {
                     </div>
                   ) : (
                     submission.evaluations.map((evaluation) => (
-                      <div key={evaluation.id} className="rounded-2xl border border-white/8 bg-white/4 p-5">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div>
-                            <div className="text-sm text-text-dim">Run #{evaluation.id}</div>
-                            <div className="mt-1 text-base font-medium text-text">
-                              {evaluation.status}
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-sm text-text-dim">Score</div>
-                            <div className="mt-1 font-mono text-text">
-                              {evaluation.score == null ? 'Pending' : `${(evaluation.score * 100).toFixed(2)}%`}
-                            </div>
-                          </div>
-                        </div>
+                      <RunCard
+                        key={evaluation.id}
+                        title="Evaluation"
+                        kind="Run"
+                        id={evaluation.id}
+                        status={evaluation.status}
+                        score={evaluation.score}
+                        startedAt={evaluation.started_at}
+                        finishedAt={evaluation.finished_at}
+                        createdAt={evaluation.created_at}
+                        progressCurrent={evaluation.progress_current}
+                        progressTotal={evaluation.progress_total}
+                        costUsd={evaluation.cost_usd}
+                        durationSeconds={evaluation.duration_seconds}
+                        benchmarkNames={evaluation.benchmark_names}
+                        phase={evaluation.phase}
+                        message={evaluation.message}
+                        command={evaluation.command}
+                        error={evaluation.error}
+                        metrics={evaluation.metrics}
+                        artifactLabel="results"
+                        artifactId={evaluation.results_artifact_id}
+                      />
+                    ))
+                  )}
+                </div>
+              </motion.div>
 
-                        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                          {[
-                            ['Started', formatDate(evaluation.started_at)],
-                            ['Finished', formatDate(evaluation.finished_at)],
-                            ['Created', formatDate(evaluation.created_at)],
-                          ].map(([label, value]) => (
-                            <div key={label} className="rounded-xl border border-white/8 bg-surface-900/70 p-3">
-                              <div className="text-xs uppercase tracking-[0.22em] text-text-dim">
-                                {label}
-                              </div>
-                              <div className="mt-2 break-words text-sm text-text">{value}</div>
-                            </div>
-                          ))}
-                        </div>
+              <motion.div
+                className="panel p-7 md:p-8"
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, delay: 0.14 }}
+              >
+                <p className="meta-label">Training history</p>
+                <h3 className="mt-2 text-xl font-semibold text-text">All recorded train runs</h3>
 
-                        {Object.keys(evaluation.metrics).length > 0 && (
-                          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                            {Object.entries(evaluation.metrics).map(([key, value]) => (
-                              <div
-                                key={key}
-                                className="rounded-xl border border-white/8 bg-surface-900/70 p-3"
-                              >
-                                <div className="text-xs uppercase tracking-[0.22em] text-text-dim">
-                                  {key}
-                                </div>
-                                {isStructuredMetric(value) ? (
-                                  <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-text">
-                                    {formatMetricValue(value)}
-                                  </pre>
-                                ) : (
-                                  <div className="mt-2 font-mono text-sm text-text">
-                                    {formatMetricValue(value)}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {evaluation.error && (
-                          <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-100">
-                            {evaluation.error}
-                          </div>
-                        )}
-                      </div>
+                <div className="mt-6 space-y-4">
+                  {submission.trains.length === 0 ? (
+                    <div className="rounded-xl border border-white/8 bg-white/4 p-4 text-sm text-text-dim">
+                      No train runs have been recorded yet.
+                    </div>
+                  ) : (
+                    submission.trains.map((train) => (
+                      <RunCard
+                        key={train.id}
+                        title="Train"
+                        kind="Run"
+                        id={train.id}
+                        status={train.status}
+                        startedAt={train.started_at}
+                        finishedAt={train.finished_at}
+                        createdAt={train.created_at}
+                        progressCurrent={train.progress_current}
+                        progressTotal={train.progress_total}
+                        costUsd={train.cost_usd}
+                        durationSeconds={train.duration_seconds}
+                        benchmarkNames={train.benchmark_names}
+                        phase={train.phase}
+                        message={train.message}
+                        command={train.command}
+                        error={train.error}
+                        metrics={train.metrics}
+                        artifactLabel="training bundle"
+                        artifactId={train.output_artifact_id}
+                      />
                     ))
                   )}
                 </div>
