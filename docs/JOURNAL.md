@@ -18,6 +18,14 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-10 — inline `#` comments in secrets.env leaked into values  #mistake #repro
+**Context:** loading provider keys via `trinity.envfile` (issue #67).
+**Expected:** `KEY=sk-abc123  # production key` loads `sk-abc123`, matching common `.env` conventions.
+**Actual:** the whole tail `sk-abc123  # production key` went into the environment, silently breaking API auth (401s that look like a bad key).
+**Root cause:** `_parse_env_line()` only recognized *full-line* comments; a `#` after the value was treated as literal value text.
+**Fix / decision:** strip a trailing inline comment (whitespace + `#`) from **unquoted** values only. Quoted values keep `#` verbatim (`KEY="value # kept"`), and a bare `#` with no leading whitespace stays literal (URL fragments). Regression tests added in `tests/test_envfile.py`.
+**Follow-up:** none.
+
 ## 2026-07-09 — MMLU training silently trained on the 2-item toy set  #mistake #repro
 **Context:** issue #44 — auditing the data path for `python -m trinity.train --benchmark mmlu`.
 **Expected:** training draws minibatches from the real MMLU dataset.
