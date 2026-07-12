@@ -14,6 +14,9 @@ Supported benchmarks
 * ``ifeval``
     Check instruction-following constraints from ``task.answer`` (instruction
     ids + kwargs) using a local deterministic heuristic.
+* ``rlpr``
+    Route the RLPR suite to math or multiple-choice grading based on source
+    benchmark metadata, with WebInstruct handled generically.
 * ``mmlu`` / ``gpqa``
     Extract a single multiple-choice letter ``A-D`` (robust to phrasings such
     as ``"the answer is (B)"``, ``"B)"``, ``"B."``) and compare to
@@ -72,6 +75,14 @@ CODE_BENCHMARKS: frozenset[str] = frozenset(
     {"livecodebench", "lcb", "bigcodebench", "bigcode"}
 )
 IFEVAL_BENCHMARKS: frozenset[str] = frozenset({"ifeval"})
+RLPR_BENCHMARKS: frozenset[str] = frozenset({"rlpr"})
+_RLPR_MATH_SOURCES: frozenset[str] = frozenset(
+    {"Math-500_Avg2", "Minerva_Avg4", "AIME2024_Avg16", "TheoremQA_Avg2"}
+)
+_RLPR_CHOICE_SOURCES: frozenset[str] = frozenset(
+    {"MMLUPro-1000_Avg2", "gpqa_diamond_Avg4"}
+)
+_RLPR_WEBINSTRUCT_SOURCES: frozenset[str] = frozenset({"WebInstruct-verified-val_Avg2"})
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +163,12 @@ def has_answer(benchmark: str, text: str) -> bool:
         return extract_choice_letter(text) is not None
     if key in MATH_BENCHMARKS:
         return extract_boxed(text) is not None or extract_last_number(text) is not None
+    if key in RLPR_BENCHMARKS:
+        return (
+            extract_choice_letter(text) is not None
+            or extract_boxed(text) is not None
+            or extract_last_number(text) is not None
+        )
     if key in IFEVAL_BENCHMARKS:
         return bool(text.strip())
     if key in CODE_BENCHMARKS:
@@ -184,6 +201,8 @@ def score_text(benchmark: str, candidate: str, reference: object) -> float:
         return 1.0 if _check_math(candidate, reference) else 0.0
     if key in CHOICE_BENCHMARKS:
         return 1.0 if _check_choice(candidate, reference) else 0.0
+    if key in RLPR_BENCHMARKS:
+        return 1.0 if _check_rlpr(candidate, reference) else 0.0
     if key in IFEVAL_BENCHMARKS:
         return 1.0 if _check_ifeval(candidate, reference) else 0.0
     if key in CODE_BENCHMARKS:
@@ -409,6 +428,53 @@ def _check_ifeval(candidate: str, reference: object) -> bool:
         if not _ifeval_check_text_instruction(str(instruction_id), kwargs, candidate):
             return False
     return True
+
+
+def _rlpr_reference_source(reference: object) -> str:
+    if isinstance(reference, dict):
+        for key in ("source", "data_source", "benchmark"):
+            value = reference.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return ""
+
+
+def _check_rlpr(candidate: str, reference: object) -> bool:
+    """Route RLPR items to the right checker based on source benchmark."""
+    if not isinstance(reference, dict):
+        return False
+    gold = reference.get("ground_truth", reference)
+    source = _rlpr_reference_source(reference)
+    if source in _RLPR_MATH_SOURCES:
+        return _check_math(candidate, gold)
+    if source in _RLPR_CHOICE_SOURCES:
+        return _check_choice(candidate, gold)
+    if source in _RLPR_WEBINSTRUCT_SOURCES:
+        return _check_rlpr_webinstruct(candidate, gold)
+
+    if _normalize_reference_letter(gold) is not None:
+        return _check_choice(candidate, gold)
+    return _check_math(candidate, gold)
+
+
+def _check_rlpr_webinstruct(candidate: str, reference: object) -> bool:
+    """WebInstruct-verified-val mixes answer styles, so score it generically."""
+    if reference is None:
+        return False
+    gold = str(reference).strip()
+    cand = (candidate or "").strip()
+    if not cand or not gold:
+        return False
+
+    gold_letter = _normalize_reference_letter(gold)
+    cand_letter = extract_choice_letter(cand)
+    if gold_letter is not None and cand_letter is not None:
+        return cand_letter == gold_letter
+
+    if math_equal(cand, gold):
+        return True
+
+    return normalize_math_answer(cand) == normalize_math_answer(gold)
 
 
 # ---------------------------------------------------------------------------

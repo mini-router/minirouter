@@ -1124,3 +1124,12 @@ The PR review caught two reproducibility/correctness issues:
   set is stable across runs.
 - `_ifeval_detect_language` now fails closed on detection errors and unsupported languages instead of
   treating them as correct.
+
+## 2026-07-12 — RLPR review fixes  #decision #repro
+
+Addressed PR 104 review feedback for `rlpr`:
+
+- pinned the Hugging Face source snapshot for `openbmb/RLPR-Evaluation`
+- made `WebInstruct-verified-val_Avg2` score generically instead of forcing choice-only routing
+- blocked training-split loading so `rlpr` stays evaluation-only in this repo
+- made RLPR parquet load failures raise instead of silently falling back to toy data
