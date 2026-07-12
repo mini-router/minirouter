@@ -188,7 +188,9 @@ def _load_rlpr_hf(split: str) -> list[Task] | None:
     for filename, spec in _RLPR_FILE_SPECS.items():
         ds = _try_load_parquet(_RLPR_RAW_BASE + filename)
         if ds is None:
-            continue
+            raise RuntimeError(
+                f"failed to load RLPR parquet file {filename} from pinned snapshot"
+            )
         source = spec["data_source"]
         kind = spec["kind"]
         for i, row in enumerate(ds):
@@ -225,7 +227,9 @@ def _load_rlpr_hf(split: str) -> list[Task] | None:
                     },
                 )
             )
-    return tasks or None
+    if not tasks:
+        raise RuntimeError("RLPR loader produced no tasks from the pinned snapshot")
+    return tasks
 
 
 def _load_math500_hf(split: str) -> list[Task] | None:

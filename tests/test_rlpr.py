@@ -127,3 +127,14 @@ def test_rlpr_train_split_is_blocked():
         assert "evaluation-only" in str(exc)
     else:
         raise AssertionError("expected rlpr train split to be rejected")
+
+
+def test_rlpr_load_failure_is_loud(monkeypatch):
+    monkeypatch.setattr(D, "_try_load_parquet", lambda url: None)
+
+    try:
+        D.load_tasks("rlpr", "test", max_items=None, seed=0)
+    except RuntimeError as exc:
+        assert "failed to load RLPR parquet file" in str(exc)
+    else:
+        raise AssertionError("expected rlpr load failure to raise")

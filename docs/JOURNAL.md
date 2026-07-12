@@ -1048,3 +1048,4 @@ Addressed PR 104 review feedback for `rlpr`:
 - pinned the Hugging Face source snapshot for `openbmb/RLPR-Evaluation`
 - made `WebInstruct-verified-val_Avg2` score generically instead of forcing choice-only routing
 - blocked training-split loading so `rlpr` stays evaluation-only in this repo
+- made RLPR parquet load failures raise instead of silently falling back to toy data
