@@ -18,6 +18,20 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
+**Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
+was unreachable, including on CI where no database service was provisioned.
+**Expected:** CI should exercise the production Postgres path and fail loudly when the test database
+is misconfigured.
+**Actual:** the shared ``validator_engine`` fixture skipped on connection errors, so the validator job
+could go green without running regression tests that depend on Postgres semantics.
+**Root cause:** CI did not start Postgres and the fixture treated unreachable databases as skippable
+even in automation.
+**Fix / decision:** provision ``postgres:16`` in the ``test-validator`` CI job, set
+``VALIDATOR_TEST_DATABASE_URL``, fail (not skip) when ``CI``/``GITHUB_ACTIONS`` is set but Postgres is
+unavailable, and add ``test_conftest.py`` to assert the fixture runs under CI.
+**Follow-up:** none — SQLite usage under ``validator/tests/`` was already removed on ``main``.
+
 ## 2026-07-09 — results_table summary crashed on a missing random_routing baseline  #mistake #gotcha
 **Context:** aggregating `experiments/**/eval*.json` into the multi-task R1/R2/R4 table.
 **Expected:** an eval JSON without `random_routing` renders that cell as `—`, like the

@@ -30,6 +30,10 @@ def _test_database_url() -> str:
     )
 
 
+def _require_postgres_in_ci() -> bool:
+    return bool(os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"))
+
+
 @pytest.fixture(scope="session")
 def validator_engine():
     """Session-scoped engine bound to the validator's real (Postgres) backend.
@@ -39,18 +43,25 @@ def validator_engine():
     backend instead of an in-memory SQLite stand-in. When no Postgres instance is
     reachable (e.g. a laptop without a local DB), the dependent tests are skipped
     rather than failing, so the suite stays runnable while still covering the
-    production path wherever a database is available.
+    production path wherever a database is available. In CI, a missing Postgres
+    backend is treated as a hard failure so coverage cannot silently no-op.
     """
     url = _test_database_url()
     if not make_url(url).drivername.startswith("postgresql"):
-        pytest.skip(f"validator tests require a Postgres database URL, got {url!r}")
+        message = f"validator tests require a Postgres database URL, got {url!r}"
+        if _require_postgres_in_ci():
+            pytest.fail(message)
+        pytest.skip(message)
 
     engine = create_engine(url, future=True, pool_pre_ping=True)
     try:
         engine.connect().close()
     except SQLAlchemyError as exc:
         engine.dispose()
-        pytest.skip(f"Postgres test database unavailable at {url!r}: {exc}")
+        message = f"Postgres test database unavailable at {url!r}: {exc}"
+        if _require_postgres_in_ci():
+            pytest.fail(message)
+        pytest.skip(message)
 
     Base.metadata.create_all(engine)
     try:
