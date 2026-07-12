@@ -69,7 +69,7 @@ def test_rlpr_hf_rows_parse_to_tasks(monkeypatch):
         for filename, rows in rows_by_file.items():
             if url.endswith(filename):
                 return rows
-        return None
+        return []
 
     monkeypatch.setattr(D, "_try_load_parquet", fake_try_load_parquet)
 
