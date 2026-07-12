@@ -357,7 +357,7 @@ def _load_livecodebench_hf(split: str) -> list[Task] | None:
                 prompt=str(question),
                 answer={
                     "tests": tests,
-                    "fn_name": _row_get(row, "fn_name", "func_name"),
+                    "fn_name": _lcb_fn_name(row),
                     "starter_code": _row_get(row, "starter_code"),
                 },
                 meta={
@@ -397,12 +397,40 @@ def _lcb_version_for_split(split: str) -> str:
     return "release_v1"
 
 
+def _lcb_fn_name(row: Any) -> str | None:
+    """Extract the call-based entry-point name for a LiveCodeBench row.
+
+    LiveCodeBench stores it inside a JSON ``metadata`` blob under ``func_name``;
+    some mirrors also surface it as a top-level ``fn_name``/``func_name`` column.
+    Returns ``None`` for stdin/stdout problems (which have no call entry point) so
+    the reward checker keeps its historical stdin behavior for them.
+    """
+    import json
+
+    direct = _row_get(row, "fn_name", "func_name")
+    if direct:
+        return str(direct)
+    meta = _row_get(row, "metadata")
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except (ValueError, TypeError):
+            meta = None
+    if isinstance(meta, dict):
+        fn = meta.get("func_name") or meta.get("fn_name")
+        if fn:
+            return str(fn)
+    return None
+
+
 def _parse_lcb_tests(row: Any) -> list[dict[str, str]]:
     """Best-effort extraction of LiveCodeBench public test cases.
 
     LiveCodeBench schemas vary across mirrors. We accept either a JSON-encoded
     string or an already-parsed list under several common keys, and normalise to
-    a list of ``{"input": ..., "output": ...}`` dicts. Returns ``[]`` if nothing
+    a list of ``{"input": ..., "output": ...}`` dicts. Each case's ``testtype``
+    (``"stdin"`` vs ``"functional"``) is preserved when present so the reward
+    checker can pick stdin-vs-call-based execution. Returns ``[]`` if nothing
     parseable is found (the reward checker treats empty tests as unscoreable).
     """
     import json
@@ -422,7 +450,11 @@ def _parse_lcb_tests(row: Any) -> list[dict[str, str]]:
         if isinstance(case, dict):
             inp = case.get("input", case.get("stdin", ""))
             out = case.get("output", case.get("expected_output", ""))
-            tests.append({"input": str(inp), "output": str(out)})
+            entry = {"input": str(inp), "output": str(out)}
+            ttype = case.get("testtype")
+            if ttype is not None:
+                entry["testtype"] = str(ttype)
+            tests.append(entry)
     return tests
 
 

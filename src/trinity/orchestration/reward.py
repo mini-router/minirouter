@@ -769,20 +769,25 @@ def extract_code(text: str) -> str:
     return text.strip()
 
 
-def _coerce_test_spec(reference: object) -> tuple[list, int]:
-    """Normalize a code reference into ``(tests, timeout_s)``.
+def _coerce_test_spec(reference: object) -> tuple[list, int, str | None]:
+    """Normalize a code reference into ``(tests, timeout_s, fn_name)``.
 
     The ``Task.answer`` for code benchmarks may be:
       * a ``list`` of tests, or
-      * a ``dict`` with key ``"tests"`` and optional ``"timeout_s"``, or
+      * a ``dict`` with key ``"tests"`` and optional ``"timeout_s"`` /
+        ``"fn_name"``, or
       * a JSON string encoding either of the above.
 
     Each test is one of:
       * a ``str`` of assert-based Python (executed after the candidate code), or
       * a ``dict`` ``{"stdin": str, "expected_stdout": str}`` for I/O tests, or
       * a 2-tuple/list ``(stdin, expected_stdout)``.
+
+    ``fn_name`` (LiveCodeBench call-based problems) is ``None`` for stdin/assert
+    specs and selects the functional execution path when present.
     """
     timeout_s = 10
+    fn_name: str | None = None
     spec: object = reference
     if isinstance(spec, str):
         try:
@@ -791,6 +796,8 @@ def _coerce_test_spec(reference: object) -> tuple[list, int]:
             spec = [spec]
     if isinstance(spec, dict):
         timeout_s = int(spec.get("timeout_s", timeout_s))
+        raw_fn = spec.get("fn_name")
+        fn_name = str(raw_fn) if raw_fn else None
         tests = spec.get("tests", [])
     else:
         tests = spec
@@ -798,7 +805,7 @@ def _coerce_test_spec(reference: object) -> tuple[list, int]:
         tests = []
     if not isinstance(tests, list):
         tests = [tests]
-    return tests, timeout_s
+    return tests, timeout_s, fn_name
 
 
 def _check_code(candidate: str, reference: object) -> bool:
@@ -806,11 +813,13 @@ def _check_code(candidate: str, reference: object) -> bool:
     code = extract_code(candidate)
     if not code.strip():
         return False
-    tests, timeout_s = _coerce_test_spec(reference)
-    return run_pass_at_1(code, tests, timeout_s=timeout_s)
+    tests, timeout_s, fn_name = _coerce_test_spec(reference)
+    return run_pass_at_1(code, tests, timeout_s=timeout_s, fn_name=fn_name)
 
 
-def run_pass_at_1(code: str, tests: Sequence, timeout_s: int = 10) -> bool:
+def run_pass_at_1(
+    code: str, tests: Sequence, timeout_s: int = 10, fn_name: str | None = None
+) -> bool:
     """Execute candidate ``code`` against ``tests`` in an isolated subprocess.
 
     The candidate code is **never** executed in-process. Each invocation writes
@@ -829,11 +838,18 @@ def run_pass_at_1(code: str, tests: Sequence, timeout_s: int = 10) -> bool:
       ``stdin`` on standard input, and its stdout is compared (whitespace-
       trimmed per line) to ``expected_stdout``. Use this for competitive-
       programming style benchmarks (LiveCodeBench).
+    * **call-based** (``dict`` with ``testtype == "functional"``, plus a
+      ``fn_name``): the candidate exposes ``fn_name`` as a ``Solution`` method or
+      module-level function; it is called with the newline-separated JSON
+      arguments in ``input`` and its return value is compared (tuples normalized
+      to lists) to the JSON ``output``. This is LiveCodeBench's functional flavor.
 
     Args:
         code: Candidate Python source (already fence-stripped).
         tests: Sequence of tests as described above.
         timeout_s: Per-test wall-clock timeout in seconds.
+        fn_name: Call-based entry-point name. When ``None`` (stdin problems),
+            every test uses the historical stdin/assert behavior.
 
     Returns:
         ``True`` iff the candidate passes all tests (and there is at least one
@@ -844,13 +860,76 @@ def run_pass_at_1(code: str, tests: Sequence, timeout_s: int = 10) -> bool:
     if not tests:
         return False
     for test in tests:
-        if not _run_one_test(code, test, timeout_s):
+        if not _run_one_test(code, test, timeout_s, fn_name=fn_name):
             return False
     return True
 
 
-def _run_one_test(code: str, test: object, timeout_s: int) -> bool:
+def _functional_harness(fn_name: str, stdin_data: str, expected_output: str) -> str:
+    """Build a self-checking script for a LiveCodeBench call-based test.
+
+    LiveCodeBench passes newline-separated JSON arguments and expects a
+    JSON-encoded return value from ``fn_name`` (a ``Solution`` method or a
+    module-level function). The generated script decodes the args, calls the
+    function, normalizes tuples to lists (so ``(0, 1)`` matches ``[0, 1]``), and
+    asserts equality with the expected output — exiting ``0`` iff correct. All
+    three values are embedded as Python literals via ``repr`` so no candidate or
+    test text can break out of the harness.
+    """
+    lines = [
+        "import json as _json",
+        "def _norm(_x):",
+        "    if isinstance(_x, tuple):",
+        "        _x = list(_x)",
+        "    if isinstance(_x, list):",
+        "        return [_norm(_e) for _e in _x]",
+        "    if isinstance(_x, dict):",
+        "        return {_k: _norm(_v) for _k, _v in _x.items()}",
+        "    return _x",
+        f"_fn_name = {fn_name!r}",
+        f"_raw_in = {stdin_data!r}",
+        f"_raw_out = {expected_output!r}",
+        "_args = [_json.loads(_ln) for _ln in _raw_in.split(chr(10)) if _ln.strip() != '']",
+        "_obj = Solution() if 'Solution' in dir() else None",
+        "if _obj is not None and hasattr(_obj, _fn_name):",
+        "    _target = getattr(_obj, _fn_name)",
+        "else:",
+        "    _target = globals()[_fn_name]",
+        "_result = _norm(_target(*_args))",
+        "try:",
+        "    _expected = _norm(_json.loads(_raw_out))",
+        "except Exception:",
+        "    _expected = _raw_out.strip()",
+        "    _result = _result if isinstance(_result, str) else _json.dumps(_result)",
+        "    _result = _result.strip()",
+        "assert _result == _expected",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _run_one_test(
+    code: str, test: object, timeout_s: int, fn_name: str | None = None
+) -> bool:
     """Run a single test in an isolated subprocess. Returns pass/fail."""
+    # Call-based (LiveCodeBench "functional") path: the candidate exposes a
+    # Solution method / module function `fn_name`, called with newline-separated
+    # JSON args, returning a JSON-comparable value. Only taken when a fn_name is
+    # known and the case is not explicitly stdin; fn_name=None (stdin problems)
+    # falls through to the historical stdin/assert handling below untouched.
+    if isinstance(test, dict) and fn_name is not None:
+        ttype = str(test.get("testtype", "")).strip().lower()
+        has_io = (
+            "stdin" in test
+            or "input" in test
+            or "expected_stdout" in test
+            or "output" in test
+        )
+        if ttype != "stdin" and has_io:
+            stdin_data = str(test.get("stdin", test.get("input", "")))
+            expected = str(test.get("expected_stdout", test.get("output", "")))
+            script = code + "\n\n" + _functional_harness(fn_name, stdin_data, expected)
+            return _exec_script(script, stdin_data="", timeout_s=timeout_s)
+
     stdin_data: str | None = None
     expected_stdout: str | None = None
     assert_block: str | None = None
