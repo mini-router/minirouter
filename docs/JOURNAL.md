@@ -18,6 +18,28 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-12 — MMLU-Pro (RLPR) answers E-J always scored 0  #mistake #finding
+**Context:** RLPR routes `MMLUPro-1000_Avg2` to the multiple-choice grader (`_check_choice`).
+**Expected:** a correct MMLU-Pro answer scores 1.0 regardless of which option letter it is.
+**Actual:** golds `A-D` scored 1.0 but `E-J` scored **0.0 even when answered correctly** —
+`score_text("rlpr", "The answer is (F).", {"ground_truth": "F", "source": "MMLUPro-1000_Avg2"})`
+returned 0.0.
+**Root cause:** the whole choice path was hard-capped at `A-D` — the five `_CHOICE_PATTERNS`,
+the `extract_choice_letter` fallback `fullmatch`, and `_normalize_reference_letter`'s
+`{"A","B","C","D"}` set and `0 <= reference <= 3` bound. MMLU-Pro has up to **ten** options
+(A-J), so any gold E-J could neither be extracted from the model output nor normalized from
+the reference. Silently deflated accuracy on ~60% of the MMLU-Pro option space.
+**Fix / decision:** widened the alphabet to `A-J` across all four spots (added a `_CHOICE_LETTERS`
+constant). Safe for the genuinely 4-option benchmarks (MMLU, GPQA): their golds are always A-D,
+and extracting a stray higher letter from candidate text still can't match a 4-letter gold, so
+no existing score can flip — verified `mmlu` grading and the prose/final-line fallbacks unchanged.
+**The tell:** `tests/test_rlpr.py` and `test_reward_checkers.py` only ever exercised gold `A`
+(and `C`), so the cap was invisible. Added E-J coverage plus a K/index-10 out-of-range guard.
+**Follow-up:** distinct from the closed #29 (first-vs-final letter ordering); this was an
+alphabet-range bug.
+
+---
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.
