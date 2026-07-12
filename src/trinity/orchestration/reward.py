@@ -911,12 +911,14 @@ def _run_one_test(
     code: str, test: object, timeout_s: int, fn_name: str | None = None
 ) -> bool:
     """Run a single test in an isolated subprocess. Returns pass/fail."""
-    # Call-based (LiveCodeBench "functional") path: the candidate exposes a
-    # Solution method / module function `fn_name`, called with newline-separated
-    # JSON args, returning a JSON-comparable value. Only taken when a fn_name is
-    # known and the case is not explicitly stdin; fn_name=None (stdin problems)
-    # falls through to the historical stdin/assert handling below untouched.
-    if isinstance(test, dict) and fn_name is not None:
+    # Call-based (LiveCodeBench "functional") path. The mode is chosen ONLY by an
+    # explicit ``testtype == "functional"`` — the authoritative per-test signal
+    # preserved by dataset.py — never by the mere presence of ``fn_name``.
+    # ``fn_name`` only names the callable target (Solution method / module
+    # function). This keeps a stray ``fn_name`` on a stdin (or untyped) case from
+    # silently switching the grader to the wrong path: anything not explicitly
+    # ``functional`` falls through to the stdin/assert handling below.
+    if isinstance(test, dict):
         ttype = str(test.get("testtype", "")).strip().lower()
         has_io = (
             "stdin" in test
@@ -924,10 +926,10 @@ def _run_one_test(
             or "expected_stdout" in test
             or "output" in test
         )
-        if ttype != "stdin" and has_io:
+        if ttype == "functional" and has_io:
             stdin_data = str(test.get("stdin", test.get("input", "")))
             expected = str(test.get("expected_stdout", test.get("output", "")))
-            script = code + "\n\n" + _functional_harness(fn_name, stdin_data, expected)
+            script = code + "\n\n" + _functional_harness(fn_name or "", stdin_data, expected)
             return _exec_script(script, stdin_data="", timeout_s=timeout_s)
 
     stdin_data: str | None = None

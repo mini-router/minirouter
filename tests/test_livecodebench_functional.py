@@ -64,9 +64,15 @@ def test_functional_module_level_function():
     assert R.score_text("livecodebench", _fence("def square(n):\n    return n * n\n"), spec) == 1.0
 
 
-def test_functional_used_when_fn_name_set_even_without_testtype():
-    # A mirror may drop testtype; a present fn_name still selects the call path.
-    assert R.score_text("livecodebench", _fence(_TWO_SUM), _fspec(testtype=None)) == 1.0
+def test_stray_fn_name_without_functional_testtype_uses_stdout():
+    # testtype is the authoritative mode signal (review on #114): a stray fn_name
+    # on a stdin/untyped case must NOT switch to the call-based harness, else a
+    # normal stdin program would be graded call-based and falsely fail.
+    spec = {"tests": [{"input": "3\n", "output": "9\n"}], "fn_name": "solve"}
+    good = "import sys\nn=int(sys.stdin.read())\nprint(n*n)"
+    assert R.score_text("livecodebench", _fence(good), spec) == 1.0
+    # And a genuine functional case (explicit testtype) still grades call-based.
+    assert R.score_text("livecodebench", _fence(_TWO_SUM), _fspec()) == 1.0
 
 
 def test_stdin_problem_still_scored_by_stdout():
