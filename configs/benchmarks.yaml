@@ -20,10 +20,8 @@ train:
     loader: "benchmarks.gsm8k"
     split: "train"
     max_items: 256
-  - name: humaneval
-    loader: "benchmarks.humaneval"
-    split: "test"          # HumanEval ships a single (test) split
-    max_items: 164
+  # HumanEval ships a single (test) split, so it is eval-only below — including it
+  # in `train` would reuse the same items and make the eval score non-disjoint.
 
 # Held-in evaluation (same distribution as train, disjoint items).
 eval:

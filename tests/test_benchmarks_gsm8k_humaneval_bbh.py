@@ -8,8 +8,14 @@ the code cases execute in the same isolated subprocess sandbox the grader uses.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
+import yaml
+
 import trinity.orchestration.dataset as D
 import trinity.orchestration.reward as R
+
+_REPO = Path(__file__).resolve().parents[1]
 
 
 def _fence(code: str) -> str:
@@ -115,3 +121,28 @@ def test_bbh_hf_row_parses(monkeypatch):
     tasks = D.load_tasks("bbh", "test", max_items=None, seed=0)
     assert tasks and tasks[0].benchmark == "bbh" and tasks[0].answer == "(A)"
     assert tasks[0].meta["subtask"] == "boolean_expressions"
+
+
+# --------------------------------------------------------------------------- #
+# Review fixes on #114/#115: has_answer(bbh) + HumanEval eval-only
+# --------------------------------------------------------------------------- #
+def test_has_answer_recognizes_bbh():
+    # has_answer drives _committed_answer + the training format_bonus; BBH must
+    # be recognized (both the multiple-choice and free-form shapes).
+    assert R.has_answer("bbh", "The answer is (A).") is True
+    assert R.has_answer("bbh", "So the answer is (E).") is True
+    assert R.has_answer("bbh", "valid") is True
+    assert R.has_answer("bbh", "") is False
+    assert R.has_answer("bbh", "   ") is False
+
+
+def test_humaneval_is_eval_only_not_in_train():
+    # HumanEval has a single (test) split, so training on it and then evaluating
+    # on the same split is not disjoint — it must be eval-only.
+    cfg = yaml.safe_load((_REPO / "configs" / "benchmarks.yaml").read_text())
+    train_names = [b["name"] for b in cfg["train"]]
+    eval_names = [b["name"] for b in cfg["eval"]]
+    assert "humaneval" not in train_names
+    assert "humaneval" in eval_names
+    # GSM8K keeps proper disjoint train/test splits.
+    assert "gsm8k" in train_names and "gsm8k" in eval_names

@@ -179,6 +179,11 @@ def has_answer(benchmark: str, text: str) -> bool:
         )
     if key in IFEVAL_BENCHMARKS:
         return bool(text.strip())
+    if key in BBH_BENCHMARKS:
+        # BBH is graded either as a multiple-choice letter or a free-form target
+        # (normalized exact-match), so any non-empty output — with or without an
+        # explicit "(X)" — is a parseable answer, matching _check_bbh.
+        return _bbh_extract_letter(text) is not None or bool(text.strip())
     if key in BFCL_BENCHMARKS:
         return _extract_json_payload(text) is not None
     if key in CODE_BENCHMARKS:
