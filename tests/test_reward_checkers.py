@@ -53,6 +53,33 @@ def test_choice_final_line_fallback():
 
 
 # ---------------------------------------------------------------------------
+# Multiple choice: echoed option list must not win (issue #124)
+# ---------------------------------------------------------------------------
+def test_choice_echoed_options_then_committed_letter():
+    # The model restates the options (A) .. D)) then commits to B on the last
+    # line. The committed answer must win, not the first listed option "A".
+    text = "A) Paris\nB) London\nC) Berlin\nD) Rome\n\nB"
+    assert R.extract_choice_letter(text) == "B"
+
+
+def test_choice_echoed_options_then_parenthesized_letter():
+    text = "A) w\nB) x\nC) y\nD) z\n\n(C)."
+    assert R.extract_choice_letter(text) == "C"
+
+
+def test_choice_leading_letter_on_final_line():
+    # A committed answer line that leads with the letter and trailing text.
+    assert R.extract_choice_letter("A) Paris\nB) London\n\nB) London is correct.") == "B"
+
+
+def test_choice_score_ignores_first_echoed_option():
+    # Full grading path: gold is B, options are echoed, answer committed last.
+    assert R.score_text("mmlu", "A) Paris\nB) London\nC) Berlin\nD) Rome\n\nB", "B") == 1.0
+    # And an echoed-first "A" must not produce a false positive when gold is A.
+    assert R.score_text("mmlu", "A) Paris\nB) London\n\nB", "A") == 0.0
+
+
+# ---------------------------------------------------------------------------
 # Code (livecodebench stdin/stdout)
 # ---------------------------------------------------------------------------
 def test_code_pass_at_1_honors_input_output_keys():

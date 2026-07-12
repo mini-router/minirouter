@@ -18,6 +18,27 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-12 — MCQ grader returned the first echoed option, not the answer  #mistake #repro #decision
+**Context:** issue #124 — `reward.py::extract_choice_letter` on the `mmlu`/`gpqa`/RLPR-choice path.
+**Expected:** a model that lists the options (`A) …`, `B) …`) and then commits to a letter should score
+the committed letter.
+**Actual:** it returned `A`. The last entry in `_CHOICE_PATTERNS`,
+`re.compile(r"^\s*\(?\s*([A-D])\s*[\).:]", re.M)`, matched any line starting with a letter+delimiter and was
+applied with `.search()` (first match), so an echoed option list resolved to the *first* option. Repro:
+`extract_choice_letter("A) Paris\nB) London\nC) Berlin\nD) Rome\n\nB")` -> `"A"` (should be `"B"`);
+`score_text("mmlu", <that>, "B")` -> `0.0`, and worse, a false positive `1.0` when the gold happened to be `A`.
+**Root cause:** the line-start pattern matched *option* lines (noise), and `.search()` took the first — the
+opposite of the docstring's "final answers come last". Neither first- nor last-match of that pattern helps,
+since a bare committed letter (`"B"`) has no delimiter and isn't matched by it at all.
+**Fix / decision:** removed the bare line-start pattern from the priority list and let the reversed-last-line
+fallback own standalone/committed-letter lines. Extended the fallback to also accept a final line that leads
+with the letter+delimiter (`"B) London is correct."`), so legitimate single-answer lines still parse while an
+earlier echoed option can never win. The answer-context patterns (`answer is X`, `\boxed{X}`, `final answer`,
+`option X`) are unchanged. Added option-echo regression tests to `tests/test_reward_checkers.py`.
+**Follow-up:** distinct from the A-J range fix (#122); the two compose — once A-J lands, E-J option-echoes are
+covered too. A separate latent case remains (a revised answer like "answer is A … actually C" still takes the
+first via `.search()`); out of scope here.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.

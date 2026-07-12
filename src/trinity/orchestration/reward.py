@@ -942,6 +942,10 @@ def _ref_to_str(reference: object) -> str:
 # Multiple choice: MMLU / GPQA
 # ---------------------------------------------------------------------------
 # Match in priority order. Earlier patterns are more explicit / trustworthy.
+# These are all answer-bearing phrasings; a bare line-start letter (e.g. an
+# echoed option like "A) Paris") is deliberately NOT here — it is handled by the
+# reversed-last-line fallback in ``extract_choice_letter`` so the committed
+# answer (which comes last) wins over the first listed option (issue #124).
 _CHOICE_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Require the captured letter to be followed by a delimiter or end-of-word,
     # so "the answer Beats..." does NOT match "B" (P2 review fix).
@@ -949,8 +953,13 @@ _CHOICE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\\boxed\s*\{\s*\(?\s*([A-D])\s*\)?\s*\}", re.I),
     re.compile(r"\bfinal\s+answer\s*[:=]?\s*\(?\s*([A-D])(?![A-Za-z])", re.I),
     re.compile(r"\boption\s*\(?\s*([A-D])(?![A-Za-z])", re.I),
-    re.compile(r"^\s*\(?\s*([A-D])\s*[\).:]", re.M),
 )
+
+# A final answer given as its own line: standalone ("B", "(C)", "D.") or leading
+# with the letter and a delimiter ("B) London ..."). Applied only to the last
+# non-empty line, so an earlier echoed option never outranks the committed answer.
+_CHOICE_LINE_STANDALONE = re.compile(r"\(?\s*([A-D])\s*\)?[.:]?", re.I)
+_CHOICE_LINE_LEADING = re.compile(r"\(?\s*([A-D])\s*[\).:]", re.I)
 
 
 def extract_choice_letter(text: str) -> str | None:
@@ -958,10 +967,11 @@ def extract_choice_letter(text: str) -> str | None:
 
     Robust to common phrasings: ``"the answer is (B)"``, ``"Answer: C"``,
     ``"B)"``, ``"B."``, ``"\\boxed{D}"``, ``"Option A"``. Tries explicit
-    answer-bearing patterns first; if none match, falls back to the **last**
-    standalone capital ``A``-``D`` token in the text (final answers usually come
-    last). Letters embedded in words (e.g. the ``A`` in ``"And"``) are excluded
-    by requiring word boundaries / delimiters.
+    answer-bearing patterns first; if none match, falls back to the letter on the
+    **last** non-empty line (final answers come last), so an echoed option list
+    (``"A) …"``, ``"B) …"``) does not cause the *first* listed option to be
+    returned (issue #124). Letters embedded in words (e.g. the ``A`` in ``"And"``)
+    are excluded by requiring word boundaries / delimiters.
 
     Args:
         text: Arbitrary model output.
@@ -975,11 +985,13 @@ def extract_choice_letter(text: str) -> str | None:
         m = pat.search(text)
         if m:
             return m.group(1).upper()
-    # Fallback (P2 review fix): only trust the LAST non-empty line, and only when
-    # it is essentially just the letter (e.g. "B", "(C)", "D."). This avoids the
-    # English article "A" in prose like "A nice approach" being read as a choice.
+    # Fallback: only the LAST non-empty line. Accept it when it is essentially
+    # just the letter ("B", "(C)", "D.") or clearly leads with the letter and a
+    # delimiter ("B) London ..."). Confining this to the final line prevents the
+    # English article "A" in prose ("A nice approach") and any echoed earlier
+    # option from being read as the answer.
     for line in reversed([ln.strip() for ln in text.splitlines() if ln.strip()]):
-        m = re.fullmatch(r"\(?\s*([A-D])\s*\)?[.:]?", line, re.I)
+        m = _CHOICE_LINE_STANDALONE.fullmatch(line) or _CHOICE_LINE_LEADING.match(line)
         if m:
             return m.group(1).upper()
         break  # only inspect the final non-empty line
