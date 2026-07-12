@@ -18,6 +18,26 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-12 — Validator crashed on first startup: ensure_schema altered non-existent columns  #mistake #repro #decision
+**Context:** issue #120 — deploying the validator against an empty Postgres.
+**Expected:** first-run startup (`main.py`/`worker.py`/`seed_mock_data.py` all do
+`Base.metadata.create_all` then `ensure_schema`) should bring up a fresh schema cleanly.
+**Actual:** startup aborted with `psycopg.errors.UndefinedColumn: column "artifact_name" of relation
+"submissions" does not exist`, raised by `ensure_schema`'s
+`ALTER TABLE submissions ALTER COLUMN artifact_name DROP NOT NULL`.
+**Root cause:** `artifact_name`/`artifact_path`/`artifact_sha256`/`checkpoint_path`/`benchmark`/`team_name`
+became `@property` accessors (commit 42c971f), so `create_all` no longer creates those columns. The
+`ADD COLUMN IF NOT EXISTS` block above is idempotent, but Postgres has no `IF EXISTS` form for
+`ALTER COLUMN`, so the unguarded legacy `ALTER … DROP NOT NULL` / back-fill `UPDATE`s crash on any DB that
+doesn't still carry the old columns — i.e. every fresh deployment.
+**Fix / decision:** gate the legacy relaxations/back-fills on the columns actually existing (queried from
+`information_schema.columns` for `current_schema()`); leave the additive `ADD COLUMN IF NOT EXISTS` block
+untouched. Legacy DBs still migrate exactly as before. Added `validator/tests/test_ensure_schema.py` covering
+both the fresh-DB path (would crash pre-fix) and the legacy relax+back-fill path, using a throwaway
+Postgres schema so the migration tests stay isolated from the rest of the suite.
+**Follow-up:** `conftest.py` builds schemas with `create_all` only and never exercised `ensure_schema`, which
+is why this slipped through; the new test closes that gap.
+
 ## 2026-07-09 — results_table summary crashed on a missing random_routing baseline  #mistake #gotcha
 **Context:** aggregating `experiments/**/eval*.json` into the multi-task R1/R2/R4 table.
 **Expected:** an eval JSON without `random_routing` renders that cell as `—`, like the
