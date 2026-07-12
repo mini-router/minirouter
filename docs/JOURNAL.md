@@ -18,6 +18,21 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-09 — reward checker unit tests (smoke S5)  #decision #repro
+**Context:** ``orchestration/reward.py`` is the single source of truth for the
+binary reward used by sep-CMA-ES training and eval. SPEC smoke test S5 exercises
+math / choice / code checkers in ``tests/smoke/run_smoke.py``, but there was no
+dedicated pytest module on the PR path.
+**Expected:** known-correct and known-wrong cases for each benchmark family should
+be locked offline so silent grading regressions are caught before they poison
+fitness.
+**Actual:** no ``tests/test_reward_checkers.py`` existed (only partial coverage in
+the smoke CLI and upcoming fix-specific modules).
+**Root cause:** S5 lived only inside the smoke ladder, not in pytest.
+**Fix / decision:** add ``tests/test_reward_checkers.py`` (stdlib only for math/
+choice; subprocess sandbox for code — no torch/GPU/network).
+**Follow-up:** comma-normalization (#35) and final-choice extraction (#29) have
+their own fix PRs; this module covers the baseline S5 contract.
 ## 2026-07-10 — Code grader no longer forwards real HOME to untrusted subprocesses  #mistake #decision #repro
 **Context:** issue #71 reported that LiveCodeBench/BigCodeBench grading executed miner-generated code
 in a subprocess that inherited the operator's real ``HOME``, exposing
