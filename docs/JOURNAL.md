@@ -38,6 +38,43 @@ compare with tuples normalized to lists. `fn_name=None` keeps the historical std
 stdin/assert tests and the S5 smoke assertions are untouched.
 **Follow-up:** private (hidden) LiveCodeBench tests are still not executed — only `public_test_cases`.
 
+## 2026-07-09 — results_table summary crashed on a missing random_routing baseline  #mistake #gotcha
+**Context:** aggregating `experiments/**/eval*.json` into the multi-task R1/R2/R4 table.
+**Expected:** an eval JSON without `random_routing` renders that cell as `—`, like the
+per-coordinator table already does.
+**Actual:** `TypeError: unsupported operand type(s) for +: 'int' and 'NoneType'` at
+`results_table.py:87` — the whole report aborted, including the per-coordinator table that
+had already been built, and `--json` never wrote `experiments/results.json`.
+**Root cause:** `load_rows` reads both headline baselines with `.get()`, so `trinity` and
+`random` are legitimately nullable. `fmt()` and the per-row table guard for that (`or 0`,
+`—`), and `single_avg()` filters `None` per benchmark — but the `trin_avg`/`rand_avg`
+aggregates summed/maxed the raw values. Only the `len(benches) >= 2` summary branch is
+affected, so a single-benchmark run hides the bug entirely.
+**Fix / decision:** added `bench_avg(key, reduce)`, which drops `None` per benchmark before
+reducing, mirroring `single_avg()`. Deliberately did **not** coerce with `or 0` (the
+one-liner the per-row table uses): a random baseline that was never measured would become
+`0.000` and R4 would print `✅ HOLDS` against a comparison nobody ran. When a baseline has no
+usable score anywhere, the row renders `—` and its invariant is reported as not evaluable.
+**Follow-up (review, #82):** the reviewer caught that I fixed only two of the three
+baselines. `best_fixed = max((single_avg(m) or 0) for m in models)` still coerced a
+missing fixed-single baseline to `0`, so with every `single::*` null, R1/R2 printed
+`✅ HOLDS (x vs 0.000)` — the exact false comparison this PR removes for random routing,
+left on the fixed-single side. Fixed by filtering `None` out of the fixed-single averages
+and rendering R1/R2 as not evaluable ("no fixed single baseline recorded") when none has a
+usable score. Lesson: when removing a `None → 0` coercion, grep for **every** `or 0` in the
+same comparison, not just the one in the reported repro.
+**Follow-up:** none. The aggregation semantics for present values (per-bench `max` for
+TRINITY, per-bench `mean` for random) are unchanged.
+
+---
+## 2026-07-11 — fugu/eval banked a tied vote as a solved query (partial credit)  #mistake #repro
+**Context:** `trinity.fugu.eval.evaluate()` emits `per_query_binary`, which feeds `scripts/oracle_ceiling.py` (McNemar test, router-vs-ceiling) — issue #83.
+**Expected:** a per-query "majority" over reps; a 50/50 ballot is not a majority.
+**Actual:** `int(2 * sum(votes) >= len(votes))` scored an exact tie as `1`. `votes=[1,0]` and `[1,1,0,0]` both banked as solved.
+**Root cause:** non-strict `>=`. Reachable via even `--reps`, and also via an odd `--reps` ballot truncated mid-task by the `cap_usd` spend check (records fewer votes than `reps`). Directly contradicts the module's own contract ("a number here cannot be inflated by partial credit") — a coin-flip query banked as 1 *is* partial credit, inflating the router in exactly the comparison oracle_ceiling exists to make trustworthy.
+**Fix / decision:** strict majority `int(2 * sum(votes) > len(votes))`, so a tie resolves to 0 (conservative: ties against the router). Odd complete ballots unaffected. Regression tests in `tests/test_fugu_eval_majority.py` (stub `propose_and_run`/`is_correct`, script the votes).
+**Follow-up:** none.
+
 ## 2026-07-09 — PR-tagged POST /submit now requires webhook secret  #mistake #decision #repro
 **Context:** follow-up to PR #20 webhook fail-closed auth; PR automation posts miner bundles to
 `POST /submit` with `repo_full_name` + `pr_number` form fields.
