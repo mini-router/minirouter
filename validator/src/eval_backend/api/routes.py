@@ -26,6 +26,7 @@ from ..schemas import (
 )
 from ..services.eval_runner import evaluate_submission
 from ..services.github import create_pr_submission
+from ..services.github import set_commit_status
 from ..services.artifacts import persist_stored_artifact
 from ..services.queue import enqueue_submission_pipeline_job
 from ..services.queue import enqueue_train_job
@@ -412,6 +413,16 @@ async def github_webhook(request: Request, settings: Settings = Depends(get_sett
             team_name=team_name,
         )
         session.commit()
+        try:
+            await set_commit_status(
+                settings,
+                submission,
+                state="pending",
+                description="Awaiting manual CI start",
+                target_url=f"{settings.public_site_url.rstrip('/')}/submission/{submission.id}",
+            )
+        except Exception:
+            pass
         return SubmissionCreateResponse(submission=_submission_to_schema(submission), evaluation=None)
     except HTTPException:
         session.rollback()
@@ -472,6 +483,16 @@ async def github_submission_upload(
                 },
             )
         session.commit()
+        try:
+            await set_commit_status(
+                settings,
+                submission,
+                state="pending",
+                description="Queued for backend worker",
+                target_url=f"{settings.public_site_url.rstrip('/')}/submission/{submission.id}",
+            )
+        except Exception:
+            pass
         return SubmissionCreateResponse(submission=_submission_to_schema(submission), evaluation=None)
     except HTTPException:
         session.rollback()

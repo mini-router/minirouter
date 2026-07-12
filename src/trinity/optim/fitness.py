@@ -246,6 +246,8 @@ async def evaluate_candidate(
     return_per_task: bool = False,
     fitness_cfg: FitnessConfig | None = None,
     max_turns: int = 5,
+    request_timeout_s: float | None = None,
+    trajectory_timeout_s: float | None = None,
     **run_kwargs,
 ) -> tuple:
     """Configure the policy with θ and score it over ``minibatch``.
@@ -273,17 +275,53 @@ async def evaluate_candidate(
         except Exception:
             client = None
     try:
+        import asyncio
+        import time
+
+        async def _run_one(task):
+            task_label = f"{task.benchmark}:{task.task_id}"
+            print(f"      [task] start {task_label}", flush=True)
+            t_task = time.time()
+            try:
+                traj_coro = run_trajectory(
+                    task,
+                    policy,
+                    pool,
+                    pool_models,
+                    sample=sample,
+                    client=client,
+                    max_turns=max_turns,
+                    request_timeout_s=request_timeout_s,
+                    **run_kwargs,
+                )
+                if trajectory_timeout_s and trajectory_timeout_s > 0:
+                    traj = await asyncio.wait_for(traj_coro, timeout=float(trajectory_timeout_s))
+                else:
+                    traj = await traj_coro
+            except asyncio.TimeoutError as exc:
+                elapsed = time.time() - t_task
+                print(
+                    f"      [task] timeout {task_label} after {elapsed:.1f}s",
+                    flush=True,
+                )
+                raise
+            except BaseException as exc:
+                elapsed = time.time() - t_task
+                print(
+                    f"      [task] failed {task_label} after {elapsed:.1f}s: "
+                    f"{type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+                raise
+            elapsed = time.time() - t_task
+            print(f"      [task] done {task_label} after {elapsed:.1f}s", flush=True)
+            return traj
+
         # return_exceptions=True so one trajectory that exhausts retries (e.g. a
         # persistent timeout) degrades to reward 0 instead of crashing the whole
         # training run. The optimizer treats it as a (slightly pessimistic) sample.
         trajs = await gather_in_batches(
-            [
-                run_trajectory(
-                    task, policy, pool, pool_models, sample=sample, client=client,
-                    max_turns=max_turns, **run_kwargs,
-                )
-                for task in minibatch
-            ],
+            [_run_one(task) for task in minibatch],
             batch_size=_BATCH_SIZE,
             return_exceptions=True,
         )
@@ -324,6 +362,8 @@ async def evaluate_population(
     on_candidate=None,
     fitness_cfg: FitnessConfig | None = None,
     max_turns: int = 5,
+    request_timeout_s: float | None = None,
+    trajectory_timeout_s: float | None = None,
     **run_kwargs,
 ) -> list[float]:
     """Evaluate λ candidates sequentially (GPU constraint). `minibatch_fn(i)->tasks`
@@ -361,6 +401,8 @@ async def evaluate_population(
                 theta, spec, policy, pool, pool_models, mb,
                 sample=sample, client=client,
                 return_per_task=True, fitness_cfg=cfg, max_turns=max_turns,
+                request_timeout_s=request_timeout_s,
+                trajectory_timeout_s=trajectory_timeout_s,
                 **run_kwargs,
             )
             fits.append(fit)

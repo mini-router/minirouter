@@ -13,6 +13,7 @@ See docs/SPEC.md §2 (data-flow) and §4 (protocol). Termination rule:
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Protocol
 
 from ..roles import postprocess as _pp
@@ -23,6 +24,25 @@ from ..types import Role, Task, Trajectory, TurnRecord
 
 class Policy(Protocol):
     def decide(self, transcript_text: str, *, sample: bool, rng=None) -> tuple[int, Role]: ...
+
+
+class TrajectoryError(RuntimeError):
+    """Base class for run_trajectory failures with task/route context."""
+
+
+class TrajectoryTimeoutError(TrajectoryError):
+    """A single LLM request or an entire trajectory exceeded its timeout."""
+
+
+def _describe_pool_model(pool, model_name: str) -> tuple[str | None, str]:
+    describe = getattr(pool, "describe_model", None)
+    if callable(describe):
+        try:
+            provider, resolved = describe(model_name)
+            return str(provider), str(resolved)
+        except Exception:
+            pass
+    return None, model_name
 
 
 def _transcript_text(task: Task, turns: list[TurnRecord]) -> str:
@@ -50,6 +70,7 @@ async def run_trajectory(
     temperature: float = 0.0,
     top_p: float = 1.0,
     reasoning: str | None = "minimal",
+    request_timeout_s: float | None = None,
     verifier_requires_prior_worker: bool = True,
     client=None,
 ) -> Trajectory:
@@ -61,6 +82,13 @@ async def run_trajectory(
         ttext = _transcript_text(task, traj.turns)
         agent_idx, role = policy.decide(ttext, sample=sample, rng=rng)
         agent_name = pool_models[agent_idx % len(pool_models)]
+        provider_name, resolved_model = _describe_pool_model(pool, agent_name)
+        route_text = f"provider={provider_name or 'unknown'} model={resolved_model}"
+        print(
+            f"[traj] task={task.task_id} benchmark={task.benchmark} turn={k}/{max_turns} "
+            f"role={role.value} agent={agent_name} {route_text} start",
+            flush=True,
+        )
 
         messages = _prompts.build_messages(role, task.prompt, traj.turns)
         kwargs = dict(temperature=temperature, top_p=top_p, max_tokens=max_tokens)
@@ -68,7 +96,26 @@ async def run_trajectory(
             kwargs["client"] = client
         if reasoning is not None:
             kwargs["reasoning"] = reasoning
-        res = await pool.chat(agent_name, messages, **_filter_supported(pool.chat, kwargs))
+        try:
+            chat_coro = pool.chat(agent_name, messages, **_filter_supported(pool.chat, kwargs))
+            if request_timeout_s and request_timeout_s > 0:
+                res = await asyncio.wait_for(chat_coro, timeout=float(request_timeout_s))
+            else:
+                res = await chat_coro
+        except asyncio.TimeoutError as exc:
+            message = (
+                f"timeout waiting for {route_text} task={task.task_id} "
+                f"benchmark={task.benchmark} turn={k}/{max_turns}"
+            )
+            print(f"[traj] !! {message}", flush=True)
+            raise TrajectoryTimeoutError(message) from exc
+        except Exception as exc:
+            message = (
+                f"error from {route_text} task={task.task_id} "
+                f"benchmark={task.benchmark} turn={k}/{max_turns}: {type(exc).__name__}: {exc}"
+            )
+            print(f"[traj] !! {message}", flush=True)
+            raise TrajectoryError(message) from exc
 
         raw = res.text
         processed = _pp.postprocess(raw, role)
@@ -85,6 +132,11 @@ async def run_trajectory(
                 prompt_tokens=getattr(res, "prompt_tokens", 0),
                 completion_tokens=getattr(res, "completion_tokens", 0),
             )
+        )
+        print(
+            f"[traj] task={task.task_id} benchmark={task.benchmark} turn={k}/{max_turns} "
+            f"role={role.value} agent={agent_name} {route_text} done verdict={verdict or '-'}",
+            flush=True,
         )
         if role == Role.WORKER:
             has_worker_output = True

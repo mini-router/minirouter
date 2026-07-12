@@ -31,6 +31,38 @@ even in automation.
 ``VALIDATOR_TEST_DATABASE_URL``, fail (not skip) when ``CI``/``GITHUB_ACTIONS`` is set but Postgres is
 unavailable, and add ``test_conftest.py`` to assert the fixture runs under CI.
 **Follow-up:** none — SQLite usage under ``validator/tests/`` was already removed on ``main``.
+## 2026-07-09 — benchmarks.livecodebench.load() was dead, and its test hid it  #mistake #gotcha
+**Context:** `configs/benchmarks.yaml` registers `loader: "benchmarks.livecodebench"`, and
+`benchmarks/__init__.py` documents the contract as "each loader exposes `load(split, **kw)`".
+**Expected:** `benchmarks.livecodebench.load("test", max_items=1)` returns a `list[Task]`.
+**Actual:** `TypeError: load_tasks() takes 1 positional argument but 2 positional arguments
+(and 2 keyword-only arguments) were given`. The canonical entrypoint raised on **every** call.
+**Root cause:** `load()` passed `("livecodebench", split)` positionally, but the benchmark name
+belongs to the *imported* `_load_tasks(benchmark, split, ...)`, not to the sibling
+`load_tasks(split, *, ...)` it actually called — that one takes a single positional.
+**Fix / decision:** `load()` now delegates to `load_tasks(split, ...)`, so the benchmark name is
+named in exactly one place.
+**The real lesson — the test asserted the bug.** `test_livecodebench_facade_delegates`
+monkeypatched `LCB.load_tasks` with a *four*-positional stub, so the buggy two-positional call
+type-checked against the fake and the suite stayed green over a dead entrypoint. A stub whose
+signature does not match the function it replaces cannot catch a signature bug. Patched the real
+delegation boundary (`LCB._load_tasks`) instead, and added a test that calls `load()` without
+patching `load_tasks` at all.
+**Follow-up:** `allow_toy_fallback` is still accepted and silently dropped by both wrappers;
+left alone here since the toy-set fallback behaviour is tracked separately in #65.
+## 2026-07-11 — Inline `#` comments in secrets.env values are stripped safely  #mistake #fix
+**Context:** issue #67 / PR #68 — `_parse_env_line()` kept trailing inline comments as part of env values
+(`KEY=sk-abc  # note` and `KEY="sk-abc"  # note`).
+**Expected:** annotated secrets.env lines should load only the secret; `#` inside quoted values should be
+preserved; malformed lines like `KEY="abc"oops` must not silently truncate.
+**Actual:** full-line comments worked, but inline trailing comments were kept; an intermediate fix silently
+dropped any suffix after a closing quote even when it was not a `#` comment.
+**Root cause:** the parser never trimmed inline comment suffixes correctly and briefly ignored non-comment
+trailing text on quoted values.
+**Fix / decision:** parse quoted values by finding the closing quote, allow only optional whitespace plus
+`#` comments after the quote, raise `ValueError` on malformed trailing text, strip ` #...` from unquoted
+values, and add regression tests in `tests/test_envfile.py`.
+**Follow-up:** none.
 
 ## 2026-07-09 — results_table summary crashed on a missing random_routing baseline  #mistake #gotcha
 **Context:** aggregating `experiments/**/eval*.json` into the multi-task R1/R2/R4 table.
@@ -280,6 +312,19 @@ made it fail-safe — a missing/empty choice (or missing `message`) yields an em
 (`text=""`, `finish_reason="error"`) while still accounting `usage`, mirroring the null-`content`
 handling. Added `tests/test_pool_parse.py` (7 cases). Scoped to the parsing path only (not the imports)
 so it stays independent of the separate `import sys` --selftest fix (#25).
+**Follow-up:** none — self-contained client-robustness fix.
+## 2026-07-08 — Remote eval used nonexistent settings.trinity_gpu_host  #mistake #fix
+**Context:** issue #46 reported that validator remote GPU evaluation failed before SSH with
+`AttributeError: 'Settings' object has no attribute 'trinity_gpu_host'`.
+**Expected:** `_remote_attempt()` should read the configured remote host from `Settings.trinity_remote_host`
+(`TRINITY_GPU_HOST` env).
+**Actual:** `eval_runner.py` referenced `settings.trinity_gpu_host`, which is not defined on `Settings`.
+**Root cause:** field rename/typo — config exposes `trinity_remote_host` but the runner still used the old name.
+**Fix / decision:** replaced both `trinity_gpu_host` references in `eval_runner.py` with
+`trinity_remote_host`; added `validator/tests/test_eval_runner_remote_host.py` to assert SSH host resolution
+uses the real Settings field.
+**Follow-up:** none.
+
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
 fell back to local CPU and still reported completion.
