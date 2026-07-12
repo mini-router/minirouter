@@ -11,6 +11,7 @@ Design constraints (see docs/SPEC.md §6, §8):
 - ``load_tasks`` is deterministic given ``seed``: shuffling/truncation use a seeded
   ``random.Random`` so two calls with the same arguments return identical lists.
 - The ``answer`` field is whatever ``reward.score`` needs for that benchmark:
+    * ifeval        -> prompt metadata with instruction ids + kwargs
     * math500 / aime  -> reference answer string (boxed-answer / last-number match)
     * mmlu / gpqa     -> the correct option LETTER ("A".."D")
     * livecodebench   -> a dict test spec {"tests": [...], "fn_name": ...}
@@ -22,6 +23,7 @@ Public API
 - ``SUPPORTED_BENCHMARKS`` (tuple[str, ...])
 
 The HuggingFace dataset ids used (when ``datasets`` + network are available):
+- ifeval        : ``google/IFEval``
 - math500       : ``HuggingFaceH4/MATH-500`` (fallback ``qwedsacf/competition_math``)
 - mmlu          : ``cais/mmlu`` (config ``all``)
 - gpqa          : ``Idavidrein/gpqa`` (config ``gpqa_diamond``)
@@ -29,7 +31,10 @@ The HuggingFace dataset ids used (when ``datasets`` + network are available):
 """
 from __future__ import annotations
 
+import json
 import random
+import urllib.request
+from functools import lru_cache
 from typing import Any
 
 from trinity.types import Task
@@ -37,6 +42,7 @@ from trinity.types import Task
 __all__ = ["load_tasks", "sample_minibatch", "SUPPORTED_BENCHMARKS"]
 
 SUPPORTED_BENCHMARKS: tuple[str, ...] = (
+    "ifeval",
     "math500",
     "mmlu",
     "gpqa",
@@ -45,6 +51,10 @@ SUPPORTED_BENCHMARKS: tuple[str, ...] = (
 
 # Letters used for multiple-choice option indexing (MMLU/GPQA).
 _CHOICE_LETTERS: tuple[str, ...] = ("A", "B", "C", "D", "E", "F", "G", "H")
+_IFEVAL_RAW_URL = (
+    "https://raw.githubusercontent.com/google-research/google-research/06076564b3311330f3560e8cfba86d359bec31af/"
+    "instruction_following_eval/data/input_data.jsonl"
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -106,9 +116,72 @@ def _row_get(row: Any, *keys: str, default: Any = None) -> Any:
     return default
 
 
+@lru_cache(maxsize=None)
+def _fetch_jsonl_rows(url: str) -> list[dict[str, Any]] | None:
+    """Fetch a JSONL file from ``url`` and return parsed rows, or ``None``."""
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            text = response.read().decode("utf-8")
+    except Exception:
+        return None
+
+    rows: list[dict[str, Any]] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except Exception:
+            return None
+        if isinstance(item, dict):
+            rows.append(item)
+    return rows or None
+
+
 # --------------------------------------------------------------------------- #
 # Per-benchmark HuggingFace parsers (return list[Task] or None on failure)
 # --------------------------------------------------------------------------- #
+def _load_ifeval_hf(split: str) -> list[Task] | None:
+    """Load the official IFEval prompt set from the Google Research repo.
+
+    The upstream file does not ship separate train/test splits, so the logical
+    ``split`` is intentionally ignored here. The parameter stays in the loader
+    signature so this module remains consistent with the other benchmark
+    loaders and with any future split-aware wrapper.
+    """
+    rows = _fetch_jsonl_rows(_IFEVAL_RAW_URL)
+    if not rows:
+        return None
+
+    tasks: list[Task] = []
+    for i, row in enumerate(rows):
+        prompt = str(_row_get(row, "prompt", default="")).strip()
+        instruction_id_list = list(_row_get(row, "instruction_id_list", default=[]))
+        kwargs = list(_row_get(row, "kwargs", default=[]))
+        if not prompt or not instruction_id_list:
+            continue
+        tasks.append(
+            Task(
+                task_id=str(_row_get(row, "key", default=f"ifeval-{i}")),
+                benchmark="ifeval",
+                prompt=prompt,
+                answer={
+                    "instruction_id_list": instruction_id_list,
+                    "kwargs": kwargs,
+                    "prompt": prompt,
+                    "source": "google-research/google-research",
+                    "key": _row_get(row, "key"),
+                },
+                meta={
+                    "source": "google-research/google-research",
+                    "key": _row_get(row, "key"),
+                },
+            )
+        )
+    return tasks or None
+
+
 def _load_math500_hf(split: str) -> list[Task] | None:
     """MATH-500 loader. answer = reference final answer string."""
     ds = _try_load_hf("HuggingFaceH4/MATH-500", split=split or "test")
@@ -485,12 +558,51 @@ def _toy_tasks(benchmark: str) -> list[Task]:
                 meta={"source": "toy"},
             ),
         ]
+    if benchmark == "ifeval":
+        return [
+            Task(
+                task_id="ifeval-toy-0",
+                benchmark="ifeval",
+                prompt="Write exactly two paragraphs. Do not use commas.",
+                answer={
+                    "instruction_id_list": [
+                        "length_constraints:number_paragraphs",
+                        "punctuation:no_comma",
+                    ],
+                    "kwargs": [{"num_paragraphs": 2}, {}],
+                    "prompt": "Write exactly two paragraphs. Do not use commas.",
+                    "source": "toy",
+                    "key": "ifeval-toy-0",
+                },
+                meta={
+                    "source": "toy",
+                    "instruction_id_list": [
+                        "length_constraints:number_paragraphs",
+                        "punctuation:no_comma",
+                    ],
+                },
+            ),
+            Task(
+                task_id="ifeval-toy-1",
+                benchmark="ifeval",
+                prompt='Reply with a short answer in double quotation marks.',
+                answer={
+                    "instruction_id_list": ["startend:quotation"],
+                    "kwargs": [{}],
+                    "prompt": 'Reply with a short answer in double quotation marks.',
+                    "source": "toy",
+                    "key": "ifeval-toy-1",
+                },
+                meta={"source": "toy", "instruction_id_list": ["startend:quotation"]},
+            ),
+        ]
     raise ValueError(
         f"Unknown benchmark {benchmark!r}. Supported: {SUPPORTED_BENCHMARKS}"
     )
 
 
 _HF_LOADERS = {
+    "ifeval": _load_ifeval_hf,
     "math500": _load_math500_hf,
     "mmlu": _load_mmlu_hf,
     "gpqa": _load_gpqa_hf,

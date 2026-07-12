@@ -1103,3 +1103,24 @@ Per user request (document everything + structured output):
   nondeterminism), best math (full_pilot) + best MMLU (mmlu_s1) coordinators → definitive numbers.
 - Cost ~$22 (ledger-tracked). No GPU was empty (other tenants), but evals are light (~4 GB) so they
   coexist on a shared H200.
+
+## 2026-07-10 — IFEval benchmark wiring added  #decision #repro
+
+Implemented a new `ifeval` benchmark loader/facade:
+- IFEval loads the official Google Research `input_data.jsonl` and stores `instruction_id_list` +
+  `kwargs` in `Task.answer`.
+- Reward support is routed through `trinity.orchestration.reward.score_text`.
+- The checker is a local deterministic heuristic aligned to the published instruction families
+  (`punctuation`, `keywords`, `length_constraints`, `detectable_format`, `change_case`, `startend`,
+  `combination`).
+
+The dataset does not publish a separate train/test split, so the loader intentionally treats the file as
+a single logical benchmark set and keeps the split argument for API compatibility.
+
+## 2026-07-12 — IFEval review fixes: pinned source + fail-closed language scoring  #fix #repro
+
+The PR review caught two reproducibility/correctness issues:
+- `_IFEVAL_RAW_URL` now points at a pinned Google Research commit instead of `master`, so the benchmark
+  set is stable across runs.
+- `_ifeval_detect_language` now fails closed on detection errors and unsupported languages instead of
+  treating them as correct.

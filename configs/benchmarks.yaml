@@ -38,6 +38,10 @@ ood:
     loader: "benchmarks.domain_knowledge"
     split: "test"
     metric: "accuracy"
+  - name: ifeval
+    loader: "benchmarks.ifeval"
+    split: "test"
+    metric: "accuracy"
 
 evaluation:
   seeds: [0]

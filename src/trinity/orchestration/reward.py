@@ -11,6 +11,9 @@ Supported benchmarks
     Extract a ``\\boxed{...}`` answer (else the last number) from the final
     answer, normalize, and compare to ``task.answer``. Symbolic equality via
     ``sympy`` when importable, otherwise a numeric/string fallback.
+* ``ifeval``
+    Check instruction-following constraints from ``task.answer`` (instruction
+    ids + kwargs) using a local deterministic heuristic.
 * ``mmlu`` / ``gpqa``
     Extract a single multiple-choice letter ``A-D`` (robust to phrasings such
     as ``"the answer is (B)"``, ``"B)"``, ``"B."``) and compare to
@@ -33,6 +36,7 @@ module loads on a machine without it.
 """
 from __future__ import annotations
 
+import collections
 import json
 import os
 import re
@@ -67,6 +71,7 @@ CHOICE_BENCHMARKS: frozenset[str] = frozenset({"mmlu", "gpqa", "gpqa-diamond", "
 CODE_BENCHMARKS: frozenset[str] = frozenset(
     {"livecodebench", "lcb", "bigcodebench", "bigcode"}
 )
+IFEVAL_BENCHMARKS: frozenset[str] = frozenset({"ifeval"})
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +152,8 @@ def has_answer(benchmark: str, text: str) -> bool:
         return extract_choice_letter(text) is not None
     if key in MATH_BENCHMARKS:
         return extract_boxed(text) is not None or extract_last_number(text) is not None
+    if key in IFEVAL_BENCHMARKS:
+        return bool(text.strip())
     if key in CODE_BENCHMARKS:
         return "```" in text or "def " in text or "import " in text
     return False
@@ -177,6 +184,8 @@ def score_text(benchmark: str, candidate: str, reference: object) -> float:
         return 1.0 if _check_math(candidate, reference) else 0.0
     if key in CHOICE_BENCHMARKS:
         return 1.0 if _check_choice(candidate, reference) else 0.0
+    if key in IFEVAL_BENCHMARKS:
+        return 1.0 if _check_ifeval(candidate, reference) else 0.0
     if key in CODE_BENCHMARKS:
         return 1.0 if _check_code(candidate, reference) else 0.0
     raise ValueError(
@@ -184,6 +193,222 @@ def score_text(benchmark: str, candidate: str, reference: object) -> float:
         f"Known: math={sorted(MATH_BENCHMARKS)}, "
         f"choice={sorted(CHOICE_BENCHMARKS)}, code={sorted(CODE_BENCHMARKS)}."
     )
+
+
+# ---------------------------------------------------------------------------
+# IFEval: instruction-following heuristics
+# ---------------------------------------------------------------------------
+def _ifeval_words(text: str) -> list[str]:
+    return re.findall(r"\w+", text)
+
+
+def _ifeval_count_sentences(text: str) -> int:
+    chunks = [chunk.strip() for chunk in re.split(r"(?<=[.!?])\s+", text.strip())]
+    chunks = [chunk for chunk in chunks if chunk]
+    return len(chunks) if chunks else (1 if text.strip() else 0)
+
+
+def _ifeval_count_words(text: str) -> int:
+    return len(_ifeval_words(text))
+
+
+def _ifeval_count_paragraphs(text: str) -> int:
+    return len([part for part in re.split(r"\n\s*\n", text) if part.strip()])
+
+
+def _ifeval_count_bullets(text: str) -> int:
+    bullet_lists = re.findall(r"^\s*\*[^\*].*$", text, flags=re.MULTILINE)
+    bullet_lists_2 = re.findall(r"^\s*-.*$", text, flags=re.MULTILINE)
+    return len(bullet_lists) + len(bullet_lists_2)
+
+
+def _ifeval_count_highlights(text: str) -> int:
+    num_highlights = 0
+    highlights = re.findall(r"\*[^\n\*]*\*", text)
+    double_highlights = re.findall(r"\*\*[^\n\*]*\*\*", text)
+    for highlight in highlights:
+        if highlight.strip("*").strip():
+            num_highlights += 1
+    for highlight in double_highlights:
+        if highlight.removeprefix("**").removesuffix("**").strip():
+            num_highlights += 1
+    return num_highlights
+
+
+def _ifeval_count_sections(text: str, splitter: str) -> int:
+    splitter = str(splitter or "").strip()
+    if not splitter:
+        return 0
+    if splitter.upper() == "PARAGRAPH":
+        return _ifeval_count_paragraphs(text)
+    pattern = r"\s?" + re.escape(splitter) + r"\s?\d+\s?"
+    sections = re.split(pattern, text)
+    return max(0, len(sections) - 1)
+
+
+def _ifeval_detect_language(text: str, language: str) -> bool:
+    language = str(language or "").strip().lower()
+    if not language:
+        return False
+    try:
+        import langdetect  # type: ignore import-not-found
+
+        try:
+            return langdetect.detect(text) == language
+        except Exception:
+            return False
+    except Exception:
+        pass
+
+    if language in {"en", "eng", "english"}:
+        return bool(re.search(r"[A-Za-z]", text)) and sum(
+            1 for ch in text if ch.isalpha() and ord(ch) > 127
+        ) == 0
+    if language == "kn":
+        return any("\u0C80" <= ch <= "\u0CFF" for ch in text)
+    return False
+
+
+def _ifeval_json_format(text: str) -> bool:
+    value = (
+        text.strip()
+        .removeprefix("```json")
+        .removeprefix("```Json")
+        .removeprefix("```JSON")
+        .removeprefix("```")
+        .removesuffix("```")
+        .strip()
+    )
+    try:
+        json.loads(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _ifeval_quotation(text: str) -> bool:
+    value = text.strip()
+    return len(value) > 1 and value[0] == '"' and value[-1] == '"'
+
+
+def _ifeval_check_text_instruction(instruction_id: str, kwargs: dict[str, object], text: str) -> bool:
+    key = instruction_id.strip().lower()
+    kwargs = kwargs or {}
+
+    if key == "punctuation:no_comma":
+        return "," not in text
+    if key == "startend:quotation":
+        return _ifeval_quotation(text)
+    if key == "startend:end_checker":
+        end_phrase = str(kwargs.get("end_phrase", "")).strip().lower()
+        return text.strip().strip('"').lower().endswith(end_phrase)
+    if key == "language:response_language":
+        return _ifeval_detect_language(text, str(kwargs.get("language", "")))
+    if key == "length_constraints:number_words":
+        relation = str(kwargs.get("relation", "")).strip().lower()
+        threshold = int(kwargs.get("num_words", 0))
+        count = _ifeval_count_words(text)
+        return count < threshold if relation == "less than" else count >= threshold
+    if key == "length_constraints:number_sentences":
+        relation = str(kwargs.get("relation", "")).strip().lower()
+        threshold = int(kwargs.get("num_sentences", 0))
+        count = _ifeval_count_sentences(text)
+        return count < threshold if relation == "less than" else count >= threshold
+    if key == "length_constraints:number_paragraphs":
+        return _ifeval_count_paragraphs(text) == int(kwargs.get("num_paragraphs", 0))
+    if key == "length_constraints:nth_paragraph_first_word":
+        paragraphs = [part for part in re.split(r"\n\s*\n", text) if part.strip()]
+        nth_paragraph = int(kwargs.get("nth_paragraph", 0))
+        if not (1 <= nth_paragraph <= len(paragraphs)):
+            return False
+        words = _ifeval_words(paragraphs[nth_paragraph - 1])
+        return bool(words) and words[0].lower() == str(kwargs.get("first_word", "")).strip().lower()
+    if key == "detectable_content:number_placeholders":
+        return len(re.findall(r"\[.*?\]", text)) >= int(kwargs.get("num_placeholders", 0))
+    if key == "detectable_content:postscript":
+        marker = str(kwargs.get("postscript_marker", "P.S."))
+        value = text.lower()
+        if marker == "P.P.S":
+            pattern = r"\s*p\.\s?p\.\s?s.*$"
+        elif marker == "P.S.":
+            pattern = r"\s*p\.\s?s\..*$"
+        else:
+            pattern = r"\s*" + re.escape(marker.lower()) + r".*$"
+        return bool(re.findall(pattern, value, flags=re.MULTILINE))
+    if key == "detectable_format:constrained_response":
+        options = ("My answer is yes.", "My answer is no.", "My answer is maybe.")
+        return any(option in text.strip() for option in options)
+    if key == "detectable_format:json_format":
+        return _ifeval_json_format(text)
+    if key == "detectable_format:multiple_sections":
+        splitter = str(kwargs.get("section_spliter", kwargs.get("section_splitter", "Section")))
+        num_sections = int(kwargs.get("num_sections", 0))
+        return _ifeval_count_sections(text, splitter) >= num_sections
+    if key == "detectable_format:number_bullet_lists":
+        return _ifeval_count_bullets(text) == int(kwargs.get("num_bullets", 0))
+    if key == "detectable_format:number_highlighted_sections":
+        return _ifeval_count_highlights(text) >= int(kwargs.get("num_highlights", 0))
+    if key == "detectable_format:title":
+        return bool(re.findall(r"<<[^\n]+>>", text))
+    if key == "keywords:existence":
+        keywords = [str(keyword) for keyword in kwargs.get("keywords", [])]
+        return all(re.search(re.escape(keyword), text, flags=re.IGNORECASE) for keyword in keywords)
+    if key == "keywords:forbidden_words":
+        forbidden_words = [str(word) for word in kwargs.get("forbidden_words", [])]
+        return all(
+            not re.search(r"\b" + re.escape(word) + r"\b", text, flags=re.IGNORECASE)
+            for word in forbidden_words
+        )
+    if key == "keywords:frequency":
+        relation = str(kwargs.get("relation", "")).strip().lower()
+        keyword = re.escape(str(kwargs.get("keyword", "")))
+        threshold = int(kwargs.get("frequency", 0))
+        count = len(re.findall(keyword, text, flags=re.IGNORECASE))
+        return count < threshold if relation == "less than" else count >= threshold
+    if key == "keywords:letter_frequency":
+        relation = str(kwargs.get("let_relation", "")).strip().lower()
+        letter = str(kwargs.get("letter", "")).lower()
+        threshold = int(kwargs.get("let_frequency", 0))
+        count = collections.Counter(text.lower())[letter]
+        return count < threshold if relation == "less than" else count >= threshold
+    if key == "change_case:capital_word_frequency":
+        relation = str(kwargs.get("capital_relation", "")).strip().lower()
+        threshold = int(kwargs.get("capital_frequency", 0))
+        count = sum(1 for word in _ifeval_words(text) if word.isupper())
+        return count < threshold if relation == "less than" else count >= threshold
+    if key == "change_case:english_capital":
+        return text.isupper()
+    if key == "change_case:english_lowercase":
+        return text.islower()
+    if key == "combination:repeat_prompt":
+        prompt_to_repeat = str(kwargs.get("prompt_to_repeat", "")).strip().lower()
+        return text.strip().lower().startswith(prompt_to_repeat)
+    if key == "combination:two_responses":
+        responses = text.split("******")
+        valid_responses = []
+        for index, response in enumerate(responses):
+            if not response.strip():
+                if index != 0 and index != len(responses) - 1:
+                    return False
+            else:
+                valid_responses.append(response)
+        return len(valid_responses) == 2 and valid_responses[0].strip() != valid_responses[1].strip()
+
+    return False
+
+
+def _check_ifeval(candidate: str, reference: object) -> bool:
+    if not candidate:
+        return False
+    if not isinstance(reference, dict):
+        return False
+    instruction_ids = list(reference.get("instruction_id_list", []))
+    kwargs_list = list(reference.get("kwargs", []))
+    for idx, instruction_id in enumerate(instruction_ids):
+        kwargs = kwargs_list[idx] if idx < len(kwargs_list) and isinstance(kwargs_list[idx], dict) else {}
+        if not _ifeval_check_text_instruction(str(instruction_id), kwargs, candidate):
+            return False
+    return True
 
 
 # ---------------------------------------------------------------------------
