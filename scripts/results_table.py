@@ -83,26 +83,54 @@ def render(rows: list[dict]) -> str:
                     # here would understate the fixed single baseline and bias R1/R2.
                     vals.append(max(bench_vals))
             return sum(vals) / len(vals) if vals else None
+        def bench_avg(key, reduce):
+            """Average ``reduce`` over each bench's non-null scores.
+
+            ``TRINITY`` and ``random_routing`` are both read with ``.get()`` in
+            ``load_rows``, so either may be ``None``. Skip the missing scores
+            rather than coercing them to 0 — a random baseline that was never
+            measured must not be reported as a comparison TRINITY won. Returns
+            ``None`` when no benchmark has a usable score, as ``single_avg`` does.
+            """
+            vals = []
+            for b in benches:
+                bench_vals = [r[key] for r in by_bench[b] if r[key] is not None]
+                if bench_vals:
+                    vals.append(reduce(bench_vals))
+            return sum(vals) / len(vals) if vals else None
+
         # TRINITY per-task best (max TRINITY across coordinators per bench), averaged
-        trin_avg = sum(max(r["trinity"] for r in by_bench[b]) for b in benches) / len(benches)
-        rand_avg = sum(
-            sum(r["random"] for r in by_bench[b]) / len(by_bench[b]) for b in benches
-        ) / len(benches)
+        trin_avg = bench_avg("trinity", max)
+        rand_avg = bench_avg("random", lambda vs: sum(vs) / len(vs))
         out.append(f"Averaged across {benches}:\n")
         out.append("| system | multi-task average |")
         out.append("|---|---|")
-        out.append(f"| **TRINITY (per-task best coordinator)** | **{trin_avg:.3f}** |")
+        out.append(f"| **TRINITY (per-task best coordinator)** | **{fmt(trin_avg)}** |")
         for m in models:
             sa = single_avg(m)
             if sa is not None:
                 out.append(f"| single: {m} (fixed) | {sa:.3f} |")
-        out.append(f"| random routing | {rand_avg:.3f} |")
-        best_fixed = max((single_avg(m) or 0) for m in models)
-        out.append(f"\n**R1/R2** (TRINITY avg > best fixed single avg): "
-                   f"{'✅ HOLDS' if trin_avg > best_fixed else '❌'} "
-                   f"({trin_avg:.3f} vs {best_fixed:.3f})")
-        out.append(f"**R4** (TRINITY avg > random avg): "
-                   f"{'✅ HOLDS' if trin_avg > rand_avg else '❌'} ({trin_avg:.3f} vs {rand_avg:.3f})")
+        out.append(f"| random routing | {fmt(rand_avg)} |")
+        # Skip fixed-single baselines with no usable score. Coercing None to 0
+        # (via ``or 0``) would let R1/R2 claim a win against a baseline that was
+        # never measured — the same false comparison this fix removes for random
+        # routing. When no fixed single has a usable score, R1/R2 is not evaluable.
+        fixed_avgs = [sa for sa in (single_avg(m) for m in models) if sa is not None]
+        best_fixed = max(fixed_avgs) if fixed_avgs else None
+        if trin_avg is None or best_fixed is None:
+            reason = "no TRINITY scores recorded" if trin_avg is None \
+                else "no fixed single baseline recorded"
+            out.append(f"\n**R1/R2** (TRINITY avg > best fixed single avg): — ({reason})")
+        else:
+            out.append(f"\n**R1/R2** (TRINITY avg > best fixed single avg): "
+                       f"{'✅ HOLDS' if trin_avg > best_fixed else '❌'} "
+                       f"({trin_avg:.3f} vs {best_fixed:.3f})")
+        if trin_avg is None or rand_avg is None:
+            out.append("**R4** (TRINITY avg > random avg): "
+                       "— (no random_routing baseline recorded)")
+        else:
+            out.append(f"**R4** (TRINITY avg > random avg): "
+                       f"{'✅ HOLDS' if trin_avg > rand_avg else '❌'} ({trin_avg:.3f} vs {rand_avg:.3f})")
     return "\n".join(out) + "\n"
 
 

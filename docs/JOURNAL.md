@@ -34,6 +34,36 @@ to `extract_last_number`. Added `tests/test_reward_math_forms.py` (22 cases) cov
 plus guards that wrong values, inequalities, and empty-with-no-number still score 0.
 **Follow-up:** unit-bearing answers (`\boxed{5\text{ cm}}` vs `5`) are still missed; deferred
 because stripping `\text{...}` risks false positives on textual answers like `\text{Monday}`.
+
+## 2026-07-09 — results_table summary crashed on a missing random_routing baseline  #mistake #gotcha
+**Context:** aggregating `experiments/**/eval*.json` into the multi-task R1/R2/R4 table.
+**Expected:** an eval JSON without `random_routing` renders that cell as `—`, like the
+per-coordinator table already does.
+**Actual:** `TypeError: unsupported operand type(s) for +: 'int' and 'NoneType'` at
+`results_table.py:87` — the whole report aborted, including the per-coordinator table that
+had already been built, and `--json` never wrote `experiments/results.json`.
+**Root cause:** `load_rows` reads both headline baselines with `.get()`, so `trinity` and
+`random` are legitimately nullable. `fmt()` and the per-row table guard for that (`or 0`,
+`—`), and `single_avg()` filters `None` per benchmark — but the `trin_avg`/`rand_avg`
+aggregates summed/maxed the raw values. Only the `len(benches) >= 2` summary branch is
+affected, so a single-benchmark run hides the bug entirely.
+**Fix / decision:** added `bench_avg(key, reduce)`, which drops `None` per benchmark before
+reducing, mirroring `single_avg()`. Deliberately did **not** coerce with `or 0` (the
+one-liner the per-row table uses): a random baseline that was never measured would become
+`0.000` and R4 would print `✅ HOLDS` against a comparison nobody ran. When a baseline has no
+usable score anywhere, the row renders `—` and its invariant is reported as not evaluable.
+**Follow-up (review, #82):** the reviewer caught that I fixed only two of the three
+baselines. `best_fixed = max((single_avg(m) or 0) for m in models)` still coerced a
+missing fixed-single baseline to `0`, so with every `single::*` null, R1/R2 printed
+`✅ HOLDS (x vs 0.000)` — the exact false comparison this PR removes for random routing,
+left on the fixed-single side. Fixed by filtering `None` out of the fixed-single averages
+and rendering R1/R2 as not evaluable ("no fixed single baseline recorded") when none has a
+usable score. Lesson: when removing a `None → 0` coercion, grep for **every** `or 0` in the
+same comparison, not just the one in the reported repro.
+**Follow-up:** none. The aggregation semantics for present values (per-bench `max` for
+TRINITY, per-bench `mean` for random) are unchanged.
+
+---
 ## 2026-07-11 — fugu/eval banked a tied vote as a solved query (partial credit)  #mistake #repro
 **Context:** `trinity.fugu.eval.evaluate()` emits `per_query_binary`, which feeds `scripts/oracle_ceiling.py` (McNemar test, router-vs-ceiling) — issue #83.
 **Expected:** a per-query "majority" over reps; a 50/50 ballot is not a majority.
