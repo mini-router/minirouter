@@ -327,6 +327,13 @@ def format_hint(benchmark: str) -> str:
     benchmark, matching what :mod:`trinity.orchestration.reward` extracts.
     """
     key = (benchmark or "").strip().lower()
+    if key == "ifeval":
+        return "Follow every instruction exactly and keep the response compliant with all format constraints."
+    if key == "rlpr":
+        return (
+            "Follow the question's expected answer format exactly: use a boxed final answer for math "
+            "items and a single choice letter for multiple-choice items."
+        )
     if key in {"mmlu", "gpqa", "gpqa-diamond", "gpqa_diamond"}:
         return "End with the final answer on its own line as: Answer: X  (X is one of A, B, C, D)."
     if key in {"livecodebench", "lcb", "bigcodebench", "bigcode"}:

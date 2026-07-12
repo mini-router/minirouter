@@ -40,6 +40,50 @@ left alone here since the toy-set fallback behaviour is tracked separately in #6
 
 ---
 
+## 2026-07-09 — PR-tagged POST /submit now requires webhook secret  #mistake #decision #repro
+**Context:** follow-up to PR #20 webhook fail-closed auth; PR automation posts miner bundles to
+`POST /submit` with `repo_full_name` + `pr_number` form fields.
+**Expected:** PR-tagged uploads should use the same shared-secret gate as
+`POST /webhooks/github/submission`.
+**Actual:** only the dedicated webhook upload path called `_verify_shared_secret`; `/submit` accepted
+any multipart request with PR metadata and could queue unauthenticated eval work.
+**Root cause:** `/submit` was originally a dual-purpose endpoint (public form + CI upload) and auth
+was only added to the narrower webhook route.
+**Fix / decision:** when `repo_full_name` and `pr_number` are present, `/submit` now requires
+`x-minirouter-webhook-secret`. Plain uploads without PR metadata remain open for the public form.
+PR automation workflow sends the header from `MINIROUTER_WEBHOOK_SECRET`.
+**Follow-up:** none.
+
+## 2026-07-09 — reward checker unit tests (smoke S5)  #decision #repro
+**Context:** ``orchestration/reward.py`` is the single source of truth for the
+binary reward used by sep-CMA-ES training and eval. SPEC smoke test S5 exercises
+math / choice / code checkers in ``tests/smoke/run_smoke.py``, but there was no
+dedicated pytest module on the PR path.
+**Expected:** known-correct and known-wrong cases for each benchmark family should
+be locked offline so silent grading regressions are caught before they poison
+fitness.
+**Actual:** no ``tests/test_reward_checkers.py`` existed (only partial coverage in
+the smoke CLI and upcoming fix-specific modules).
+**Root cause:** S5 lived only inside the smoke ladder, not in pytest.
+**Fix / decision:** add ``tests/test_reward_checkers.py`` (stdlib only for math/
+choice; subprocess sandbox for code — no torch/GPU/network).
+**Follow-up:** comma-normalization (#35) and final-choice extraction (#29) have
+their own fix PRs; this module covers the baseline S5 contract.
+## 2026-07-10 — Code grader no longer forwards real HOME to untrusted subprocesses  #mistake #decision #repro
+**Context:** issue #71 reported that LiveCodeBench/BigCodeBench grading executed miner-generated code
+in a subprocess that inherited the operator's real ``HOME``, exposing
+``~/.config/trinity/secrets.env`` to untrusted submissions.
+**Expected:** graded candidate code should run with a private writable home directory and must not be
+able to read API keys from the evaluator's user profile via ``~`` expansion.
+**Actual:** ``_sandbox_env()`` copied ``HOME`` from the parent process, so a malicious solution could
+read and exfiltrate provider credentials.
+**Root cause:** the grader assumed ``subprocess.run`` plus a temp ``cwd`` was a sandbox, but forwarded
+the full user environment including ``HOME``.
+**Fix / decision:** run each graded script under ``python -I`` inside a fresh temp directory used as
+both ``cwd`` and private ``HOME``/``TMPDIR``; stop forwarding the parent ``HOME``. Added
+``tests/test_reward_sandbox.py`` with a leak PoC and a regression for normal stdin/stdout grading.
+**Follow-up:** absolute-path reads of world-readable repo files still need an OS-level sandbox
+(container/bwrap) on hostile validator hosts.
 ## 2026-07-09 — MMLU training silently trained on the 2-item toy set  #mistake #repro
 **Context:** issue #44 — auditing the data path for `python -m trinity.train --benchmark mmlu`.
 **Expected:** training draws minibatches from the real MMLU dataset.
@@ -1081,3 +1125,33 @@ Per user request (document everything + structured output):
   nondeterminism), best math (full_pilot) + best MMLU (mmlu_s1) coordinators → definitive numbers.
 - Cost ~$22 (ledger-tracked). No GPU was empty (other tenants), but evals are light (~4 GB) so they
   coexist on a shared H200.
+
+## 2026-07-10 — IFEval benchmark wiring added  #decision #repro
+
+Implemented a new `ifeval` benchmark loader/facade:
+- IFEval loads the official Google Research `input_data.jsonl` and stores `instruction_id_list` +
+  `kwargs` in `Task.answer`.
+- Reward support is routed through `trinity.orchestration.reward.score_text`.
+- The checker is a local deterministic heuristic aligned to the published instruction families
+  (`punctuation`, `keywords`, `length_constraints`, `detectable_format`, `change_case`, `startend`,
+  `combination`).
+
+The dataset does not publish a separate train/test split, so the loader intentionally treats the file as
+a single logical benchmark set and keeps the split argument for API compatibility.
+
+## 2026-07-12 — IFEval review fixes: pinned source + fail-closed language scoring  #fix #repro
+
+The PR review caught two reproducibility/correctness issues:
+- `_IFEVAL_RAW_URL` now points at a pinned Google Research commit instead of `master`, so the benchmark
+  set is stable across runs.
+- `_ifeval_detect_language` now fails closed on detection errors and unsupported languages instead of
+  treating them as correct.
+
+## 2026-07-12 — RLPR review fixes  #decision #repro
+
+Addressed PR 104 review feedback for `rlpr`:
+
+- pinned the Hugging Face source snapshot for `openbmb/RLPR-Evaluation`
+- made `WebInstruct-verified-val_Avg2` score generically instead of forcing choice-only routing
+- blocked training-split loading so `rlpr` stays evaluation-only in this repo
+- made RLPR parquet load failures raise instead of silently falling back to toy data

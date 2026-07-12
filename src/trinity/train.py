@@ -191,7 +191,11 @@ async def train(args) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Evolve the TRINITY coordinator with sep-CMA-ES")
-    ap.add_argument("--benchmark", required=True, help="math500 | mmlu | gpqa | livecodebench")
+    ap.add_argument(
+        "--benchmark",
+        required=True,
+        help="ifeval | math500 | mmlu | gpqa | livecodebench",
+    )
     ap.add_argument("--config", default=str(_REPO / "configs" / "trinity.yaml"))
     ap.add_argument("--models", default=str(_REPO / "configs" / "models.yaml"))
     ap.add_argument("--provider", default="fireworks",

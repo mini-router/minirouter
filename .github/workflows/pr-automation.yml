@@ -188,11 +188,13 @@ jobs:
         shell: bash
         env:
           BACKEND_BASE_URL: ${{ vars.BACKEND_BASE_URL }}
+          MINIROUTER_WEBHOOK_SECRET: ${{ secrets.MINIROUTER_WEBHOOK_SECRET }}
         run: |
           set -euo pipefail
           backend_base="${BACKEND_BASE_URL:-https://minirouter.work.gd}"
           response="$(
             curl -fsS \
+              -H "x-minirouter-webhook-secret: ${MINIROUTER_WEBHOOK_SECRET}" \
               -F "file=@submission.tar.gz;type=application/gzip" \
               -F "team_name=${{ steps.classify.outputs.team_name }}" \
               -F "repo_full_name=${{ steps.classify.outputs.repo_full_name }}" \
