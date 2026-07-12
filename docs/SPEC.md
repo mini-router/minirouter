@@ -364,6 +364,12 @@ AIME2025, BigCodeBench, MT-Bench(-101), GPQA-Diamond. Same K=5 / 4096-token sett
 ### 6.5 Full-power LiveCodeBench
 After training, **lift the 4096-token cap, no retraining** (R6). Paper's pool narrowed to 3 closed models; OUR pool is already 3 models, so simply remove the cap and re-eval.
 
+### 6.6 Extra open benchmarks — GSM8K / HumanEval / BBH [OUR CHOICE]
+Additions beyond the paper's original four in-distribution tasks (issue #99), chosen because they reuse the existing grading paths with no core-checker changes and fill leaderboard columns the API/UI already reserve:
+- **GSM8K** (`openai/gsm8k`, config `main`): grade-school word problems, canonical `#### <answer>` final-answer form. Graded on the existing `MATH_BENCHMARKS` path (the loader extracts the post-`####` number as the reference). In-distribution train/eval.
+- **HumanEval** (`openai/openai_humaneval`): Python function completion with `assert`-based unit tests. Graded on the existing sandboxed `run_pass_at_1` assert path — the loader shapes each row's `test` + `entry_point` into `"<test>\ncheck(<entry_point>)"`. Single (test) split. In-distribution eval.
+- **BBH** (`lukaemon/bbh`, all 27 subtasks): OOD generalization suite (§6.2 spirit, relevant to R5). Mixed multiple-choice (`"(X)"` targets, letters up to `(G)`) and free-form targets; graded by a dedicated `bbh` checker that picks letter-match vs normalized exact-match per row.
+
 ---
 
 ## 7. Target / Relative Results to Reproduce

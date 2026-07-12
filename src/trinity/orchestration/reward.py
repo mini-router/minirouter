@@ -67,14 +67,18 @@ __all__ = [
     "MATH_BENCHMARKS",
     "CHOICE_BENCHMARKS",
     "CODE_BENCHMARKS",
+    "IFEVAL_BENCHMARKS",
+    "BBH_BENCHMARKS",
 ]
 
 # Benchmark routing tables. Keys are matched case-insensitively against
 # ``Task.benchmark`` (which the dataset loaders set, e.g. "math500").
-MATH_BENCHMARKS: frozenset[str] = frozenset({"math500", "math", "aime", "aime2025"})
+MATH_BENCHMARKS: frozenset[str] = frozenset(
+    {"math500", "math", "aime", "aime2025", "gsm8k"}
+)
 CHOICE_BENCHMARKS: frozenset[str] = frozenset({"mmlu", "gpqa", "gpqa-diamond", "gpqa_diamond"})
 CODE_BENCHMARKS: frozenset[str] = frozenset(
-    {"livecodebench", "lcb", "bigcodebench", "bigcode"}
+    {"livecodebench", "lcb", "bigcodebench", "bigcode", "humaneval"}
 )
 IFEVAL_BENCHMARKS: frozenset[str] = frozenset({"ifeval"})
 RLPR_BENCHMARKS: frozenset[str] = frozenset({"rlpr"})
@@ -86,6 +90,7 @@ _RLPR_CHOICE_SOURCES: frozenset[str] = frozenset(
 )
 _RLPR_WEBINSTRUCT_SOURCES: frozenset[str] = frozenset({"WebInstruct-verified-val_Avg2"})
 BFCL_BENCHMARKS: frozenset[str] = frozenset({"bfcl_simple"})
+BBH_BENCHMARKS: frozenset[str] = frozenset({"bbh"})
 
 
 # ---------------------------------------------------------------------------
@@ -212,12 +217,15 @@ def score_text(benchmark: str, candidate: str, reference: object) -> float:
         return 1.0 if _check_ifeval(candidate, reference) else 0.0
     if key in BFCL_BENCHMARKS:
         return 1.0 if _check_bfcl(candidate, reference) else 0.0
+    if key in BBH_BENCHMARKS:
+        return 1.0 if _check_bbh(candidate, reference) else 0.0
     if key in CODE_BENCHMARKS:
         return 1.0 if _check_code(candidate, reference) else 0.0
     raise ValueError(
         f"Unknown benchmark {benchmark!r}. "
         f"Known: math={sorted(MATH_BENCHMARKS)}, "
-        f"choice={sorted(CHOICE_BENCHMARKS)}, code={sorted(CODE_BENCHMARKS)}."
+        f"choice={sorted(CHOICE_BENCHMARKS)}, code={sorted(CODE_BENCHMARKS)}, "
+        f"ifeval={sorted(IFEVAL_BENCHMARKS)}, bbh={sorted(BBH_BENCHMARKS)}."
     )
 
 
@@ -1019,6 +1027,67 @@ def _normalize_reference_letter(reference: object) -> str | None:
             return "ABCD"[reference]
         return None
     return None
+
+
+# ---------------------------------------------------------------------------
+# BBH: BIG-Bench Hard (mixed multiple-choice + free-form targets)
+# ---------------------------------------------------------------------------
+def _bbh_extract_letter(text: str) -> str | None:
+    """Extract a multiple-choice letter (A-Z) from a BBH answer.
+
+    BBH multiple-choice subtasks can have up to seven options ((A)-(G)), so this
+    is more permissive than :func:`extract_choice_letter` (which caps at A-D).
+    Prefers an explicit ``answer is (X)`` / ``\\boxed{X}`` form, then the last
+    bare ``(X)`` occurrence (the conventionally-final choice).
+    """
+    if not text:
+        return None
+    for pat in (
+        re.compile(r"answer\s*(?:is|:)?\s*\(?\s*([A-Za-z])\s*\)?(?![A-Za-z])", re.I),
+        re.compile(r"\\boxed\s*\{\s*\(?\s*([A-Za-z])\s*\)?\s*\}", re.I),
+    ):
+        matches = pat.findall(text)
+        if matches:
+            return matches[-1].upper()
+    bare = re.findall(r"\(([A-Za-z])\)", text)
+    return bare[-1].upper() if bare else None
+
+
+def _bbh_normalize(text: str) -> str:
+    """Normalize a BBH free-form answer for exact comparison.
+
+    Lowercases, strips a leading ``answer:`` / ``the answer is`` lead-in and
+    surrounding quotes/punctuation, and collapses internal whitespace.
+    """
+    s = (text or "").strip().lower()
+    s = re.sub(r"^(the\s+)?(final\s+)?answer(\s+is)?\s*[:=]?\s*", "", s)
+    s = s.strip().strip("\"'").strip().strip(".").strip()
+    return re.sub(r"\s+", " ", s)
+
+
+def _check_bbh(candidate: str, reference: object) -> bool:
+    """True iff the candidate matches the BBH target.
+
+    BBH targets are either a multiple-choice letter shaped like ``"(A)"`` (graded
+    via the same letter extraction as MMLU/GPQA) or a free-form string (graded by
+    normalized exact match against the model's final line / whole answer).
+    """
+    ref = reference if isinstance(reference, str) else _ref_to_str(reference)
+    ref = (ref or "").strip()
+    if not ref:
+        return False
+    m = re.fullmatch(r"\(([A-Za-z])\)", ref)
+    if m:
+        got = _bbh_extract_letter(candidate)
+        return got is not None and got == m.group(1).upper()
+    # Free-form: accept the last non-empty line or the whole answer once normalized.
+    target = _bbh_normalize(ref)
+    if not target:
+        return False
+    text = candidate or ""
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    last = lines[-1] if lines else text
+    return _bbh_normalize(last) == target or _bbh_normalize(text) == target
 
 
 # ---------------------------------------------------------------------------

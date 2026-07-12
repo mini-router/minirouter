@@ -100,6 +100,24 @@ TRINITY, per-bench `mean` for random) are unchanged.
 **Root cause:** non-strict `>=`. Reachable via even `--reps`, and also via an odd `--reps` ballot truncated mid-task by the `cap_usd` spend check (records fewer votes than `reps`). Directly contradicts the module's own contract ("a number here cannot be inflated by partial credit") — a coin-flip query banked as 1 *is* partial credit, inflating the router in exactly the comparison oracle_ceiling exists to make trustworthy.
 **Fix / decision:** strict majority `int(2 * sum(votes) > len(votes))`, so a tie resolves to 0 (conservative: ties against the router). Odd complete ballots unaffected. Regression tests in `tests/test_fugu_eval_majority.py` (stub `propose_and_run`/`is_correct`, script the votes).
 **Follow-up:** none.
+## 2026-07-11 — GSM8K / HumanEval / BBH benchmarks wired end-to-end  #decision #finding
+**Context:** the leaderboard schema, mock data, and web types already carried
+`gsm8k` / `humaneval` / `bbh` metric fields, but nothing in the training/eval core
+ever produced those scores (issue #99).
+**Expected:** these should reuse existing grading paths rather than new core logic.
+**Actual / decision:** added three HF loaders + offline toy fallbacks in
+`orchestration/dataset.py`, thin `benchmarks/{gsm8k,humaneval,bbh}.py` facades, and
+`configs/benchmarks.yaml` wiring. Grading reuses existing paths: GSM8K joins
+`MATH_BENCHMARKS` (loader extracts the post-`####` number), HumanEval joins
+`CODE_BENCHMARKS` and shapes each row into the existing `run_pass_at_1` assert
+contract (`"<test>\ncheck(<entry_point>)"`), and a new `bbh` checker picks
+letter-match vs normalized exact-match per row.
+**Finding:** BBH multiple-choice subtasks go up to `(G)` (5–7 options), so the
+A–D `extract_choice_letter` would silently under-count; added a permissive
+A–Z `_bbh_extract_letter` for BBH only. `scripts/results_table.py` and the
+leaderboard need no changes — both read benchmark names generically.
+**Follow-up:** grading correctness is covered by offline tests; real-dataset
+accuracy numbers depend on a networked eval run (out of scope for this PR).
 
 ## 2026-07-09 — PR-tagged POST /submit now requires webhook secret  #mistake #decision #repro
 **Context:** follow-up to PR #20 webhook fail-closed auth; PR automation posts miner bundles to

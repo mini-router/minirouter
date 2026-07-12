@@ -53,6 +53,41 @@ SUPPORTED_BENCHMARKS: tuple[str, ...] = (
     "mmlu",
     "gpqa",
     "livecodebench",
+    "gsm8k",
+    "humaneval",
+    "bbh",
+)
+
+# The 27 BIG-Bench Hard subtask configs (all loaded and concatenated for the
+# `bbh` OOD suite). Sourced from the `lukaemon/bbh` dataset config list.
+_BBH_SUBTASKS: tuple[str, ...] = (
+    "boolean_expressions",
+    "causal_judgement",
+    "date_understanding",
+    "disambiguation_qa",
+    "dyck_languages",
+    "formal_fallacies",
+    "geometric_shapes",
+    "hyperbaton",
+    "logical_deduction_five_objects",
+    "logical_deduction_seven_objects",
+    "logical_deduction_three_objects",
+    "movie_recommendation",
+    "multistep_arithmetic_two",
+    "navigate",
+    "object_counting",
+    "penguins_in_a_table",
+    "reasoning_about_colored_objects",
+    "ruin_names",
+    "salient_translation_error_detection",
+    "snarks",
+    "sports_understanding",
+    "temporal_sequences",
+    "tracking_shuffled_objects_five_objects",
+    "tracking_shuffled_objects_seven_objects",
+    "tracking_shuffled_objects_three_objects",
+    "web_of_lies",
+    "word_sorting",
 )
 
 # Letters used for multiple-choice option indexing (MMLU/GPQA).
@@ -604,6 +639,112 @@ def _load_livecodebench_hf(split: str) -> list[Task] | None:
     return tasks or None
 
 
+def _gsm8k_final_answer(solution: str) -> str | None:
+    """Extract GSM8K's canonical ``#### <answer>`` final number.
+
+    GSM8K stores the full worked solution in ``answer`` with the graded value on
+    the last line after ``####``. Strip grouping commas / currency so it compares
+    numerically through the existing math grader. Returns ``None`` if empty.
+    """
+    text = str(solution or "")
+    tail = text.split("####")[-1] if "####" in text else text
+    tail = tail.strip().replace(",", "").replace("$", "").strip()
+    return tail or None
+
+
+def _load_gsm8k_hf(split: str) -> list[Task] | None:
+    """GSM8K loader. answer = the final numeric answer string (math-graded)."""
+    ds = _try_load_hf("openai/gsm8k", name="main", split=split or "test")
+    src = "openai/gsm8k"
+    if ds is None:
+        ds = _try_load_hf("gsm8k", name="main", split=split or "test")
+    if ds is None:
+        return None
+    tasks: list[Task] = []
+    for i, row in enumerate(ds):
+        question = _row_get(row, "question", "problem", default="")
+        final = _gsm8k_final_answer(_row_get(row, "answer", "solution", default=""))
+        if not question or final is None:
+            continue
+        tasks.append(
+            Task(
+                task_id=f"gsm8k-{i}",
+                benchmark="gsm8k",
+                prompt=str(question),
+                answer=final,
+                meta={"source": src},
+            )
+        )
+    return tasks or None
+
+
+def _load_humaneval_hf(split: str) -> list[Task] | None:
+    """HumanEval loader.
+
+    answer is a code test spec consumed by the sandboxed pass@1 executor. Each
+    row ships a ``check(candidate)`` unit-test body plus the ``entry_point``
+    function name; we shape them into the existing assert-style test contract:
+    ``{"tests": ["<test>\\ncheck(<entry_point>)"], ...}``. No sandbox changes.
+    """
+    ds = _try_load_hf("openai/openai_humaneval", split=split or "test")
+    src = "openai/openai_humaneval"
+    if ds is None:
+        ds = _try_load_hf("openai_humaneval", split=split or "test")
+    if ds is None:
+        return None
+    tasks: list[Task] = []
+    for i, row in enumerate(ds):
+        prompt = _row_get(row, "prompt", default="")
+        test = _row_get(row, "test", default="")
+        entry = _row_get(row, "entry_point", default="")
+        if not prompt or not test or not entry:
+            continue
+        assert_block = f"{test}\n\ncheck({entry})\n"
+        tasks.append(
+            Task(
+                task_id=str(_row_get(row, "task_id", default=f"humaneval-{i}")),
+                benchmark="humaneval",
+                prompt=str(prompt),
+                answer={
+                    "tests": [assert_block],
+                    "fn_name": None,
+                    "starter_code": str(prompt),
+                },
+                meta={"source": src, "entry_point": str(entry)},
+            )
+        )
+    return tasks or None
+
+
+def _load_bbh_hf(split: str) -> list[Task] | None:
+    """BIG-Bench Hard loader across all 27 subtasks (OOD generalization suite).
+
+    Each subtask config has an ``input`` question and a ``target`` answer that is
+    either an ``"(X)"``-shaped multiple-choice letter or a free-form string; the
+    reward checker picks the letter-match vs normalized exact-match path per row.
+    """
+    tasks: list[Task] = []
+    for sub in _BBH_SUBTASKS:
+        ds = _try_load_hf("lukaemon/bbh", name=sub, split=split or "test")
+        if ds is None:
+            continue
+        for i, row in enumerate(ds):
+            question = _row_get(row, "input", "question", default="")
+            target = _row_get(row, "target", default="")
+            if not question or target == "" or target is None:
+                continue
+            tasks.append(
+                Task(
+                    task_id=f"bbh-{sub}-{i}",
+                    benchmark="bbh",
+                    prompt=str(question),
+                    answer=str(target),
+                    meta={"source": "lukaemon/bbh", "subtask": sub},
+                )
+            )
+    return tasks or None
+
+
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
@@ -893,6 +1034,63 @@ def _toy_tasks(benchmark: str) -> list[Task]:
                 meta={"source": "toy", "category": "simple_python"},
             )
         ]
+    if benchmark == "gsm8k":
+        return [
+            Task(
+                task_id="gsm8k-toy-0",
+                benchmark="gsm8k",
+                prompt="Tom has 3 apples and buys 2 more. How many apples does he have?",
+                answer="5",
+                meta={"source": "toy"},
+            ),
+            Task(
+                task_id="gsm8k-toy-1",
+                benchmark="gsm8k",
+                prompt="A box holds 12 eggs. How many eggs are in 4 boxes?",
+                answer="48",
+                meta={"source": "toy"},
+            ),
+        ]
+    if benchmark == "humaneval":
+        return [
+            Task(
+                task_id="humaneval-toy-0",
+                benchmark="humaneval",
+                prompt="def add(a, b):\n    \"\"\"Return the sum of a and b.\"\"\"\n",
+                answer={
+                    "tests": [
+                        "def check(candidate):\n"
+                        "    assert candidate(2, 3) == 5\n"
+                        "    assert candidate(0, 0) == 0\n"
+                        "    assert candidate(-1, 1) == 0\n"
+                        "\ncheck(add)\n"
+                    ],
+                    "fn_name": None,
+                    "starter_code": "def add(a, b):\n",
+                },
+                meta={"source": "toy", "entry_point": "add"},
+            ),
+        ]
+    if benchmark == "bbh":
+        return [
+            Task(
+                task_id="bbh-toy-0",
+                benchmark="bbh",
+                prompt=(
+                    "Is the following sentence plausible? \"The cat sat on the mat.\"\n"
+                    "Options:\n(A) yes\n(B) no"
+                ),
+                answer="(A)",
+                meta={"source": "toy", "subtask": "toy_mcq"},
+            ),
+            Task(
+                task_id="bbh-toy-1",
+                benchmark="bbh",
+                prompt="Sort the following words alphabetically: banana apple cherry",
+                answer="apple banana cherry",
+                meta={"source": "toy", "subtask": "toy_freeform"},
+            ),
+        ]
     raise ValueError(
         f"Unknown benchmark {benchmark!r}. Supported: {SUPPORTED_BENCHMARKS}"
     )
@@ -906,6 +1104,9 @@ _HF_LOADERS = {
     "mmlu": _load_mmlu_hf,
     "gpqa": _load_gpqa_hf,
     "livecodebench": _load_livecodebench_hf,
+    "gsm8k": _load_gsm8k_hf,
+    "humaneval": _load_humaneval_hf,
+    "bbh": _load_bbh_hf,
 }
 
 
