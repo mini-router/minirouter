@@ -52,7 +52,7 @@ SUPPORTED_BENCHMARKS: tuple[str, ...] = (
 # Letters used for multiple-choice option indexing (MMLU/GPQA).
 _CHOICE_LETTERS: tuple[str, ...] = ("A", "B", "C", "D", "E", "F", "G", "H")
 _IFEVAL_RAW_URL = (
-    "https://raw.githubusercontent.com/google-research/google-research/master/"
+    "https://raw.githubusercontent.com/google-research/google-research/06076564b3311330f3560e8cfba86d359bec31af/"
     "instruction_following_eval/data/input_data.jsonl"
 )
 

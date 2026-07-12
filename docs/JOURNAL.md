@@ -1041,3 +1041,11 @@ Implemented a new `ifeval` benchmark loader/facade:
 
 The dataset does not publish a separate train/test split, so the loader intentionally treats the file as
 a single logical benchmark set and keeps the split argument for API compatibility.
+
+## 2026-07-12 — IFEval review fixes: pinned source + fail-closed language scoring  #fix #repro
+
+The PR review caught two reproducibility/correctness issues:
+- `_IFEVAL_RAW_URL` now points at a pinned Google Research commit instead of `master`, so the benchmark
+  set is stable across runs.
+- `_ifeval_detect_language` now fails closed on detection errors and unsupported languages instead of
+  treating them as correct.

@@ -255,7 +255,7 @@ def _ifeval_detect_language(text: str, language: str) -> bool:
         try:
             return langdetect.detect(text) == language
         except Exception:
-            return True
+            return False
     except Exception:
         pass
 
@@ -265,7 +265,7 @@ def _ifeval_detect_language(text: str, language: str) -> bool:
         ) == 0
     if language == "kn":
         return any("\u0C80" <= ch <= "\u0CFF" for ch in text)
-    return bool(text.strip())
+    return False
 
 
 def _ifeval_json_format(text: str) -> bool:

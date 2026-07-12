@@ -58,3 +58,8 @@ def test_ifeval_reward_scores_common_constraints():
 
     assert R.score_text("ifeval", candidate, reference) == 1.0
     assert R.score_text("ifeval", wrong, reference) == 0.0
+
+
+def test_ifeval_language_instruction_fails_closed():
+    assert R._ifeval_detect_language("Hello world", "kn") is False
+    assert R._ifeval_detect_language("Hello world", "xx") is False
