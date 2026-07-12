@@ -18,6 +18,24 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-12 — RLPR MMLU-Pro scored as 4-option, so E-J answers always lost  #mistake #repro #decision
+**Context:** issue #122 — the RLPR source `MMLUPro-1000_Avg2` is MMLU-Pro, a 10-option (A-J) benchmark.
+**Expected:** a model that picks the correct option E-J should score 1.0.
+**Actual:** `_check_choice` always returned False for E-J. `reward.py`'s `extract_choice_letter` (5 regexes +
+fallback) and `_normalize_reference_letter` only recognized `A-D`, so both the candidate letter and the gold
+reference failed to resolve for E-J. Repro: `_check_choice("The final answer is E", "E")` -> False;
+`extract_choice_letter("Answer: H")` -> None; `_normalize_reference_letter(4)` -> None.
+**Root cause:** the choice scorer predates MMLU-Pro; its letter range was hard-coded to A-D (4-option
+MMLU/GPQA). The RLPR loader renders the MMLU-Pro prompt verbatim (all 10 options shown) and passes the raw
+letter as gold, so ~half the items (correct answer in E-J) were unscoreable -> systematically deflated
+accuracy/reward for that source.
+**Fix / decision:** widened the recognized range to A-J (regex capture groups + a shared `_CHOICE_LETTERS`
+constant used by `_normalize_reference_letter`, including the integer-index branch). The existing
+answer-context / standalone-line guards already prevent prose false matches — verified the pronoun "I"
+("I think the answer is B" -> B, "I believe it depends" -> None) and "A nice approach" -> None still hold, so
+4-option benchmarks don't regress. Added MMLU-Pro (A-J) regression tests in `tests/test_reward_checkers.py`.
+**Follow-up:** if a benchmark ever exceeds 10 options, make the range option-count-aware instead of fixed A-J.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.

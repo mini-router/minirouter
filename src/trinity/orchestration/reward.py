@@ -21,7 +21,7 @@ Supported benchmarks
     Parse a JSON function-call payload and compare it against the ground-truth
     call schema stored in ``task.answer``.
 * ``mmlu`` / ``gpqa``
-    Extract a single multiple-choice letter ``A-D`` (robust to phrasings such
+    Extract a single multiple-choice letter ``A-J`` (robust to phrasings such
     as ``"the answer is (B)"``, ``"B)"``, ``"B."``) and compare to
     ``task.answer``.
 * ``livecodebench`` / ``bigcodebench``
@@ -941,27 +941,35 @@ def _ref_to_str(reference: object) -> str:
 # ---------------------------------------------------------------------------
 # Multiple choice: MMLU / GPQA
 # ---------------------------------------------------------------------------
+# Valid option letters. Spans A-J so 10-option benchmarks (MMLU-Pro) work, not
+# just the 4-option ones (classic MMLU / GPQA). The answer-context and
+# standalone-line guards below keep the extra letters (notably the pronoun "I")
+# from matching in prose.
+_CHOICE_LETTERS: str = "ABCDEFGHIJ"
+
 # Match in priority order. Earlier patterns are more explicit / trustworthy.
 _CHOICE_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Require the captured letter to be followed by a delimiter or end-of-word,
     # so "the answer Beats..." does NOT match "B" (P2 review fix).
-    re.compile(r"answer\s*(?:is|:)?\s*\(?\s*([A-D])\s*(?:[\).:]|\b)(?![A-Za-z])", re.I),
-    re.compile(r"\\boxed\s*\{\s*\(?\s*([A-D])\s*\)?\s*\}", re.I),
-    re.compile(r"\bfinal\s+answer\s*[:=]?\s*\(?\s*([A-D])(?![A-Za-z])", re.I),
-    re.compile(r"\boption\s*\(?\s*([A-D])(?![A-Za-z])", re.I),
-    re.compile(r"^\s*\(?\s*([A-D])\s*[\).:]", re.M),
+    re.compile(r"answer\s*(?:is|:)?\s*\(?\s*([A-J])\s*(?:[\).:]|\b)(?![A-Za-z])", re.I),
+    re.compile(r"\\boxed\s*\{\s*\(?\s*([A-J])\s*\)?\s*\}", re.I),
+    re.compile(r"\bfinal\s+answer\s*[:=]?\s*\(?\s*([A-J])(?![A-Za-z])", re.I),
+    re.compile(r"\boption\s*\(?\s*([A-J])(?![A-Za-z])", re.I),
+    re.compile(r"^\s*\(?\s*([A-J])\s*[\).:]", re.M),
 )
 
 
 def extract_choice_letter(text: str) -> str | None:
-    """Extract a single multiple-choice letter ``A``-``D`` from ``text``.
+    """Extract a single multiple-choice letter ``A``-``J`` from ``text``.
 
     Robust to common phrasings: ``"the answer is (B)"``, ``"Answer: C"``,
-    ``"B)"``, ``"B."``, ``"\\boxed{D}"``, ``"Option A"``. Tries explicit
-    answer-bearing patterns first; if none match, falls back to the **last**
-    standalone capital ``A``-``D`` token in the text (final answers usually come
-    last). Letters embedded in words (e.g. the ``A`` in ``"And"``) are excluded
-    by requiring word boundaries / delimiters.
+    ``"B)"``, ``"B."``, ``"\\boxed{D}"``, ``"Option A"``. The range spans
+    ``A``-``J`` for 10-option benchmarks (MMLU-Pro), not just 4-option ones.
+    Tries explicit answer-bearing patterns first; if none match, falls back to
+    the **last** standalone capital ``A``-``J`` token in the text (final answers
+    usually come last). Letters embedded in words (e.g. the ``A`` in ``"And"``,
+    or the pronoun ``"I"`` in prose) are excluded by requiring answer context or
+    a standalone-letter line with word boundaries / delimiters.
 
     Args:
         text: Arbitrary model output.
@@ -979,7 +987,7 @@ def extract_choice_letter(text: str) -> str | None:
     # it is essentially just the letter (e.g. "B", "(C)", "D."). This avoids the
     # English article "A" in prose like "A nice approach" being read as a choice.
     for line in reversed([ln.strip() for ln in text.splitlines() if ln.strip()]):
-        m = re.fullmatch(r"\(?\s*([A-D])\s*\)?[.:]?", line, re.I)
+        m = re.fullmatch(r"\(?\s*([A-J])\s*\)?[.:]?", line, re.I)
         if m:
             return m.group(1).upper()
         break  # only inspect the final non-empty line
@@ -998,11 +1006,12 @@ def _check_choice(candidate: str, reference: object) -> bool:
 
 
 def _normalize_reference_letter(reference: object) -> str | None:
-    """Coerce a reference answer to a single ``A``-``D`` letter.
+    """Coerce a reference answer to a single ``A``-``J`` letter.
 
-    Accepts a letter string (``"B"``, ``"(B)"``) or a 0-based / 1-based integer
-    index (``1`` -> ``"B"`` under 0-based; datasets vary, so a bare letter is
-    preferred). Returns ``None`` if it cannot be resolved.
+    Accepts a letter string (``"B"``, ``"(B)"``) or a 0-based integer index
+    (``1`` -> ``"B"``). The range spans ``A``-``J`` so 10-option benchmarks such
+    as MMLU-Pro (whose correct answer is often ``E``-``J``) score correctly.
+    Returns ``None`` if it cannot be resolved.
     """
     if reference is None:
         return None
@@ -1011,12 +1020,12 @@ def _normalize_reference_letter(reference: object) -> str | None:
         if letter is not None:
             return letter
         s = reference.strip().upper()
-        return s if s in {"A", "B", "C", "D"} else None
+        return s if s in _CHOICE_LETTERS else None
     if isinstance(reference, bool):
         return None
     if isinstance(reference, int):
-        if 0 <= reference <= 3:
-            return "ABCD"[reference]
+        if 0 <= reference < len(_CHOICE_LETTERS):
+            return _CHOICE_LETTERS[reference]
         return None
     return None
 

@@ -53,6 +53,45 @@ def test_choice_final_line_fallback():
 
 
 # ---------------------------------------------------------------------------
+# Multiple choice: 10-option MMLU-Pro (A-J), issue #122
+# ---------------------------------------------------------------------------
+def test_choice_extracts_e_through_j():
+    # 10-option benchmarks (MMLU-Pro) use answers past D; these must extract.
+    assert R.extract_choice_letter("The answer is E.") == "E"
+    assert R.extract_choice_letter("Option H") == "H"
+    assert R.extract_choice_letter(r"\boxed{J}") == "J"
+    assert R.extract_choice_letter("Final answer:\nG") == "G"
+
+
+def test_choice_reference_normalizes_e_through_j():
+    # Reference given as a letter or as a 0-based integer index.
+    assert R._normalize_reference_letter("E") == "E"
+    assert R._normalize_reference_letter("J") == "J"
+    assert R._normalize_reference_letter(4) == "E"  # index 4 -> E
+    assert R._normalize_reference_letter(9) == "J"  # index 9 -> J
+    assert R._normalize_reference_letter(10) is None  # out of range
+
+
+def test_choice_grading_scores_e_through_j():
+    assert R._check_choice("The final answer is E", "E") is True
+    assert R._check_choice("The final answer is (H).", "H") is True
+    assert R._check_choice("The final answer is E", "F") is False  # wrong letter
+
+
+def test_rlpr_mmlu_pro_scores_high_letter_answer():
+    # Full RLPR path for an MMLUPro-1000_Avg2 item whose gold answer is E-J.
+    ref = {"ground_truth": "H", "source": "MMLUPro-1000_Avg2"}
+    assert R.score_text("rlpr", "After analysis, the answer is (H).", ref) == 1.0
+    assert R.score_text("rlpr", "After analysis, the answer is (C).", ref) == 0.0
+
+
+def test_choice_pronoun_i_is_not_a_choice():
+    # Widening the range to A-J must not read the pronoun "I" as choice "I".
+    assert R.extract_choice_letter("I think the answer is B") == "B"
+    assert R.extract_choice_letter("I believe it depends on the context") is None
+
+
+# ---------------------------------------------------------------------------
 # Code (livecodebench stdin/stdout)
 # ---------------------------------------------------------------------------
 def test_code_pass_at_1_honors_input_output_keys():
