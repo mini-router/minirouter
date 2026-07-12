@@ -18,6 +18,20 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-11 — Inline `#` comments in secrets.env values are stripped safely  #mistake #fix
+**Context:** issue #67 / PR #68 — `_parse_env_line()` kept trailing inline comments as part of env values
+(`KEY=sk-abc  # note` and `KEY="sk-abc"  # note`).
+**Expected:** annotated secrets.env lines should load only the secret; `#` inside quoted values should be
+preserved; malformed lines like `KEY="abc"oops` must not silently truncate.
+**Actual:** full-line comments worked, but inline trailing comments were kept; an intermediate fix silently
+dropped any suffix after a closing quote even when it was not a `#` comment.
+**Root cause:** the parser never trimmed inline comment suffixes correctly and briefly ignored non-comment
+trailing text on quoted values.
+**Fix / decision:** parse quoted values by finding the closing quote, allow only optional whitespace plus
+`#` comments after the quote, raise `ValueError` on malformed trailing text, strip ` #...` from unquoted
+values, and add regression tests in `tests/test_envfile.py`.
+**Follow-up:** none.
+
 ## 2026-07-09 — results_table summary crashed on a missing random_routing baseline  #mistake #gotcha
 **Context:** aggregating `experiments/**/eval*.json` into the multi-task R1/R2/R4 table.
 **Expected:** an eval JSON without `random_routing` renders that cell as `—`, like the
@@ -266,6 +280,19 @@ made it fail-safe — a missing/empty choice (or missing `message`) yields an em
 (`text=""`, `finish_reason="error"`) while still accounting `usage`, mirroring the null-`content`
 handling. Added `tests/test_pool_parse.py` (7 cases). Scoped to the parsing path only (not the imports)
 so it stays independent of the separate `import sys` --selftest fix (#25).
+**Follow-up:** none — self-contained client-robustness fix.
+## 2026-07-08 — Remote eval used nonexistent settings.trinity_gpu_host  #mistake #fix
+**Context:** issue #46 reported that validator remote GPU evaluation failed before SSH with
+`AttributeError: 'Settings' object has no attribute 'trinity_gpu_host'`.
+**Expected:** `_remote_attempt()` should read the configured remote host from `Settings.trinity_remote_host`
+(`TRINITY_GPU_HOST` env).
+**Actual:** `eval_runner.py` referenced `settings.trinity_gpu_host`, which is not defined on `Settings`.
+**Root cause:** field rename/typo — config exposes `trinity_remote_host` but the runner still used the old name.
+**Fix / decision:** replaced both `trinity_gpu_host` references in `eval_runner.py` with
+`trinity_remote_host`; added `validator/tests/test_eval_runner_remote_host.py` to assert SSH host resolution
+uses the real Settings field.
+**Follow-up:** none.
+
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
 fell back to local CPU and still reported completion.
