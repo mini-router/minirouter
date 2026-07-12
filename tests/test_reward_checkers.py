@@ -52,6 +52,36 @@ def test_choice_final_line_fallback():
     assert R.extract_choice_letter("Final answer:\nB") == "B"
 
 
+# MMLU-Pro has up to ten options (A-J); RLPR routes it to the same choice
+# grader, so E-J must be extractable and matchable, not silently scored 0.
+def test_choice_letters_span_a_through_j():
+    for letter in "ABCDEFGHIJ":
+        assert R.extract_choice_letter(f"The answer is ({letter}).") == letter
+        assert R._normalize_reference_letter(letter) == letter
+
+
+def test_choice_letters_stop_at_j():
+    # K is out of range for a ten-option scheme.
+    assert R.extract_choice_letter("The answer is (K).") is None
+    assert R._normalize_reference_letter("K") is None
+
+
+def test_choice_reference_integer_index_covers_ten_options():
+    assert R._normalize_reference_letter(5) == "F"   # 0-based
+    assert R._normalize_reference_letter(9) == "J"
+    assert R._normalize_reference_letter(10) is None
+
+
+def test_rlpr_mmlu_pro_grades_e_through_j_correctly():
+    """The regression: MMLU-Pro golds E-J scored 0 even when answered right."""
+    for gold in "EFGHIJ":
+        ref = {"ground_truth": gold, "source": "MMLUPro-1000_Avg2"}
+        assert R.score_text("rlpr", f"The answer is ({gold}).", ref) == 1.0
+        # a wrong letter still scores 0 (no blanket pass)
+        wrong = "A" if gold != "A" else "B"
+        assert R.score_text("rlpr", f"The answer is ({wrong}).", ref) == 0.0
+
+
 # ---------------------------------------------------------------------------
 # Code (livecodebench stdin/stdout)
 # ---------------------------------------------------------------------------

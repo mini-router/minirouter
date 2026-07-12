@@ -18,9 +18,10 @@ Supported benchmarks
     Route the RLPR suite to math or multiple-choice grading based on source
     benchmark metadata, with WebInstruct handled generically.
 * ``mmlu`` / ``gpqa``
-    Extract a single multiple-choice letter ``A-D`` (robust to phrasings such
+    Extract a single multiple-choice letter ``A-J`` (robust to phrasings such
     as ``"the answer is (B)"``, ``"B)"``, ``"B."``) and compare to
-    ``task.answer``.
+    ``task.answer``. The range spans ``A-J`` for MMLU-Pro's ten options; MMLU
+    and GPQA are 4-option, so the wider range never changes their scoring.
 * ``livecodebench`` / ``bigcodebench``
     Execute candidate code against the task's tests in a subprocess with a
     private temp ``HOME`` (``run_pass_at_1``). Never ``exec`` untrusted code in
@@ -728,16 +729,20 @@ def _ref_to_str(reference: object) -> str:
 _CHOICE_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Require the captured letter to be followed by a delimiter or end-of-word,
     # so "the answer Beats..." does NOT match "B" (P2 review fix).
-    re.compile(r"answer\s*(?:is|:)?\s*\(?\s*([A-D])\s*(?:[\).:]|\b)(?![A-Za-z])", re.I),
-    re.compile(r"\\boxed\s*\{\s*\(?\s*([A-D])\s*\)?\s*\}", re.I),
-    re.compile(r"\bfinal\s+answer\s*[:=]?\s*\(?\s*([A-D])(?![A-Za-z])", re.I),
-    re.compile(r"\boption\s*\(?\s*([A-D])(?![A-Za-z])", re.I),
-    re.compile(r"^\s*\(?\s*([A-D])\s*[\).:]", re.M),
+    re.compile(r"answer\s*(?:is|:)?\s*\(?\s*([A-J])\s*(?:[\).:]|\b)(?![A-Za-z])", re.I),
+    re.compile(r"\\boxed\s*\{\s*\(?\s*([A-J])\s*\)?\s*\}", re.I),
+    re.compile(r"\bfinal\s+answer\s*[:=]?\s*\(?\s*([A-J])(?![A-Za-z])", re.I),
+    re.compile(r"\boption\s*\(?\s*([A-J])(?![A-Za-z])", re.I),
+    re.compile(r"^\s*\(?\s*([A-J])\s*[\).:]", re.M),
 )
 
 
 def extract_choice_letter(text: str) -> str | None:
-    """Extract a single multiple-choice letter ``A``-``D`` from ``text``.
+    """Extract a single multiple-choice letter ``A``-``J`` from ``text``.
+
+    The alphabet spans ``A``-``J`` because MMLU-Pro (routed here via RLPR) has up
+    to ten options; the genuinely 4-option benchmarks (MMLU, GPQA) never emit an
+    ``E``-``J`` gold, so the wider range cannot flip any of their scores.
 
     Robust to common phrasings: ``"the answer is (B)"``, ``"Answer: C"``,
     ``"B)"``, ``"B."``, ``"\\boxed{D}"``, ``"Option A"``. Tries explicit
@@ -762,7 +767,7 @@ def extract_choice_letter(text: str) -> str | None:
     # it is essentially just the letter (e.g. "B", "(C)", "D."). This avoids the
     # English article "A" in prose like "A nice approach" being read as a choice.
     for line in reversed([ln.strip() for ln in text.splitlines() if ln.strip()]):
-        m = re.fullmatch(r"\(?\s*([A-D])\s*\)?[.:]?", line, re.I)
+        m = re.fullmatch(r"\(?\s*([A-J])\s*\)?[.:]?", line, re.I)
         if m:
             return m.group(1).upper()
         break  # only inspect the final non-empty line
@@ -780,12 +785,15 @@ def _check_choice(candidate: str, reference: object) -> bool:
     return got == ref
 
 
-def _normalize_reference_letter(reference: object) -> str | None:
-    """Coerce a reference answer to a single ``A``-``D`` letter.
+_CHOICE_LETTERS = "ABCDEFGHIJ"  # MMLU-Pro has up to ten options
 
-    Accepts a letter string (``"B"``, ``"(B)"``) or a 0-based / 1-based integer
-    index (``1`` -> ``"B"`` under 0-based; datasets vary, so a bare letter is
-    preferred). Returns ``None`` if it cannot be resolved.
+
+def _normalize_reference_letter(reference: object) -> str | None:
+    """Coerce a reference answer to a single ``A``-``J`` letter.
+
+    Accepts a letter string (``"B"``, ``"(B)"``) or a 0-based integer index
+    (``1`` -> ``"B"``). Returns ``None`` if it cannot be resolved. The alphabet
+    spans ``A``-``J`` for MMLU-Pro (see :func:`extract_choice_letter`).
     """
     if reference is None:
         return None
@@ -794,12 +802,12 @@ def _normalize_reference_letter(reference: object) -> str | None:
         if letter is not None:
             return letter
         s = reference.strip().upper()
-        return s if s in {"A", "B", "C", "D"} else None
+        return s if s in set(_CHOICE_LETTERS) else None
     if isinstance(reference, bool):
         return None
     if isinstance(reference, int):
-        if 0 <= reference <= 3:
-            return "ABCD"[reference]
+        if 0 <= reference < len(_CHOICE_LETTERS):
+            return _CHOICE_LETTERS[reference]
         return None
     return None
 
