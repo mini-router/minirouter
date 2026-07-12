@@ -18,6 +18,19 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
+**Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
+was unreachable, including on CI where no database service was provisioned.
+**Expected:** CI should exercise the production Postgres path and fail loudly when the test database
+is misconfigured.
+**Actual:** the shared ``validator_engine`` fixture skipped on connection errors, so the validator job
+could go green without running regression tests that depend on Postgres semantics.
+**Root cause:** CI did not start Postgres and the fixture treated unreachable databases as skippable
+even in automation.
+**Fix / decision:** provision ``postgres:16`` in the ``test-validator`` CI job, set
+``VALIDATOR_TEST_DATABASE_URL``, fail (not skip) when ``CI``/``GITHUB_ACTIONS`` is set but Postgres is
+unavailable, and add ``test_conftest.py`` to assert the fixture runs under CI.
+**Follow-up:** none — SQLite usage under ``validator/tests/`` was already removed on ``main``.
 ## 2026-07-09 — benchmarks.livecodebench.load() was dead, and its test hid it  #mistake #gotcha
 **Context:** `configs/benchmarks.yaml` registers `loader: "benchmarks.livecodebench"`, and
 `benchmarks/__init__.py` documents the contract as "each loader exposes `load(split, **kw)`".
