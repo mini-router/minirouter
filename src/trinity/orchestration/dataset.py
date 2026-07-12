@@ -327,9 +327,25 @@ def _load_math500_hf(split: str) -> list[Task] | None:
     return tasks or None
 
 
+def _mmlu_split_for_split(split: str) -> str:
+    """Map a logical split onto a real ``cais/mmlu`` split name.
+
+    ``cais/mmlu`` does not expose a ``train`` split. Its training pool is
+    ``auxiliary_train``, while ``dev``/``validation``/``test`` are the other
+    published splits. The public loader should accept the logical training
+    split used by ``train.py`` and resolve it to the real upstream name.
+    """
+    s = (split or "").strip().lower()
+    if s in {"train", "auxiliary_train"}:
+        return "auxiliary_train"
+    if s in {"dev", "validation", "val"}:
+        return "validation" if s.startswith("val") else s
+    return "test"
+
+
 def _load_mmlu_hf(split: str) -> list[Task] | None:
     """MMLU loader. answer = correct option LETTER ("A".."D")."""
-    ds = _try_load_hf("cais/mmlu", name="all", split=split or "test")
+    ds = _try_load_hf("cais/mmlu", name="all", split=_mmlu_split_for_split(split))
     if ds is None:
         return None
     tasks: list[Task] = []
