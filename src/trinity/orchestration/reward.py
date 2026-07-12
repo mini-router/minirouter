@@ -16,9 +16,10 @@ Supported benchmarks
     as ``"the answer is (B)"``, ``"B)"``, ``"B."``) and compare to
     ``task.answer``.
 * ``livecodebench`` / ``bigcodebench``
-    Execute candidate code against the task's tests in a subprocess sandbox
-    with a timeout (``run_pass_at_1``). Never ``exec`` untrusted code in
-    process.
+    Execute candidate code against the task's tests in a subprocess with a
+    private temp ``HOME`` (``run_pass_at_1``). Never ``exec`` untrusted code in
+    process. This is not a full OS sandbox; absolute-path reads of
+    world-readable files are still possible without container isolation.
 
 Design contract
 ---------------
@@ -585,12 +586,13 @@ def _check_code(candidate: str, reference: object) -> bool:
 
 
 def run_pass_at_1(code: str, tests: Sequence, timeout_s: int = 10) -> bool:
-    """Execute candidate ``code`` against ``tests`` in a subprocess sandbox.
+    """Execute candidate ``code`` against ``tests`` in an isolated subprocess.
 
     The candidate code is **never** executed in-process. Each invocation writes
     a temporary script and runs it with the current Python interpreter in a
-    fresh subprocess with a wall-clock timeout. The candidate is judged to pass
-    only if **every** test passes.
+    fresh subprocess with a wall-clock timeout and a private temp ``HOME`` so
+    graded code cannot read the operator's ``~/.config/trinity/secrets.env``.
+    The candidate is judged to pass only if **every** test passes.
 
     Two test flavors are supported (they may be mixed in one list):
 
@@ -676,16 +678,19 @@ def _stdout_matches(got: str, expected: str) -> bool:
     return got_lines == exp_lines
 
 
-def _sandbox_env() -> dict[str, str]:
+def _sandbox_env(*, home_dir: str) -> dict[str, str]:
     """Minimal environment for the child interpreter."""
     env = {
         "PATH": os.environ.get("PATH", ""),
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONIOENCODING": "utf-8",
+        "HOME": home_dir,
+        "TMPDIR": home_dir,
     }
-    # Preserve a HOME so libraries that need a writable dir do not crash.
-    if "HOME" in os.environ:
-        env["HOME"] = os.environ["HOME"]
+    if os.name == "nt":
+        env["USERPROFILE"] = home_dir
+        env["TEMP"] = home_dir
+        env["TMP"] = home_dir
     return env
 
 
@@ -712,26 +717,31 @@ def _exec_script_capture(
     """
     tmp_path: str | None = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False, encoding="utf-8"
-        ) as fh:
-            fh.write(script)
-            tmp_path = fh.name
-        try:
-            proc = subprocess.run(
-                [sys.executable, tmp_path],
-                input=stdin_data,
-                capture_output=True,
-                text=True,
-                timeout=timeout_s,
-                env=_sandbox_env(),
-                cwd=tempfile.gettempdir(),
-            )
-        except subprocess.TimeoutExpired:
-            return False, ""
-        except (OSError, ValueError):
-            return False, ""
-        return (proc.returncode == 0), (proc.stdout or "")
+        with tempfile.TemporaryDirectory(prefix="trinity_sandbox_") as run_dir:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".py",
+                delete=False,
+                encoding="utf-8",
+                dir=run_dir,
+            ) as fh:
+                fh.write(script)
+                tmp_path = fh.name
+            try:
+                proc = subprocess.run(
+                    [sys.executable, "-I", tmp_path],
+                    input=stdin_data,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_s,
+                    env=_sandbox_env(home_dir=run_dir),
+                    cwd=run_dir,
+                )
+            except subprocess.TimeoutExpired:
+                return False, ""
+            except (OSError, ValueError):
+                return False, ""
+            return (proc.returncode == 0), (proc.stdout or "")
     finally:
         if tmp_path is not None:
             try:
