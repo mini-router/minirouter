@@ -314,6 +314,11 @@ def normalize_math_answer(ans: str | None) -> str:
     s = re.sub(r"\\d?frac\s*(\d)\s*(\d)", r"\1/\2", s)
     s = s.replace(r"\cdot", "*").replace(r"\times", "*")
     s = re.sub(r"\s+", "", s)
+    # Scientific notation a*10^{b} (after \times/\cdot became *) -> canonical
+    # "aeb" so the numeric path can parse it: "5*10^{3}" -> "5e3" -> 5000.0.
+    # Without this, float()/Fraction both fail and the sympy fallback reads "^"
+    # as XOR, so a correct order-of-magnitude answer scores 0.
+    s = re.sub(r"(\d+(?:\.\d+)?)\*10\^\{?(-?\d+)\}?", r"\1e\2", s)
     # Drop thousands-separator commas so "1,234" compares equal to "1234" (and
     # parses as a number). extract_last_number already strips these, so without
     # this the extract path and the compare path disagree and a correct answer
@@ -321,6 +326,11 @@ def normalize_math_answer(ans: str | None) -> str:
     # leaving set/tuple/interval answers like "(1,2)" untouched.
     s = re.sub(r"(?<=\d),(?=\d{3}(?:\D|$))", "", s)
     s = s.lower()
+    # Drop a leading single-variable assignment ("x=5" -> "5"): grade the value,
+    # not the restated variable. Guarded so "==" (equality) and inequalities like
+    # "x<=5"/"x>=5" stay intact — only a bare "<ident>=" prefix not followed by a
+    # second "=" is cut ("<"/">" are not word chars, so they never precede the "=").
+    s = re.sub(r"^[a-z]\w*=(?!=)", "", s)
     # Canonicalize a pure integer ratio a/b.
     m = re.fullmatch(r"\(?(-?\d+)\)?/\(?(-?\d+)\)?", s)
     if m:
@@ -409,7 +419,9 @@ def _sympy_equal(a: str, b: str) -> bool:
 def _check_math(candidate: str, reference: object) -> bool:
     """True iff the candidate's extracted answer equals the reference."""
     extracted = extract_boxed(candidate)
-    if extracted is None:
+    if extracted is None or not extracted.strip():
+        # No box, or an empty/whitespace \boxed{} that carries no answer: fall
+        # back to the last number in the text, exactly like a missing box.
         extracted = extract_last_number(candidate)
     if extracted is None:
         # Last resort: compare the whole (normalized) candidate.
