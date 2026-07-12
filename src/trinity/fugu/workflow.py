@@ -327,6 +327,8 @@ def format_hint(benchmark: str) -> str:
     benchmark, matching what :mod:`trinity.orchestration.reward` extracts.
     """
     key = (benchmark or "").strip().lower()
+    if key == "ifeval":
+        return "Follow every instruction exactly and keep the response compliant with all format constraints."
     if key == "bfcl_simple":
         return "Return only valid JSON function-call objects with the requested names and arguments."
     if key in {"mmlu", "gpqa", "gpqa-diamond", "gpqa_diamond"}:

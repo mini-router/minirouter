@@ -1029,6 +1029,14 @@ Per user request (document everything + structured output):
 - Cost ~$22 (ledger-tracked). No GPU was empty (other tenants), but evals are light (~4 GB) so they
   coexist on a shared H200.
 
+## 2026-07-12 — IFEval review fixes: pinned source + fail-closed language scoring  #fix #repro
+
+The PR review caught two reproducibility/correctness issues:
+- `_IFEVAL_RAW_URL` now points at a pinned Google Research commit instead of `master`, so the benchmark
+  set is stable across runs.
+- `_ifeval_detect_language` now fails closed on detection errors and unsupported languages instead of
+  treating them as correct.
+
 ## 2026-07-10 — BFCL simple-slice benchmark wiring added  #decision #repro
 
 Implemented a new `bfcl_simple` benchmark loader/facade:
@@ -1037,3 +1045,11 @@ Implemented a new `bfcl_simple` benchmark loader/facade:
 
 Scoring is exact JSON function-call matching against the official ground-truth schema. Multi-turn/live BFCL
 categories remain out of scope until the loader preserves full dialogue context.
+
+## 2026-07-12 — BFCL review fixes  #decision #repro
+
+Addressed PR 102 review feedback for `bfcl_simple`:
+
+- pinned the Gorilla raw-source snapshot instead of reading from `main`
+- blocked `train` splits so the benchmark stays evaluation-only in this repo
+- kept the simplified single-turn scope explicit in the loader/docs

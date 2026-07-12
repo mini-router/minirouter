@@ -42,6 +42,13 @@ def test_shared_secret_requires_configured_secret(secret: str) -> None:
     assert "GITHUB_WEBHOOK_SECRET" in str(excinfo.value.detail)
 
 
+def test_shared_secret_rejects_missing_header() -> None:
+    with pytest.raises(HTTPException) as excinfo:
+        _verify_shared_secret(None, "super-secret")
+    assert excinfo.value.status_code == 401
+    assert excinfo.value.detail == "missing webhook secret"
+
+
 def test_shared_secret_rejects_invalid_secret() -> None:
     with pytest.raises(HTTPException) as excinfo:
         _verify_shared_secret("wrong", "super-secret")

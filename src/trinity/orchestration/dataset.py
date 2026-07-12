@@ -11,6 +11,7 @@ Design constraints (see docs/SPEC.md §6, §8):
 - ``load_tasks`` is deterministic given ``seed``: shuffling/truncation use a seeded
   ``random.Random`` so two calls with the same arguments return identical lists.
 - The ``answer`` field is whatever ``reward.score`` needs for that benchmark:
+    * ifeval        -> prompt metadata with instruction ids + kwargs
     * bfcl_simple   -> a JSON-serializable ground-truth function-call schema
     * math500 / aime  -> reference answer string (boxed-answer / last-number match)
     * mmlu / gpqa     -> the correct option LETTER ("A".."D")
@@ -23,6 +24,7 @@ Public API
 - ``SUPPORTED_BENCHMARKS`` (tuple[str, ...])
 
 The HuggingFace dataset ids used (when ``datasets`` + network are available):
+- ifeval        : ``google/IFEval``
 - bfcl_simple   : BFCL v4 single-turn JSON files from the official Gorilla repository
 - math500       : ``HuggingFaceH4/MATH-500`` (fallback ``qwedsacf/competition_math``)
 - mmlu          : ``cais/mmlu`` (config ``all``)
@@ -42,6 +44,7 @@ from trinity.types import Task
 __all__ = ["load_tasks", "sample_minibatch", "SUPPORTED_BENCHMARKS"]
 
 SUPPORTED_BENCHMARKS: tuple[str, ...] = (
+    "ifeval",
     "bfcl_simple",
     "math500",
     "mmlu",
@@ -56,6 +59,10 @@ _BFCL_SUPPORTED_FILES: tuple[str, ...] = (
     "BFCL_v4_simple_python.json",
     "BFCL_v4_simple_javascript.json",
     "BFCL_v4_simple_java.json",
+)
+_IFEVAL_RAW_URL = (
+    "https://raw.githubusercontent.com/google-research/google-research/06076564b3311330f3560e8cfba86d359bec31af/"
+    "instruction_following_eval/data/input_data.jsonl"
 )
 _BFCL_FILE_TO_CATEGORY: dict[str, str] = {
     name: name.removeprefix("BFCL_v4_").removesuffix(".json") for name in _BFCL_SUPPORTED_FILES
@@ -151,11 +158,52 @@ def _fetch_jsonl_rows(url: str) -> list[dict[str, Any]] | None:
 
 def _bfcl_categories_for_split(split: str) -> list[str]:
     s = (split or "").strip().lower()
-    if s in {"simple", "single", "single_turn"}:
-        return list(_BFCL_SUPPORTED_FILES)
-    # Default: the single-turn BFCL v4 suite that is fully comparable as one-shot
-    # function-call output.
+    if s not in {"test", "eval", "validation", "valid"}:
+        raise ValueError(
+            "bfcl_simple is evaluation-only; use split='test'/'eval' instead of a training split"
+        )
+    # BFCL v4 simple is intentionally limited to the single-turn categories.
     return list(_BFCL_SUPPORTED_FILES)
+
+
+def _load_ifeval_hf(split: str) -> list[Task] | None:
+    """Load the official IFEval prompt set from the Google Research repo.
+
+    The upstream file does not ship separate train/test splits, so the logical
+    ``split`` is intentionally ignored here. The parameter stays in the loader
+    signature so this module remains consistent with the other benchmark
+    loaders and with any future split-aware wrapper.
+    """
+    rows = _fetch_jsonl_rows(_IFEVAL_RAW_URL)
+    if not rows:
+        return None
+
+    tasks: list[Task] = []
+    for i, row in enumerate(rows):
+        prompt = str(_row_get(row, "prompt", default="")).strip()
+        instruction_id_list = list(_row_get(row, "instruction_id_list", default=[]))
+        kwargs = list(_row_get(row, "kwargs", default=[]))
+        if not prompt or not instruction_id_list:
+            continue
+        tasks.append(
+            Task(
+                task_id=str(_row_get(row, "key", default=f"ifeval-{i}")),
+                benchmark="ifeval",
+                prompt=prompt,
+                answer={
+                    "instruction_id_list": instruction_id_list,
+                    "kwargs": kwargs,
+                    "prompt": prompt,
+                    "source": "google-research/google-research",
+                    "key": _row_get(row, "key"),
+                },
+                meta={
+                    "source": "google-research/google-research",
+                    "key": _row_get(row, "key"),
+                },
+            )
+        )
+    return tasks or None
 
 
 def _extract_bfcl_question(row: Any) -> str:
@@ -199,11 +247,13 @@ def _load_bfcl_hf(split: str) -> list[Task] | None:
     for filename in files:
         category = _BFCL_FILE_TO_CATEGORY.get(filename, filename)
         question_url = (
-            "https://raw.githubusercontent.com/ShishirPatil/gorilla/main/"
+            "https://raw.githubusercontent.com/ShishirPatil/gorilla/"
+            "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8/"
             f"berkeley-function-call-leaderboard/bfcl_eval/data/{filename}"
         )
         answer_url = (
-            "https://raw.githubusercontent.com/ShishirPatil/gorilla/main/"
+            "https://raw.githubusercontent.com/ShishirPatil/gorilla/"
+            "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8/"
             f"berkeley-function-call-leaderboard/bfcl_eval/data/possible_answer/{filename}"
         )
         questions = _fetch_jsonl_rows(question_url)
@@ -221,9 +271,9 @@ def _load_bfcl_hf(split: str) -> list[Task] | None:
             functions = list(_row_get(row, "function", default=[]))
             ground_truth = gold.get("ground_truth", [])
             tasks.append(
-            Task(
-                task_id=row_id,
-                benchmark="bfcl_simple",
+                Task(
+                    task_id=row_id,
+                    benchmark="bfcl_simple",
                     prompt=_format_bfcl_prompt(question, functions, category),
                     answer={
                         "ground_truth": ground_truth,
@@ -603,6 +653,44 @@ def _toy_tasks(benchmark: str) -> list[Task]:
                 meta={"source": "toy"},
             ),
         ]
+    if benchmark == "ifeval":
+        return [
+            Task(
+                task_id="ifeval-toy-0",
+                benchmark="ifeval",
+                prompt="Write exactly two paragraphs. Do not use commas.",
+                answer={
+                    "instruction_id_list": [
+                        "length_constraints:number_paragraphs",
+                        "punctuation:no_comma",
+                    ],
+                    "kwargs": [{"num_paragraphs": 2}, {}],
+                    "prompt": "Write exactly two paragraphs. Do not use commas.",
+                    "source": "toy",
+                    "key": "ifeval-toy-0",
+                },
+                meta={
+                    "source": "toy",
+                    "instruction_id_list": [
+                        "length_constraints:number_paragraphs",
+                        "punctuation:no_comma",
+                    ],
+                },
+            ),
+            Task(
+                task_id="ifeval-toy-1",
+                benchmark="ifeval",
+                prompt='Reply with a short answer in double quotation marks.',
+                answer={
+                    "instruction_id_list": ["startend:quotation"],
+                    "kwargs": [{}],
+                    "prompt": 'Reply with a short answer in double quotation marks.',
+                    "source": "toy",
+                    "key": "ifeval-toy-1",
+                },
+                meta={"source": "toy", "instruction_id_list": ["startend:quotation"]},
+            ),
+        ]
     if benchmark == "bfcl_simple":
         return [
             Task(
@@ -641,6 +729,7 @@ def _toy_tasks(benchmark: str) -> list[Task]:
 
 
 _HF_LOADERS = {
+    "ifeval": _load_ifeval_hf,
     "bfcl_simple": _load_bfcl_hf,
     "math500": _load_math500_hf,
     "mmlu": _load_mmlu_hf,

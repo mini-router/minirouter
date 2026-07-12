@@ -104,7 +104,9 @@ queued submission at a time.
 
 The PR workflow now uploads `submissions/final_model/` as a tarball to
 `POST /submit`, which stores the archive, extracts `best_theta.npy`, and queues the submission for
-evaluation.
+evaluation. When the upload includes `repo_full_name` and `pr_number` (as the workflow does), the
+request must also send `x-minirouter-webhook-secret` matching `GITHUB_WEBHOOK_SECRET`.
+Plain uploads from the public form omit PR metadata and do not require the header.
 
 To enable automatic merge after evaluation, set `GITHUB_AUTO_MERGE_SUBMISSIONS=true`.
 To keep only the PR comment and skip auto-merge, leave it `false`.

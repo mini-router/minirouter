@@ -89,3 +89,12 @@ def test_bfcl_reward_scores_matching_json_call():
 
     assert R.score_text("bfcl_simple", candidate, reference) == 1.0
     assert R.score_text("bfcl_simple", wrong, reference) == 0.0
+
+
+def test_bfcl_train_split_is_blocked():
+    try:
+        D.load_tasks("bfcl_simple", "train", max_items=None, seed=0)
+    except ValueError as exc:
+        assert "evaluation-only" in str(exc)
+    else:
+        raise AssertionError("expected bfcl_simple train split to be rejected")
