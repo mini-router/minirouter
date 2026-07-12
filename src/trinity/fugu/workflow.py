@@ -329,6 +329,11 @@ def format_hint(benchmark: str) -> str:
     key = (benchmark or "").strip().lower()
     if key == "ifeval":
         return "Follow every instruction exactly and keep the response compliant with all format constraints."
+    if key == "rlpr":
+        return (
+            "Follow the question's expected answer format exactly: use a boxed final answer for math "
+            "items and a single choice letter for multiple-choice items."
+        )
     if key == "bfcl_simple":
         return "Return only valid JSON function-call objects with the requested names and arguments."
     if key in {"mmlu", "gpqa", "gpqa-diamond", "gpqa_diamond"}:

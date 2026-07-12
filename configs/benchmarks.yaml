@@ -42,6 +42,10 @@ ood:
     loader: "benchmarks.ifeval"
     split: "test"
     metric: "accuracy"
+  - name: rlpr
+    loader: "benchmarks.rlpr"
+    split: "test"
+    metric: "accuracy"
   - name: bfcl_simple
     loader: "benchmarks.bfcl_simple"
     split: "test"
