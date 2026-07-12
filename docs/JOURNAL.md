@@ -37,7 +37,6 @@ the candidate read nothing, printed nothing, and stdout `""` never matched `"[0,
 compare with tuples normalized to lists. `fn_name=None` keeps the historical stdin behavior, so
 stdin/assert tests and the S5 smoke assertions are untouched.
 **Follow-up:** private (hidden) LiveCodeBench tests are still not executed — only `public_test_cases`.
-
 ## 2026-07-09 — results_table summary crashed on a missing random_routing baseline  #mistake #gotcha
 **Context:** aggregating `experiments/**/eval*.json` into the multi-task R1/R2/R4 table.
 **Expected:** an eval JSON without `random_routing` renders that cell as `—`, like the
@@ -67,6 +66,8 @@ same comparison, not just the one in the reported repro.
 TRINITY, per-bench `mean` for random) are unchanged.
 
 ---
+
+
 ## 2026-07-11 — fugu/eval banked a tied vote as a solved query (partial credit)  #mistake #repro
 **Context:** `trinity.fugu.eval.evaluate()` emits `per_query_binary`, which feeds `scripts/oracle_ceiling.py` (McNemar test, router-vs-ceiling) — issue #83.
 **Expected:** a per-query "majority" over reps; a 50/50 ballot is not a majority.
