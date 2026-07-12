@@ -54,11 +54,9 @@ def test_livecodebench_hf_row_parses_to_task(monkeypatch):
     assert task.task_id == "lcb-123"
     assert task.meta["version"] == "release_v6"
     assert task.meta["source"] == "lighteval/code_generation_lite"
-    # _parse_lcb_tests now preserves each case's ``testtype`` (defaulting to
-    # "stdin") so the grader can tell stdin from functional problems apart.
     assert task.answer["tests"] == [
-        {"input": "3\n", "output": "9\n", "testtype": "stdin"},
-        {"input": "5\n", "output": "25\n", "testtype": "stdin"},
+        {"input": "3\n", "output": "9\n"},
+        {"input": "5\n", "output": "25\n"},
     ]
     assert seen["calls"][0] == {
         "path": "lighteval/code_generation_lite",

@@ -46,6 +46,10 @@ ood:
     loader: "benchmarks.rlpr"
     split: "test"
     metric: "accuracy"
+  - name: bfcl_simple
+    loader: "benchmarks.bfcl_simple"
+    split: "test"
+    metric: "accuracy"
 
 evaluation:
   seeds: [0]
