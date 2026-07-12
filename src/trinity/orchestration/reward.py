@@ -17,15 +17,17 @@ Supported benchmarks
 * ``rlpr``
     Route the RLPR suite to math or multiple-choice grading based on source
     benchmark metadata, with WebInstruct handled generically.
+* ``bfcl_simple``
+    Parse a JSON function-call payload and compare it against the ground-truth
+    call schema stored in ``task.answer``.
 * ``mmlu`` / ``gpqa``
     Extract a single multiple-choice letter ``A-D`` (robust to phrasings such
     as ``"the answer is (B)"``, ``"B)"``, ``"B."``) and compare to
     ``task.answer``.
 * ``livecodebench`` / ``bigcodebench``
-    Execute candidate code against the task's tests in a subprocess with a
-    private temp ``HOME`` (``run_pass_at_1``). Never ``exec`` untrusted code in
-    process. This is not a full OS sandbox; absolute-path reads of
-    world-readable files are still possible without container isolation.
+    Execute candidate code against the task's tests in a subprocess sandbox
+    with a timeout (``run_pass_at_1``). Never ``exec`` untrusted code in
+    process.
 
 Design contract
 ---------------
@@ -47,7 +49,7 @@ import subprocess
 import sys
 import tempfile
 from fractions import Fraction
-from typing import Sequence
+from typing import Any, Sequence
 
 from trinity.types import Role, Task, Trajectory
 
@@ -83,6 +85,7 @@ _RLPR_CHOICE_SOURCES: frozenset[str] = frozenset(
     {"MMLUPro-1000_Avg2", "gpqa_diamond_Avg4"}
 )
 _RLPR_WEBINSTRUCT_SOURCES: frozenset[str] = frozenset({"WebInstruct-verified-val_Avg2"})
+BFCL_BENCHMARKS: frozenset[str] = frozenset({"bfcl_simple"})
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +174,8 @@ def has_answer(benchmark: str, text: str) -> bool:
         )
     if key in IFEVAL_BENCHMARKS:
         return bool(text.strip())
+    if key in BFCL_BENCHMARKS:
+        return _extract_json_payload(text) is not None
     if key in CODE_BENCHMARKS:
         return "```" in text or "def " in text or "import " in text
     return False
@@ -205,6 +210,8 @@ def score_text(benchmark: str, candidate: str, reference: object) -> float:
         return 1.0 if _check_rlpr(candidate, reference) else 0.0
     if key in IFEVAL_BENCHMARKS:
         return 1.0 if _check_ifeval(candidate, reference) else 0.0
+    if key in BFCL_BENCHMARKS:
+        return 1.0 if _check_bfcl(candidate, reference) else 0.0
     if key in CODE_BENCHMARKS:
         return 1.0 if _check_code(candidate, reference) else 0.0
     raise ValueError(
@@ -430,6 +437,9 @@ def _check_ifeval(candidate: str, reference: object) -> bool:
     return True
 
 
+# ---------------------------------------------------------------------------
+# RLPR: route to math / choice / generic WebInstruct scoring
+# ---------------------------------------------------------------------------
 def _rlpr_reference_source(reference: object) -> str:
     if isinstance(reference, dict):
         for key in ("source", "data_source", "benchmark"):
@@ -475,6 +485,213 @@ def _check_rlpr_webinstruct(candidate: str, reference: object) -> bool:
         return True
 
     return normalize_math_answer(cand) == normalize_math_answer(gold)
+
+
+# ---------------------------------------------------------------------------
+# BFCL: function-call JSON comparison
+# ---------------------------------------------------------------------------
+def _strip_code_fences(text: str) -> str:
+    s = text.strip()
+    if not s.startswith("```"):
+        return s
+    s = s[3:]
+    if s.lower().startswith("json"):
+        s = s[4:]
+    s = s.strip()
+    if s.endswith("```"):
+        s = s[:-3]
+    return s.strip()
+
+
+def _extract_json_payload(text: str) -> object | None:
+    """Best-effort JSON extraction for BFCL outputs."""
+    if not text:
+        return None
+    s = _strip_code_fences(text)
+    for candidate in (s, s[s.find("{") :] if "{" in s else "", s[s.find("[") :] if "[" in s else ""):
+        if not candidate:
+            continue
+        candidate = candidate.strip()
+        if candidate.endswith("```"):
+            candidate = candidate[:-3].strip()
+        if candidate.startswith("{") and "}" in candidate:
+            end = candidate.rfind("}")
+            if end > 0:
+                try:
+                    return json.loads(candidate[: end + 1])
+                except Exception:
+                    pass
+        if candidate.startswith("[") and "]" in candidate:
+            end = candidate.rfind("]")
+            if end > 0:
+                try:
+                    return json.loads(candidate[: end + 1])
+                except Exception:
+                    pass
+    try:
+        return json.loads(s)
+    except Exception:
+        return None
+
+
+def _coerce_bfcl_scalar(value: object) -> object:
+    if isinstance(value, str):
+        s = value.strip()
+        low = s.lower()
+        if low == "true":
+            return True
+        if low == "false":
+            return False
+        if low in {"null", "none"}:
+            return None
+        if re.fullmatch(r"-?\d+", s):
+            try:
+                return int(s)
+            except Exception:
+                return s
+        if re.fullmatch(r"-?(?:\d+\.\d+|\d+\.)", s):
+            try:
+                return float(s)
+            except Exception:
+                return s
+        return s
+    return value
+
+
+def _normalize_bfcl_value(value: object) -> object:
+    if isinstance(value, list):
+        return [_normalize_bfcl_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(k): _normalize_bfcl_value(v) for k, v in value.items()}
+    return _coerce_bfcl_scalar(value)
+
+
+def _bfcl_call_from_model(item: object) -> tuple[str, dict[str, object]] | None:
+    if not isinstance(item, dict) or not item:
+        return None
+    if "name" in item and ("arguments" in item or "args" in item):
+        name = str(item.get("name", "")).strip()
+        arguments = item.get("arguments", item.get("args", {}))
+        if isinstance(arguments, dict):
+            return name, arguments
+        return None
+    if len(item) == 1:
+        name, arguments = next(iter(item.items()))
+        if isinstance(arguments, dict):
+            return str(name).strip(), arguments
+    if all(isinstance(v, dict) for v in item.values()):
+        # Best-effort support for top-level maps of function name -> arguments.
+        name, arguments = next(iter(item.items()))
+        if isinstance(arguments, dict):
+            return str(name).strip(), arguments
+    return None
+
+
+def _bfcl_call_from_gold(item: object) -> tuple[str, dict[str, list[object]]] | None:
+    if not isinstance(item, dict) or not item:
+        return None
+    if len(item) == 1:
+        name, arguments = next(iter(item.items()))
+        if isinstance(arguments, dict):
+            normalized: dict[str, list[object]] = {}
+            for key, allowed in arguments.items():
+                if isinstance(allowed, list):
+                    normalized[str(key)] = [_normalize_bfcl_value(v) for v in allowed]
+                else:
+                    normalized[str(key)] = [_normalize_bfcl_value(allowed)]
+            return str(name).strip(), normalized
+    return None
+
+
+def _bfcl_missing_allowed(allowed: object) -> bool:
+    allowed = _normalize_bfcl_value(allowed)
+    if allowed in ("", None):
+        return True
+    if isinstance(allowed, list):
+        return any(_bfcl_missing_allowed(item) for item in allowed)
+    return False
+
+
+def _bfcl_value_matches(candidate: object, allowed: object) -> bool:
+    if isinstance(allowed, list):
+        options = allowed
+    else:
+        options = [allowed]
+    candidate_norm = _normalize_bfcl_value(candidate)
+    for opt in options:
+        opt_norm = _normalize_bfcl_value(opt)
+        if candidate_norm == opt_norm:
+            return True
+        if str(candidate_norm).strip() == str(opt_norm).strip():
+            return True
+    return False
+
+
+def _bfcl_call_matches(
+    candidate: tuple[str, dict[str, object]],
+    reference: tuple[str, dict[str, list[object]]],
+) -> bool:
+    cand_name, cand_args = candidate
+    ref_name, ref_args = reference
+    if cand_name != ref_name:
+        return False
+    if not set(cand_args).issubset(ref_args):
+        return False
+    for key, allowed in ref_args.items():
+        if key not in cand_args:
+            if _bfcl_missing_allowed(allowed):
+                continue
+            return False
+        if not _bfcl_value_matches(cand_args[key], allowed):
+            return False
+    return True
+
+
+def _check_bfcl(candidate: str, reference: object) -> bool:
+    raw = _extract_json_payload(candidate)
+    if raw is None:
+        return False
+    if isinstance(reference, dict) and "ground_truth" in reference:
+        gold_raw = reference["ground_truth"]
+    else:
+        gold_raw = reference
+    if not isinstance(gold_raw, list):
+        return False
+
+    cand_calls: list[tuple[str, dict[str, object]]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            call = _bfcl_call_from_model(item)
+            if call is None:
+                return False
+            cand_calls.append(call)
+    else:
+        call = _bfcl_call_from_model(raw)
+        if call is None:
+            return False
+        cand_calls.append(call)
+
+    gold_calls: list[tuple[str, dict[str, list[object]]]] = []
+    for item in gold_raw:
+        call = _bfcl_call_from_gold(item)
+        if call is None:
+            return False
+        gold_calls.append(call)
+
+    if len(cand_calls) != len(gold_calls):
+        return False
+
+    key = lambda call: json.dumps(
+        {"name": call[0], "arguments": call[1]},
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    cand_calls_sorted = sorted(cand_calls, key=key)
+    gold_calls_sorted = sorted(gold_calls, key=key)
+    return all(
+        _bfcl_call_matches(candidate_call, gold_call)
+        for candidate_call, gold_call in zip(cand_calls_sorted, gold_calls_sorted)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -835,20 +1052,25 @@ def extract_code(text: str) -> str:
     return text.strip()
 
 
-def _coerce_test_spec(reference: object) -> tuple[list, int]:
-    """Normalize a code reference into ``(tests, timeout_s)``.
+def _coerce_test_spec(reference: object) -> tuple[list, int, str | None]:
+    """Normalize a code reference into ``(tests, timeout_s, fn_name)``.
 
     The ``Task.answer`` for code benchmarks may be:
       * a ``list`` of tests, or
-      * a ``dict`` with key ``"tests"`` and optional ``"timeout_s"``, or
+      * a ``dict`` with key ``"tests"`` and optional ``"timeout_s"`` /
+        ``"fn_name"``, or
       * a JSON string encoding either of the above.
 
     Each test is one of:
       * a ``str`` of assert-based Python (executed after the candidate code), or
       * a ``dict`` ``{"stdin": str, "expected_stdout": str}`` for I/O tests, or
       * a 2-tuple/list ``(stdin, expected_stdout)``.
+
+    ``fn_name`` (LiveCodeBench call-based problems) is ``None`` for stdin/assert
+    specs and selects the functional execution path when present.
     """
     timeout_s = 10
+    fn_name: str | None = None
     spec: object = reference
     if isinstance(spec, str):
         try:
@@ -857,6 +1079,8 @@ def _coerce_test_spec(reference: object) -> tuple[list, int]:
             spec = [spec]
     if isinstance(spec, dict):
         timeout_s = int(spec.get("timeout_s", timeout_s))
+        raw_fn = spec.get("fn_name")
+        fn_name = str(raw_fn) if raw_fn else None
         tests = spec.get("tests", [])
     else:
         tests = spec
@@ -864,7 +1088,7 @@ def _coerce_test_spec(reference: object) -> tuple[list, int]:
         tests = []
     if not isinstance(tests, list):
         tests = [tests]
-    return tests, timeout_s
+    return tests, timeout_s, fn_name
 
 
 def _check_code(candidate: str, reference: object) -> bool:
@@ -872,18 +1096,19 @@ def _check_code(candidate: str, reference: object) -> bool:
     code = extract_code(candidate)
     if not code.strip():
         return False
-    tests, timeout_s = _coerce_test_spec(reference)
-    return run_pass_at_1(code, tests, timeout_s=timeout_s)
+    tests, timeout_s, fn_name = _coerce_test_spec(reference)
+    return run_pass_at_1(code, tests, timeout_s=timeout_s, fn_name=fn_name)
 
 
-def run_pass_at_1(code: str, tests: Sequence, timeout_s: int = 10) -> bool:
+def run_pass_at_1(
+    code: str, tests: Sequence, timeout_s: int = 10, fn_name: str | None = None
+) -> bool:
     """Execute candidate ``code`` against ``tests`` in an isolated subprocess.
 
     The candidate code is **never** executed in-process. Each invocation writes
     a temporary script and runs it with the current Python interpreter in a
-    fresh subprocess with a wall-clock timeout and a private temp ``HOME`` so
-    graded code cannot read the operator's ``~/.config/trinity/secrets.env``.
-    The candidate is judged to pass only if **every** test passes.
+    fresh subprocess with a wall-clock timeout. The candidate is judged to pass
+    only if **every** test passes.
 
     Two test flavors are supported (they may be mixed in one list):
 
@@ -895,11 +1120,18 @@ def run_pass_at_1(code: str, tests: Sequence, timeout_s: int = 10) -> bool:
       ``stdin`` on standard input, and its stdout is compared (whitespace-
       trimmed per line) to ``expected_stdout``. Use this for competitive-
       programming style benchmarks (LiveCodeBench).
+    * **call-based** (``dict`` with ``testtype == "functional"``, plus a
+      ``fn_name``): the candidate exposes ``fn_name`` as a ``Solution`` method or
+      module-level function; it is called with the newline-separated JSON
+      arguments in ``input`` and its return value is compared (tuples normalized
+      to lists) to the JSON ``output``. This is LiveCodeBench's functional flavor.
 
     Args:
         code: Candidate Python source (already fence-stripped).
         tests: Sequence of tests as described above.
         timeout_s: Per-test wall-clock timeout in seconds.
+        fn_name: Call-based entry-point name. When ``None`` (stdin problems),
+            every test uses the historical stdin/assert behavior.
 
     Returns:
         ``True`` iff the candidate passes all tests (and there is at least one
@@ -910,13 +1142,78 @@ def run_pass_at_1(code: str, tests: Sequence, timeout_s: int = 10) -> bool:
     if not tests:
         return False
     for test in tests:
-        if not _run_one_test(code, test, timeout_s):
+        if not _run_one_test(code, test, timeout_s, fn_name=fn_name):
             return False
     return True
 
 
-def _run_one_test(code: str, test: object, timeout_s: int) -> bool:
+def _functional_harness(fn_name: str, stdin_data: str, expected_output: str) -> str:
+    """Build a self-checking script for a LiveCodeBench call-based test.
+
+    LiveCodeBench passes newline-separated JSON arguments and expects a
+    JSON-encoded return value from ``fn_name`` (a ``Solution`` method or a
+    module-level function). The generated script decodes the args, calls the
+    function, normalizes tuples to lists (so ``(0, 1)`` matches ``[0, 1]``), and
+    asserts equality with the expected output — exiting ``0`` iff correct. All
+    three values are embedded as Python literals via ``repr`` so no candidate or
+    test text can break out of the harness.
+    """
+    lines = [
+        "import json as _json",
+        "def _norm(_x):",
+        "    if isinstance(_x, tuple):",
+        "        _x = list(_x)",
+        "    if isinstance(_x, list):",
+        "        return [_norm(_e) for _e in _x]",
+        "    if isinstance(_x, dict):",
+        "        return {_k: _norm(_v) for _k, _v in _x.items()}",
+        "    return _x",
+        f"_fn_name = {fn_name!r}",
+        f"_raw_in = {stdin_data!r}",
+        f"_raw_out = {expected_output!r}",
+        "_args = [_json.loads(_ln) for _ln in _raw_in.split(chr(10)) if _ln.strip() != '']",
+        "_obj = Solution() if 'Solution' in dir() else None",
+        "if _obj is not None and hasattr(_obj, _fn_name):",
+        "    _target = getattr(_obj, _fn_name)",
+        "else:",
+        "    _target = globals()[_fn_name]",
+        "_result = _norm(_target(*_args))",
+        "try:",
+        "    _expected = _norm(_json.loads(_raw_out))",
+        "except Exception:",
+        "    _expected = _raw_out.strip()",
+        "    _result = _result if isinstance(_result, str) else _json.dumps(_result)",
+        "    _result = _result.strip()",
+        "assert _result == _expected",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _run_one_test(
+    code: str, test: object, timeout_s: int, fn_name: str | None = None
+) -> bool:
     """Run a single test in an isolated subprocess. Returns pass/fail."""
+    # Call-based (LiveCodeBench "functional") path. The mode is chosen ONLY by an
+    # explicit ``testtype == "functional"`` — the authoritative per-test signal
+    # preserved by dataset.py — never by the mere presence of ``fn_name``.
+    # ``fn_name`` only names the callable target (Solution method / module
+    # function). This keeps a stray ``fn_name`` on a stdin (or untyped) case from
+    # silently switching the grader to the wrong path: anything not explicitly
+    # ``functional`` falls through to the stdin/assert handling below.
+    if isinstance(test, dict):
+        ttype = str(test.get("testtype", "")).strip().lower()
+        has_io = (
+            "stdin" in test
+            or "input" in test
+            or "expected_stdout" in test
+            or "output" in test
+        )
+        if ttype == "functional" and has_io:
+            stdin_data = str(test.get("stdin", test.get("input", "")))
+            expected = str(test.get("expected_stdout", test.get("output", "")))
+            script = code + "\n\n" + _functional_harness(fn_name or "", stdin_data, expected)
+            return _exec_script(script, stdin_data="", timeout_s=timeout_s)
+
     stdin_data: str | None = None
     expected_stdout: str | None = None
     assert_block: str | None = None

@@ -15,6 +15,7 @@ from .db import Base, build_engine, build_session_factory, ensure_schema
 from .models import JobQueue, Submission, TrainRun
 from .services.eval_runner import evaluate_submission
 from .services.github import publish_submission_result
+from .services.github import set_commit_status
 from .services.queue import enqueue_submission_job
 from .services.train_runner import run_train_job
 
@@ -119,6 +120,21 @@ def process_once(session_factory, settings: Settings) -> int:
             logger.error("queued job %s references missing submission", job.id)
             return 1
         submission.status = "running"
+        if submission.source == "github_pr":
+            try:
+                import asyncio
+
+                asyncio.run(
+                    set_commit_status(
+                        settings,
+                        submission,
+                        state="pending",
+                        description="Evaluation running",
+                        target_url=f"{settings.public_site_url.rstrip('/')}/submission/{submission.id}",
+                    )
+                )
+            except Exception:
+                pass
         checkpoint_override = None
         if payload.get("checkpoint_path"):
             from pathlib import Path

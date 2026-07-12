@@ -40,6 +40,8 @@ session:
   final_answer: "O_tau"                 # output of the terminating turn
   verifier_requires_prior_worker: true  # [OUR CHOICE] turn-1 Verifier cannot ACCEPT empty (SPEC §0.3.5)
   first_turn_role: "free"               # no forced T->W->V ordering
+  request_timeout_s: null               # per-LLM request timeout; set for quick fail-fast smoke runs
+  trajectory_timeout_s: null            # wall-clock timeout for one task trajectory
 
 # Separable CMA-ES (diagonal covariance). Hyperparameters per SPEC §0.2 / §5.
 sep_cmaes:

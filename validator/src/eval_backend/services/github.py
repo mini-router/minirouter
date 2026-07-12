@@ -81,7 +81,10 @@ def create_pr_submission(
             existing.submission_artifact_id = artifact_row.id
             changed = True
         if changed:
-            existing.status = "queued" if artifact is not None else existing.status or "awaiting_upload"
+            if artifact is not None:
+                existing.status = "queued"
+            elif existing.status not in {"completed", "failed", "running"}:
+                existing.status = "awaiting_ci"
             existing.latest_score = None
             existing.latest_eval_id = None
             existing.best_eval_id = None
@@ -96,7 +99,7 @@ def create_pr_submission(
         pr_number=pr_number,
         head_sha=head_sha,
         benchmark_names_json=[settings.eval_benchmark],
-        status="queued" if artifact is not None else "awaiting_upload",
+        status="queued" if artifact is not None else "awaiting_ci",
         created_at=_utcnow(),
         updated_at=_utcnow(),
     )
@@ -263,6 +266,34 @@ async def post_pr_comment(settings: Settings, submission: Submission, body: str)
     )
 
 
+async def set_commit_status(
+    settings: Settings,
+    submission: Submission,
+    *,
+    state: str,
+    description: str,
+    context: str = "MiniRouter / submission",
+    target_url: str | None = None,
+) -> None:
+    owner = _repo_owner(submission.repo_full_name)
+    repo = _repo_name(submission.repo_full_name)
+    if owner is None or repo is None or not submission.head_sha:
+        return
+    payload: dict[str, Any] = {
+        "state": state,
+        "description": description[:140],
+        "context": context,
+    }
+    if target_url:
+        payload["target_url"] = target_url
+    await _github_request(
+        settings,
+        "POST",
+        f"/repos/{owner}/{repo}/statuses/{submission.head_sha}",
+        json_body=payload,
+    )
+
+
 async def merge_pull_request(settings: Settings, submission: Submission) -> None:
     owner = _repo_owner(submission.repo_full_name)
     repo = _repo_name(submission.repo_full_name)
@@ -288,8 +319,6 @@ async def publish_submission_result(
 ) -> None:
     if submission.source != "github_pr" or not settings.github_access_token:
         return
-    if not settings.github_post_comment_on_eval and not settings.github_auto_merge_submissions:
-        return
 
     run = evaluation.run if isinstance(evaluation, EvaluationResult) else evaluation
     metrics: dict[str, Any]
@@ -306,12 +335,35 @@ async def publish_submission_result(
                 metrics = {}
 
     body = build_submission_summary_markdown(submission, run, metrics=metrics)
+    target_url = None
+    if settings.public_site_url:
+        target_url = f"{settings.public_site_url.rstrip('/')}/submission/{submission.id}"
 
     try:
         if settings.github_post_comment_on_eval:
             await post_pr_comment(settings, submission, body)
     except Exception:
         # Comment failures should not break the evaluation pipeline.
+        pass
+
+    commit_state = "pending"
+    commit_description = "Evaluation queued"
+    if run.status == "completed":
+        commit_state = "success"
+        commit_description = "Evaluation completed"
+    elif run.status == "failed":
+        commit_state = "failure"
+        commit_description = "Evaluation failed"
+
+    try:
+        await set_commit_status(
+            settings,
+            submission,
+            state=commit_state,
+            description=commit_description,
+            target_url=target_url,
+        )
+    except Exception:
         pass
 
     if settings.github_auto_merge_submissions and run.status == "completed" and run.score is not None:
