@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
@@ -19,6 +19,11 @@ import eval_backend.models  # noqa: F401
 # throwaway database so a developer's local Postgres is never clobbered.
 DEFAULT_TEST_DATABASE_URL = (
     "postgresql+psycopg://minirouter:minirouter@127.0.0.1:5432/minirouter_test"
+)
+
+TRUNCATE_VALIDATOR_TABLES = text(
+    "TRUNCATE TABLE job_queues, evaluations, trains, artifacts, submissions "
+    "RESTART IDENTITY CASCADE"
 )
 
 
@@ -67,8 +72,21 @@ def validator_engine():
     try:
         yield engine
     finally:
-        Base.metadata.drop_all(engine)
+        with engine.begin() as conn:
+            conn.execute(TRUNCATE_VALIDATOR_TABLES)
         engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _reset_validator_db(request):
+    uses_validator_db = {"validator_engine", "validator_session"} & set(request.fixturenames)
+    if not uses_validator_db:
+        yield
+        return
+    engine = request.getfixturevalue("validator_engine")
+    yield
+    with engine.begin() as conn:
+        conn.execute(TRUNCATE_VALIDATOR_TABLES)
 
 
 @pytest.fixture()

@@ -19,6 +19,15 @@ def _build_settings(tmp_path: Path) -> Settings:
 
 
 def _add_submission(session, checkpoint_path: Path) -> Submission:
+    submission = Submission(
+        id="sub-1",
+        source="upload",
+        miner_id="miner-a",
+        benchmark_names_json=["math500"],
+        status="queued",
+    )
+    session.add(submission)
+    session.flush()
     artifact = Artifact(
         id="artifact-sub-1",
         storage_backend="local",
@@ -27,18 +36,10 @@ def _add_submission(session, checkpoint_path: Path) -> Submission:
         sha256="abc123",
         size_bytes=checkpoint_path.stat().st_size,
         mime_type="application/octet-stream",
-        submission_id="sub-1",
+        submission_id=submission.id,
         meta_json={"checkpoint_path": str(checkpoint_path)},
     )
-    submission = Submission(
-        id="sub-1",
-        source="upload",
-        miner_id="miner-a",
-        benchmark_names_json=["math500"],
-        status="queued",
-    )
     session.add(artifact)
-    session.add(submission)
     submission.submission_artifact_id = artifact.id
     session.flush()
     return submission
