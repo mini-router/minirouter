@@ -268,6 +268,11 @@ async def submit(
     head_sha: str | None = Form(None),
     settings: Settings = Depends(get_settings),
 ) -> SubmissionCreateResponse:
+    if repo_full_name and pr_number is not None:
+        _verify_shared_secret(
+            request.headers.get("x-minirouter-webhook-secret"),
+            settings.github_webhook_secret,
+        )
     session = get_session(request)
     try:
         submission_id = str(uuid4())
