@@ -224,6 +224,26 @@ def _load_ifeval_hf(split: str) -> list[Task] | None:
     return tasks or None
 
 
+def _render_rlpr_prompt(messages: Any) -> str:
+    """Render RLPR chat-style prompts into a flat text transcript."""
+    parts: list[str] = []
+    if isinstance(messages, list):
+        for msg in messages:
+            role = str(_row_get(msg, "role", default="")).strip().upper()
+            content = str(_row_get(msg, "content", default="")).strip()
+            if not content:
+                continue
+            if role:
+                parts.append(f"{role}: {content}")
+            else:
+                parts.append(content)
+    else:
+        text = str(messages or "").strip()
+        if text:
+            parts.append(text)
+    return "\n\n".join(parts).strip()
+
+
 def _load_rlpr_hf(split: str) -> list[Task] | None:
     """Load the RLPR evaluation suite from the official parquet files.
 
