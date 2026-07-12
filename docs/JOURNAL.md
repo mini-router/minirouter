@@ -47,6 +47,13 @@ same comparison, not just the one in the reported repro.
 TRINITY, per-bench `mean` for random) are unchanged.
 
 ---
+## 2026-07-11 — fugu/eval banked a tied vote as a solved query (partial credit)  #mistake #repro
+**Context:** `trinity.fugu.eval.evaluate()` emits `per_query_binary`, which feeds `scripts/oracle_ceiling.py` (McNemar test, router-vs-ceiling) — issue #83.
+**Expected:** a per-query "majority" over reps; a 50/50 ballot is not a majority.
+**Actual:** `int(2 * sum(votes) >= len(votes))` scored an exact tie as `1`. `votes=[1,0]` and `[1,1,0,0]` both banked as solved.
+**Root cause:** non-strict `>=`. Reachable via even `--reps`, and also via an odd `--reps` ballot truncated mid-task by the `cap_usd` spend check (records fewer votes than `reps`). Directly contradicts the module's own contract ("a number here cannot be inflated by partial credit") — a coin-flip query banked as 1 *is* partial credit, inflating the router in exactly the comparison oracle_ceiling exists to make trustworthy.
+**Fix / decision:** strict majority `int(2 * sum(votes) > len(votes))`, so a tie resolves to 0 (conservative: ties against the router). Odd complete ballots unaffected. Regression tests in `tests/test_fugu_eval_majority.py` (stub `propose_and_run`/`is_correct`, script the votes).
+**Follow-up:** none.
 
 ## 2026-07-09 — PR-tagged POST /submit now requires webhook secret  #mistake #decision #repro
 **Context:** follow-up to PR #20 webhook fail-closed auth; PR automation posts miner bundles to
