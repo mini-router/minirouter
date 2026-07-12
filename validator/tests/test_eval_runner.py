@@ -74,9 +74,21 @@ def test_valid_results_stay_completed(validator_session, tmp_path, monkeypatch):
     checkpoint_path.write_bytes(b"theta")
     submission = _add_submission(session, checkpoint_path)
 
-    def _fake_local_attempt(settings, checkpoint_path, local_results_path, submission_id, env):
+    def _fake_local_attempt(
+        settings,
+        checkpoint_path,
+        local_results_path,
+        local_ledger_path,
+        submission_id,
+        env,
+    ):
         local_results_path.write_text(
             json.dumps({"results": {"TRINITY": {"accuracy": 0.75}}}),
+            encoding="utf-8",
+        )
+        local_ledger_path.write_text(
+            json.dumps({"provider": "chutes", "m": "google/gemma-4-31B-turbo-TEE", "p": 100, "c": 50})
+            + "\n",
             encoding="utf-8",
         )
         return ("fake-eval-command", 0, "stdout", "")
