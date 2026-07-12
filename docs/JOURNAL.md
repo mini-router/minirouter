@@ -116,7 +116,6 @@ passing `test`/`validation`/`dev` through, then route `_load_mmlu_hf` through it
 split name.
 **Follow-up:** complementary to #7 (fail-loud-on-toy-fallback); this fixes the *reason* the MMLU
 load failed rather than only surfacing it.
-
 ## 2026-07-09 — Submission eval now batches benchmark items + host alias fixed  #fix #perf #validator
 **Context:** validator submission eval was still processing benchmark items one by one, and the remote
 GPU host field used by the worker did not match the config dataclass.
@@ -146,6 +145,7 @@ HF row parsing, and pass@1 scoring, and update the README to call out LiveCodeBe
 automatic grader description.
 **Follow-up:** if we later wire `configs/benchmarks.yaml` into a runtime loader, the module is now in
 place.
+
 ## 2026-07-09 — role prompt assembly unit tests  #decision #repro
 **Context:** ``roles/prompts.py`` implements SPEC §4.4 system contracts and the
 ``render_transcript`` / ``build_messages`` helpers used by the inner loop, but had
@@ -266,20 +266,6 @@ made it fail-safe — a missing/empty choice (or missing `message`) yields an em
 (`text=""`, `finish_reason="error"`) while still accounting `usage`, mirroring the null-`content`
 handling. Added `tests/test_pool_parse.py` (7 cases). Scoped to the parsing path only (not the imports)
 so it stays independent of the separate `import sys` --selftest fix (#25).
-**Follow-up:** none — self-contained client-robustness fix.
-## 2026-07-08 — Remote eval used nonexistent settings.trinity_gpu_host  #mistake #fix
-**Context:** issue #46 reported that validator remote GPU evaluation failed before SSH with
-`AttributeError: 'Settings' object has no attribute 'trinity_gpu_host'`.
-**Expected:** `_remote_attempt()` should read the configured remote host from `Settings.trinity_remote_host`
-(`TRINITY_GPU_HOST` env).
-**Actual:** `eval_runner.py` referenced `settings.trinity_gpu_host`, which is not defined on `Settings`.
-**Root cause:** field rename/typo — config exposes `trinity_remote_host` but the runner still used the old name.
-**Fix / decision:** replaced both `trinity_gpu_host` references in `eval_runner.py` with
-`trinity_remote_host`; added `validator/tests/test_eval_runner_remote_host.py` to assert SSH host resolution
-uses the real Settings field.
-**Follow-up:** none.
-
-
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
 fell back to local CPU and still reported completion.
@@ -1141,19 +1127,6 @@ Per user request (document everything + structured output):
 - Cost ~$22 (ledger-tracked). No GPU was empty (other tenants), but evals are light (~4 GB) so they
   coexist on a shared H200.
 
-## 2026-07-10 — IFEval benchmark wiring added  #decision #repro
-
-Implemented a new `ifeval` benchmark loader/facade:
-- IFEval loads the official Google Research `input_data.jsonl` and stores `instruction_id_list` +
-  `kwargs` in `Task.answer`.
-- Reward support is routed through `trinity.orchestration.reward.score_text`.
-- The checker is a local deterministic heuristic aligned to the published instruction families
-  (`punctuation`, `keywords`, `length_constraints`, `detectable_format`, `change_case`, `startend`,
-  `combination`).
-
-The dataset does not publish a separate train/test split, so the loader intentionally treats the file as
-a single logical benchmark set and keeps the split argument for API compatibility.
-
 ## 2026-07-12 — IFEval review fixes: pinned source + fail-closed language scoring  #fix #repro
 
 The PR review caught two reproducibility/correctness issues:
@@ -1170,3 +1143,20 @@ Addressed PR 104 review feedback for `rlpr`:
 - made `WebInstruct-verified-val_Avg2` score generically instead of forcing choice-only routing
 - blocked training-split loading so `rlpr` stays evaluation-only in this repo
 - made RLPR parquet load failures raise instead of silently falling back to toy data
+
+## 2026-07-10 — BFCL simple-slice benchmark wiring added  #decision #repro
+
+Implemented a new `bfcl_simple` benchmark loader/facade:
+- BFCL loads only the official v4 single-turn JSONL question/answer files directly from the Gorilla repo raw URLs.
+- Reward support is now routed through `trinity.orchestration.reward.score_text` for `bfcl_simple`.
+
+Scoring is exact JSON function-call matching against the official ground-truth schema. Multi-turn/live BFCL
+categories remain out of scope until the loader preserves full dialogue context.
+
+## 2026-07-12 — BFCL review fixes  #decision #repro
+
+Addressed PR 102 review feedback for `bfcl_simple`:
+
+- pinned the Gorilla raw-source snapshot instead of reading from `main`
+- blocked `train` splits so the benchmark stays evaluation-only in this repo
+- kept the simplified single-turn scope explicit in the loader/docs
