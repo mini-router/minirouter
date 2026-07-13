@@ -28,8 +28,10 @@ entries can be processed.
 **Root cause:** failure recovery only called `session.rollback()` without persisting dead-letter
 state in a fresh transaction.
 **Fix / decision:** mark the claimed `JobQueue` row and related submission `failed` after rollback,
-return from `process_once()` instead of re-raising, and log GitHub publish failures. Added
-`validator/tests/test_worker.py` against the JobQueue worker path.
+return from `process_once()` instead of re-raising, and log GitHub publish failures. Lock only
+`job_queues` rows in the claim query (`FOR UPDATE OF job_queues`) so Postgres accepts the outer
+join used for review-gate ordering. Added `validator/tests/test_worker.py` against the JobQueue
+worker path.
 **Follow-up:** optionally persist a failed `EvaluationRun`/`TrainRun` row when the crash happens
 before the runner creates one.
 
