@@ -18,6 +18,24 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-13 — Infra-failed evals auto-closed PRs (couldn't-run == rejected)  #mistake #decision
+**Context:** issue #190 — PRs #121 and #125 were auto-closed by the submission-eval bot.
+**Expected:** a PR should only be closed when its eval *ran* and the model scored at/below threshold.
+**Actual:** both were closed by infrastructure failures — #121 remote command exit 1 (`results_missing`),
+#125 `ssh trinity-gpu … exit status 255` (GPU host unreachable, eval never scored). `publish_submission_result`
+computed `should_merge` and closed the PR in the `else` for *every* non-merge outcome, including
+`run.status == "failed"`.
+**Root cause:** `services/github.py` conflated "the validator couldn't run the eval" with "the submission was
+rejected" — any `status != completed`/low-score path hit the same `close_pull_request`.
+**Fix / decision:** only close on a *completed* eval that scored at/below threshold (`should_close`). On
+`status == "failed"` (infra: unreachable host, remote setup error, missing results) leave the PR open and set
+the commit status to a retryable `error` instead of `failure`. Added `tests/test_publish_submission_result.py`
+covering infra-failure → not closed, completed-low → closed, completed-high → merged (verified the infra case
+fails on the pre-fix code).
+**Follow-up:** a secondary `eval_runner` behavior (remote *connection* errors abort before local fallback even
+when fallback is enabled) is intentional per its test and left as-is; retry/backoff for transient infra
+failures could be layered on the queue's existing `max_attempts=3`.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.

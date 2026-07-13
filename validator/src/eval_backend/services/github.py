@@ -364,6 +364,17 @@ async def publish_submission_result(
         and run.score > settings.github_review_score_threshold
         and submission.latest_eval_id == run.id
     )
+    # A PR is only *rejected* (closed) when the eval actually ran to completion and
+    # scored at/below threshold. A "failed" run means the validator could not
+    # produce a score at all — the GPU host was unreachable, the remote setup
+    # errored, or results.json was never written. That is an infrastructure
+    # problem, not a submission rejection, so the PR is left open (and can be
+    # retried) rather than closed (issue #190).
+    should_close = (
+        submission.source == "github_pr"
+        and run.status == "completed"
+        and not should_merge
+    )
     commit_state = "pending"
     commit_description = "Evaluation queued"
     if run.status == "completed":
@@ -374,8 +385,10 @@ async def publish_submission_result(
             commit_state = "failure"
             commit_description = "Evaluation below threshold"
     elif run.status == "failed":
-        commit_state = "failure"
-        commit_description = "Evaluation failed"
+        # Surface infrastructure failures as a retryable "error" (not "failure"),
+        # so a transient validator/GPU-host outage does not read as a rejection.
+        commit_state = "error"
+        commit_description = "Evaluation could not run (infrastructure); left open for retry"
 
     try:
         await set_commit_status(
@@ -392,7 +405,8 @@ async def publish_submission_result(
         try:
             if should_merge:
                 await merge_pull_request(settings, submission)
-            else:
+            elif should_close:
                 await close_pull_request(settings, submission)
+            # else: eval could not complete (infrastructure) — leave the PR open.
         except Exception:
             pass
