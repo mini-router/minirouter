@@ -83,7 +83,7 @@ jobs:
             })
 
             const names = files.map((file) => file.filename)
-            const labels = new Set()
+            const labels = new Set((pr.labels || []).map((item) => String(item.name || '').toLowerCase()))
             const any = (predicate) => names.some(predicate)
 
             if (any((path) => path.startsWith('web/'))) {
@@ -122,22 +122,6 @@ jobs:
 
             if (pr.head.ref.startsWith('sn74-')) {
               labels.add('miner')
-            }
-
-            const submissionArtifacts = [
-              'submissions/final_model/best_theta.npy',
-              'submissions/final_model/summary.json',
-              'submissions/final_model/history.json',
-              'submissions/final_model/eval.json',
-            ]
-            const touchedSubmissionArtifact = any((path) =>
-              submissionArtifacts.includes(path)
-            )
-            if (touchedSubmissionArtifact) {
-              labels.add('submission')
-              labels.add('miner')
-            } else if (any((path) => path.startsWith('submissions/final_model/'))) {
-              labels.add('docs')
             }
 
             if (labels.size > 0) {
@@ -295,7 +279,7 @@ jobs:
             })
 
             const names = files.map((file) => file.filename)
-            const labels = new Set()
+            const labels = new Set((pr.labels || []).map((item) => String(item.name || '').toLowerCase()))
             const any = (predicate) => names.some(predicate)
 
             if (any((path) => path.startsWith('web/'))) {
@@ -334,22 +318,6 @@ jobs:
 
             if (pr.head.ref.startsWith('sn74-')) {
               labels.add('miner')
-            }
-
-            const submissionArtifacts = [
-              'submissions/final_model/best_theta.npy',
-              'submissions/final_model/summary.json',
-              'submissions/final_model/history.json',
-              'submissions/final_model/eval.json',
-            ]
-            const touchedSubmissionArtifact = any((path) =>
-              submissionArtifacts.includes(path)
-            )
-            if (touchedSubmissionArtifact) {
-              labels.add('submission')
-              labels.add('miner')
-            } else if (any((path) => path.startsWith('submissions/final_model/'))) {
-              labels.add('docs')
             }
 
             if (labels.size > 0) {
