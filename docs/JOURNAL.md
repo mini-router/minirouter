@@ -18,6 +18,12 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-12 — code grader: add resource limits on top of the HOME/secrets fix  #security #decision
+**Context:** issue #71 — the code grader (`run_pass_at_1`) runs untrusted miner/LLM candidate code. The core secret-leak fix (isolated throwaway HOME/cwd, scrubbed env, `python -I`) already landed on main.
+**Finding:** main's sandbox closes the HOME/secrets exfiltration vector but has **no resource limits** — an untrusted candidate can still exhaust host memory or fork-bomb the eval box within its wall-clock timeout (verified: a 4 GiB `bytearray` allocation runs to completion and "passes" on main).
+**Fix / decision:** add `_rlimit_preexec()` and wire it as `preexec_fn` on the grading subprocess — best-effort POSIX `setrlimit` for address space (2 GiB), CPU (30s), and process count (64), each guarded so a platform rejecting one still applies the rest; returns `None` (no hook) off POSIX. Purely additive on top of main's version. Tests appended to `tests/test_reward_sandbox.py` (POSIX-gated): the memory-bomb candidate is now killed instead of passing, and ordinary grading is unaffected.
+**Follow-up:** OS-level isolation (network namespace, filesystem confinement, unprivileged user — issue items #2–4) still belongs at the validator host/deploy layer; flagged to maintainers.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.
