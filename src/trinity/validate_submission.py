@@ -163,7 +163,6 @@ def validate_bundle(
     if summary_path.is_file() and summary_path.stat().st_size > 0:
         summary = _load_summary(summary_path, result)
         if summary is not None:
-            summary_n_total: int | None = None
             present = [k for k in SUMMARY_USEFUL_KEYS if k in summary]
             missing = [k for k in SUMMARY_USEFUL_KEYS if k not in summary]
             if present:
@@ -178,7 +177,6 @@ def validate_bundle(
                 except (TypeError, ValueError):
                     result.add_warning("summary.json n_total is not an integer")
                 else:
-                    n_expected = summary_n_total
                     result.add_info(f"summary.json n_total={summary_n_total}")
             if "benchmark" in summary:
                 result.add_info(f"benchmark={summary['benchmark']!r}")
