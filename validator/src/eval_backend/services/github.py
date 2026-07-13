@@ -312,6 +312,19 @@ async def merge_pull_request(settings: Settings, submission: Submission) -> None
     )
 
 
+async def close_pull_request(settings: Settings, submission: Submission) -> None:
+    owner = _repo_owner(submission.repo_full_name)
+    repo = _repo_name(submission.repo_full_name)
+    if owner is None or repo is None or submission.pr_number is None:
+        return
+    await _github_request(
+        settings,
+        "PATCH",
+        f"/repos/{owner}/{repo}/pulls/{submission.pr_number}",
+        json_body={"state": "closed"},
+    )
+
+
 async def publish_submission_result(
     settings: Settings,
     submission: Submission,
@@ -346,11 +359,22 @@ async def publish_submission_result(
         # Comment failures should not break the evaluation pipeline.
         pass
 
+    should_merge = (
+        submission.source == "github_pr"
+        and run.status == "completed"
+        and run.score is not None
+        and run.score > settings.github_review_score_threshold
+        and submission.latest_eval_id == run.id
+    )
     commit_state = "pending"
     commit_description = "Evaluation queued"
     if run.status == "completed":
-        commit_state = "success"
-        commit_description = "Evaluation completed"
+        if should_merge:
+            commit_state = "success"
+            commit_description = "Evaluation passed"
+        else:
+            commit_state = "failure"
+            commit_description = "Evaluation below threshold"
     elif run.status == "failed":
         commit_state = "failure"
         commit_description = "Evaluation failed"
@@ -366,8 +390,11 @@ async def publish_submission_result(
     except Exception:
         pass
 
-    if settings.github_auto_merge_submissions and run.status == "completed" and run.score is not None:
+    if submission.source == "github_pr":
         try:
-            await merge_pull_request(settings, submission)
+            if should_merge:
+                await merge_pull_request(settings, submission)
+            else:
+                await close_pull_request(settings, submission)
         except Exception:
             pass

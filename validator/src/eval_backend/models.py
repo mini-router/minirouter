@@ -329,3 +329,15 @@ class CompetitionRuntimeConfig(Base):
     @benchmark_names.setter
     def benchmark_names(self, value: list[str]) -> None:
         self.default_benchmark_names_json = [str(item) for item in value if str(item).strip()]
+
+
+class ReviewControl(Base):
+    __tablename__ = "review_control"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    started_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )

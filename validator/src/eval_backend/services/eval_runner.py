@@ -639,11 +639,19 @@ def evaluate_submission(
     checkpoint_path_override: Path | None = None,
     train_id: int | None = None,
     input_artifact_id: str | None = None,
+    force_remote_only: bool = False,
+    allow_local_fallback: bool | None = None,
 ) -> EvaluationResult:
     local_workspace = _local_workspace(settings, submission.id)
     local_workspace.mkdir(parents=True, exist_ok=True)
     local_results_path = local_workspace / "results.json"
     local_cost_ledger_path = local_workspace / "cost_ledger.jsonl"
+
+    effective_allow_local_fallback = (
+        settings.eval_allow_local_fallback if allow_local_fallback is None else allow_local_fallback
+    )
+    use_remote = force_remote_only or settings.eval_execution_mode != "local_cpu"
+    execution_mode = "remote_gpu" if use_remote else "local_cpu"
 
     run = EvaluationRun(
         submission_id=submission.id,
@@ -652,9 +660,9 @@ def evaluate_submission(
         benchmark_names_json=list(submission.benchmark_names_json or []),
         provider=settings.eval_provider,
         models_config=settings.eval_models_config,
-        execution_mode=settings.eval_execution_mode,
-        device="cpu" if settings.eval_execution_mode == "local_cpu" else "cuda:0",
-        dtype="float32" if settings.eval_execution_mode == "local_cpu" else "bfloat16",
+        execution_mode=execution_mode,
+        device="cpu" if execution_mode == "local_cpu" else "cuda:0",
+        dtype="float32" if execution_mode == "local_cpu" else "bfloat16",
         batch_size=settings.eval_batch_size,
         max_items=settings.eval_max_items,
         status="running",
@@ -720,10 +728,8 @@ def evaluate_submission(
     stderr = ""
     remote_error: str | None = None
     remote_connection_error: str | None = None
-    execution_mode = settings.eval_execution_mode if settings.eval_execution_mode == "local_cpu" else "remote_gpu"
-
     attempts: list[str] = []
-    if settings.eval_execution_mode != "local_cpu":
+    if use_remote:
         try:
             _touch_progress(
                 session,
@@ -794,7 +800,7 @@ def evaluate_submission(
             stderr=stderr,
         )
 
-    if remote_error and not settings.eval_allow_local_fallback:
+    if remote_error and not effective_allow_local_fallback:
         run.status = "failed"
         run.phase = "failed"
         run.message = "remote gpu evaluation failed and local fallback is disabled"
@@ -831,11 +837,12 @@ def evaluate_submission(
             stderr=stderr,
         )
 
-    if remote_error or settings.eval_execution_mode == "local_cpu":
+    if remote_error or not use_remote:
         if remote_error:
             execution_mode = "local_fallback"
         else:
             execution_mode = "local_cpu"
+        run.execution_mode = execution_mode
         try:
             _touch_progress(
                 session,
