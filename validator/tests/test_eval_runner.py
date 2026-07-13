@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 from eval_backend.core.config import Settings
 from eval_backend.models import Artifact, Submission
@@ -177,6 +179,33 @@ def test_results_cost_is_preserved_when_no_ledger_is_synced(validator_session, t
     assert result.metrics["cost_usd"] == 0.0039
     assert result.metrics["cost_missing"] is False
     assert result.run.cost_usd == 0.0039
+
+
+def test_attach_runtime_metrics_preserves_existing_cost_fields(tmp_path):
+    run = SimpleNamespace(
+        started_at=datetime(2026, 7, 13, 17, 0, tzinfo=timezone.utc),
+        finished_at=datetime(2026, 7, 13, 17, 1, tzinfo=timezone.utc),
+    )
+    ledger = tmp_path / "missing_cost_ledger.jsonl"
+
+    metrics = eval_runner._attach_runtime_metrics(
+        {
+            "score": 0.9,
+            "cost_usd": 0.0039,
+            "cost_missing": False,
+            "cost_ledger": "/remote/workspace/cost_ledger.jsonl",
+            "cost_calls": 7,
+        },
+        run=run,
+        ledger_path=ledger,
+    )
+
+    assert metrics["score"] == 0.9
+    assert metrics["duration_seconds"] == 60.0
+    assert metrics["cost_usd"] == 0.0039
+    assert metrics["cost_missing"] is False
+    assert metrics["cost_ledger"] == "/remote/workspace/cost_ledger.jsonl"
+    assert metrics["cost_calls"] == 7
 
 
 def test_ledger_cost_report_prices_current_openrouter_models(tmp_path):
