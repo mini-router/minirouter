@@ -198,6 +198,7 @@ class AdminRuntimeConfigOut(BaseModel):
     eval_max_items: int
     eval_provider: str
     eval_models_config: str
+    eval_execution_mode: str
     updated_at: datetime | None = None
 
 
@@ -206,6 +207,7 @@ class AdminRuntimeConfigUpdate(BaseModel):
     eval_max_items: int = 20
     eval_provider: str = "chutes"
     eval_models_config: str = "configs/models.chutes.yaml"
+    eval_execution_mode: str = "remote_gpu"
 
 
 class ReviewControlOut(BaseModel):

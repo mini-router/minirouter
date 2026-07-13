@@ -20,6 +20,7 @@ class RuntimeDefaults:
     eval_max_items: int
     eval_provider: str
     eval_models_config: str
+    eval_execution_mode: str
 
 
 def _default_runtime(settings: Settings) -> RuntimeDefaults:
@@ -28,6 +29,7 @@ def _default_runtime(settings: Settings) -> RuntimeDefaults:
         eval_max_items=settings.eval_max_items,
         eval_provider=settings.eval_provider,
         eval_models_config=settings.eval_models_config,
+        eval_execution_mode=settings.eval_execution_mode,
     )
 
 
@@ -41,6 +43,7 @@ def seed_runtime_config(session: Session, settings: Settings) -> CompetitionRunt
             default_eval_max_items=defaults.eval_max_items,
             default_eval_provider=defaults.eval_provider,
             default_eval_models_config=defaults.eval_models_config,
+            default_eval_execution_mode=defaults.eval_execution_mode,
         )
         session.add(row)
         session.flush()
@@ -54,6 +57,8 @@ def seed_runtime_config(session: Session, settings: Settings) -> CompetitionRunt
         existing.default_eval_provider = defaults.eval_provider
     if not existing.default_eval_models_config.strip():
         existing.default_eval_models_config = defaults.eval_models_config
+    if not existing.default_eval_execution_mode.strip():
+        existing.default_eval_execution_mode = defaults.eval_execution_mode
     existing.updated_at = _utcnow()
     session.flush()
     return existing
@@ -70,6 +75,7 @@ def get_runtime_config(session: Session, settings: Settings) -> RuntimeDefaults:
         eval_max_items=row.default_eval_max_items or settings.eval_max_items,
         eval_provider=row.default_eval_provider or settings.eval_provider,
         eval_models_config=row.default_eval_models_config or settings.eval_models_config,
+        eval_execution_mode=row.default_eval_execution_mode or settings.eval_execution_mode,
     )
 
 
@@ -82,6 +88,7 @@ def apply_runtime_defaults(settings: Settings, runtime: RuntimeDefaults) -> Sett
         eval_max_items=runtime.eval_max_items,
         eval_provider=runtime.eval_provider,
         eval_models_config=runtime.eval_models_config,
+        eval_execution_mode=runtime.eval_execution_mode,
     )
 
 
@@ -93,6 +100,7 @@ def update_runtime_config(
     eval_max_items: int,
     eval_provider: str,
     eval_models_config: str,
+    eval_execution_mode: str,
 ) -> CompetitionRuntimeConfig:
     row = session.execute(
         select(CompetitionRuntimeConfig).where(CompetitionRuntimeConfig.id == 1)
@@ -106,6 +114,8 @@ def update_runtime_config(
     row.default_eval_max_items = max(1, int(eval_max_items))
     row.default_eval_provider = eval_provider.strip() or settings.eval_provider
     row.default_eval_models_config = eval_models_config.strip() or settings.eval_models_config
+    mode = eval_execution_mode.strip().lower()
+    row.default_eval_execution_mode = mode if mode in {"local_cpu", "remote_gpu"} else settings.eval_execution_mode
     row.updated_at = _utcnow()
     session.flush()
     return row

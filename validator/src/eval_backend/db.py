@@ -57,6 +57,9 @@ def ensure_schema(engine) -> None:
             "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS duration_seconds DOUBLE PRECISION"
         )
         conn.exec_driver_sql("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS cost_usd DOUBLE PRECISION")
+        conn.exec_driver_sql(
+            "ALTER TABLE competition_runtime_config ADD COLUMN IF NOT EXISTS default_eval_execution_mode VARCHAR(32)"
+        )
         conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN artifact_name DROP NOT NULL")
         conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN artifact_path DROP NOT NULL")
         conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN artifact_sha256 DROP NOT NULL")
@@ -69,6 +72,10 @@ def ensure_schema(engine) -> None:
         conn.exec_driver_sql(
             "UPDATE submissions SET benchmark_names_json = COALESCE(benchmark_names_json, json_build_array(benchmark)) "
             "WHERE benchmark_names_json IS NULL AND benchmark IS NOT NULL"
+        )
+        conn.exec_driver_sql(
+            "UPDATE competition_runtime_config "
+            "SET default_eval_execution_mode = COALESCE(NULLIF(default_eval_execution_mode, ''), 'remote_gpu')"
         )
 
 

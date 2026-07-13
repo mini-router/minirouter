@@ -317,6 +317,9 @@ class CompetitionRuntimeConfig(Base):
     default_eval_models_config: Mapped[str] = mapped_column(
         String(255), nullable=False, default="configs/models.chutes.yaml"
     )
+    default_eval_execution_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="remote_gpu"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False

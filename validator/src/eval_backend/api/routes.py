@@ -329,6 +329,7 @@ def _runtime_config_to_schema(session: Session, settings: Settings) -> AdminRunt
         eval_max_items=runtime.eval_max_items,
         eval_provider=runtime.eval_provider,
         eval_models_config=runtime.eval_models_config,
+        eval_execution_mode=runtime.eval_execution_mode,
         updated_at=row.updated_at if row is not None else None,
     )
 
@@ -844,6 +845,7 @@ def admin_update_config(
             eval_max_items=payload.eval_max_items,
             eval_provider=payload.eval_provider,
             eval_models_config=payload.eval_models_config,
+            eval_execution_mode=payload.eval_execution_mode,
         )
         session.commit()
         return _runtime_config_to_schema(session, settings)
