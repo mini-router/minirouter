@@ -70,6 +70,18 @@ def _flatten_metrics(payload: Any) -> dict[str, Any]:
         ):
             if key in payload:
                 flat[key] = payload[key]
+        cost = payload.get("cost")
+        if isinstance(cost, dict):
+            for key in (
+                "cost_usd",
+                "cost_missing",
+                "cost_ledger",
+                "cost_calls",
+                "cost_prompt_tokens",
+                "cost_completion_tokens",
+            ):
+                if key in cost and key not in flat:
+                    flat[key] = cost[key]
         for key in ("results", "metrics", "TRINITY"):
             value = payload.get(key)
             if isinstance(value, dict):
