@@ -180,6 +180,7 @@ jobs:
                 number: Number('${{ steps.classify.outputs.pr_number }}'),
                 head: { sha: '${{ steps.classify.outputs.head_sha }}' },
               },
+              block: 'submission',
               sender: { login: '${{ steps.classify.outputs.team_name }}' },
             }
             const body = JSON.stringify(payload)
@@ -392,6 +393,7 @@ jobs:
                 number: Number('${{ steps.classify.outputs.pr_number }}'),
                 head: { sha: '${{ steps.classify.outputs.head_sha }}' },
               },
+              block: 'submission',
               sender: { login: '${{ steps.classify.outputs.team_name }}' },
             }
             const body = JSON.stringify(payload)
