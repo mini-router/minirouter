@@ -6,7 +6,7 @@ set -euo pipefail
 
 HOST="${TRINITY_GPU_HOST:-trinity-gpu}"
 REMOTE_DIR="${TRINITY_REMOTE_DIR:-trinity}"
-GPU_INDEX="${TRINITY_GPU_INDEX:-0}"
+GPU_INDEX="${TRINITY_GPU_INDEX:-5}"
 LOCAL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [[ -n "${TRINITY_SECRETS_FILE:-}" ]]; then
@@ -45,7 +45,7 @@ export PATH="$HOME/.local/bin:$PATH"
 uv venv --python 3.12 .venv 2>/dev/null || true
 source .venv/bin/activate
 uv pip install -e . >/dev/null
-echo "--- GPU ${TRINITY_GPU_INDEX:-0} ---"
-CUDA_VISIBLE_DEVICES="${TRINITY_GPU_INDEX:-0}" python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'n/a')"
+echo "--- GPU ${TRINITY_GPU_INDEX:-5} ---"
+CUDA_VISIBLE_DEVICES="${TRINITY_GPU_INDEX:-5}" python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'n/a')"
 REMOTE
 echo "[setup_remote] done."
