@@ -209,7 +209,8 @@ def _attach_runtime_metrics(metrics: dict[str, Any], *, run: EvaluationRun, ledg
             max(0.0, (run.finished_at - run.started_at).total_seconds()),
             2,
         )
-    out.update(_ledger_cost_report(ledger_path))
+    for key, value in _ledger_cost_report(ledger_path).items():
+        out.setdefault(key, value)
     return out
 
 
