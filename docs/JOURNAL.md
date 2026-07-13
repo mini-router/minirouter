@@ -18,6 +18,19 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-13 — Rename CONTRIBUTOIN.md to the canonical CONTRIBUTING.md  #decision #gotcha
+**Context:** the contribution guide lived at `CONTRIBUTOIN.md` (transposed letters). GitHub and the
+SN74 competition dashboard only surface guidelines from the canonical `CONTRIBUTING.md` (root,
+`.github/`, or `docs/`), so the dashboard's Contributing tab reported "No contributing guidelines
+found" even though the file existed.
+**Expected:** the contribution guide should be discoverable in the standard GitHub/dashboard slot.
+**Actual:** the misspelled filename was invisible to every tool that looks for `CONTRIBUTING.md`; the
+PR-automation labeler had been coded around the typo (matching `CONTRIBUTOIN.md`/`CONTRIBUTION.md`)
+rather than fixing it.
+**Fix / decision:** `git mv CONTRIBUTOIN.md CONTRIBUTING.md`; update the README reference and add
+`CONTRIBUTING.md` to the docs-label path check in `pr-automation.yml` (both jobs), keeping the old
+spellings so historical branches still label correctly.
+**Follow-up:** none — content is unchanged.
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.
