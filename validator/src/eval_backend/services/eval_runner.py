@@ -408,11 +408,11 @@ def _run_bash(command: str, cwd: Path, timeout: int, env: dict[str, str] | None 
 
 
 def _remote_path(path: str | Path) -> str:
-    return str(path)
+    return str(Path(path).expanduser())
 
 
 def _remote_workspace(settings: Settings, submission_id: str) -> Path:
-    return Path(settings.trinity_remote_workspace_root) / "submissions" / submission_id
+    return Path(settings.trinity_remote_workspace_root).expanduser() / "submissions" / submission_id
 
 
 def _local_workspace(settings: Settings, submission_id: str) -> Path:
