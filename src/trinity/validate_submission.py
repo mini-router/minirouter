@@ -132,9 +132,10 @@ def validate_bundle(
     bundle_dir:
         Path to the bundle (typically ``submissions/final_model``).
     expected_n_total:
-        Fallback θ length when the bundle does not declare one in
-        ``summary.json``. Defaults to the canonical :func:`params.make_spec`
-        ``n_total`` (13,312).
+        The θ length ``best_theta.npy`` is validated against. Defaults to the
+        canonical :func:`params.make_spec` ``n_total`` (13,312). ``summary.json``
+        does not override this — its ``n_total`` is only recorded and, if it
+        disagrees with the θ length, reported as a warning.
 
     Returns
     -------
@@ -178,7 +179,11 @@ def validate_bundle(
                 except (TypeError, ValueError):
                     result.add_warning("summary.json n_total is not an integer")
                 else:
-                    n_expected = summary_n_total
+                    # The summary's claim is recorded but does NOT redefine the
+                    # expected length: theta is validated against the canonical
+                    # ParamSpec (or an explicit override), so a submitter cannot
+                    # pass a wrong-size theta by declaring a matching wrong
+                    # n_total. Any disagreement is surfaced separately below.
                     result.add_info(f"summary.json n_total={summary_n_total}")
             if "benchmark" in summary:
                 result.add_info(f"benchmark={summary['benchmark']!r}")
@@ -192,7 +197,10 @@ def validate_bundle(
                 f"best_theta.npy shape={theta.shape} dtype={theta.dtype}"
             )
             if theta.size != n_expected:
-                result.add_warning(
+                # Hard error: a theta whose length does not match the canonical
+                # head size cannot be loaded into the coordinator, so the bundle
+                # is invalid regardless of what summary.json claims.
+                result.add_error(
                     f"best_theta.npy length {theta.size} != expected n_total={n_expected}"
                 )
             else:

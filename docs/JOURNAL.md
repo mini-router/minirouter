@@ -18,6 +18,14 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-13 — validate_bundle trusted summary.json n_total over the canonical spec; CI red on main  #mistake #security #repro
+**Context:** `src/trinity/validate_submission.py` gates miner bundles offline (issue #167). Also the cause of `test_wrong_theta_length_fails` failing on main, which made `test-router` red on **every** open PR (issue #160).
+**Expected:** `best_theta.npy` is validated against the canonical head size `params.make_spec().n_total` (13,312); a wrong-size theta is rejected.
+**Actual:** since #150 ("make size check warning-only", `f56e7af`), the summary's `n_total` **overrode** the expected length (`n_expected = summary_n_total`) and a mismatch was only a warning. So `theta` of length 128 + `summary n_total: 128` validated `ok=True` — the submitter's own claim was trusted over the real spec, defeating the check. Repro: `validate_bundle` on a 128-long theta with matching wrong summary returned `ok=True`.
+**Decision:** two open issues disagreed — #160 (keep warning-only, fix the stale test) vs #167 (reject wrong-size theta as a hard error). Chose #167 (user call): stronger + closes the hole and greens CI. summary `n_total` no longer redefines `n_expected` (recorded as info only); a theta-length mismatch vs the canonical spec is a hard **error**; a summary-vs-theta disagreement stays a separate warning.
+**Fix:** validate theta against canonical `ParamSpec.n_total` (or explicit `expected_n_total`); updated `test_wrong_theta_length_fails` to assert the error, added `test_summary_cannot_override_expected_length` regression. Full `tests/` suite: 234 passed.
+**Follow-up:** closes #167; also resolves the CI-red symptom in #160 (via the stronger fix rather than a warning-only test).
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.

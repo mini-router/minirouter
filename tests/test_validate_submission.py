@@ -54,8 +54,10 @@ def test_missing_required_files_fail(tmp_path: Path):
 
 
 def test_wrong_theta_length_fails(tmp_path: Path):
+    # A theta whose length does not match the canonical ParamSpec is a hard
+    # error, even when summary.json claims a matching (wrong) n_total: the
+    # submitter's own claim must not be trusted over the real spec (#167).
     _write_valid_bundle(tmp_path, n_total=128)
-    # overwrite summary to claim the wrong length so we only trip the shape check
     (tmp_path / "summary.json").write_text(
         json.dumps({"benchmark": "math500", "n_total": 128, "best_fitness": 0.1}),
         encoding="utf-8",
@@ -63,6 +65,19 @@ def test_wrong_theta_length_fails(tmp_path: Path):
     result = validate_bundle(tmp_path)
     assert not result.ok
     assert any("length 128" in e for e in result.errors)
+
+
+def test_summary_cannot_override_expected_length(tmp_path: Path):
+    # Regression for #167: a wrong-size theta must not pass just because
+    # summary.json declares a matching wrong n_total.
+    np.save(tmp_path / "best_theta.npy", np.zeros(128, dtype=np.float64))
+    (tmp_path / "summary.json").write_text(
+        json.dumps({"benchmark": "math500", "pool": ["a"], "n_total": 128}),
+        encoding="utf-8",
+    )
+    result = validate_bundle(tmp_path)
+    assert not result.ok
+    assert any("expected n_total" in e for e in result.errors)
 
 
 def test_summary_n_total_mismatch_warns(tmp_path: Path):
