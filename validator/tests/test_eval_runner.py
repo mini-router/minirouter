@@ -137,6 +137,48 @@ def test_nonzero_exit_with_results_still_completes(validator_session, tmp_path, 
     assert result.score == 0.88
 
 
+def test_results_cost_is_preserved_when_no_ledger_is_synced(validator_session, tmp_path, monkeypatch):
+    session = validator_session
+    settings = _build_settings(tmp_path)
+    checkpoint_path = tmp_path / "theta.npy"
+    checkpoint_path.write_bytes(b"theta")
+    submission = _add_submission(session, checkpoint_path)
+
+    def _fake_local_attempt(
+        settings,
+        checkpoint_path,
+        local_results_path,
+        local_ledger_path,
+        submission_id,
+        env,
+    ):
+        local_results_path.write_text(
+            json.dumps(
+                {
+                    "results": {"TRINITY": {"accuracy": 0.9}},
+                    "cost": {
+                        "cost_usd": 0.0039,
+                        "cost_missing": False,
+                        "cost_ledger": "/remote/workspace/cost_ledger.jsonl",
+                        "cost_calls": 7,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return ("fake-eval-command", 0, "stdout", "")
+
+    monkeypatch.setattr(eval_runner, "_local_attempt", _fake_local_attempt)
+
+    result = eval_runner.evaluate_submission(session, submission, settings)
+
+    assert result.run.status == "completed"
+    assert result.score == 0.9
+    assert result.metrics["cost_usd"] == 0.0039
+    assert result.metrics["cost_missing"] is False
+    assert result.run.cost_usd == 0.0039
+
+
 def test_ledger_cost_report_prices_current_openrouter_models(tmp_path):
     ledger = tmp_path / "cost_ledger.jsonl"
     ledger.write_text(

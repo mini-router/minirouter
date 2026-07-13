@@ -67,6 +67,7 @@ def _flatten_metrics(payload: Any) -> dict[str, Any]:
             "humaneval",
             "bbh",
             "params",
+            "cost",
         ):
             if key in payload:
                 flat[key] = payload[key]
@@ -197,7 +198,9 @@ def _attach_runtime_metrics(metrics: dict[str, Any], *, run: EvaluationRun, ledg
             max(0.0, (run.finished_at - run.started_at).total_seconds()),
             2,
         )
-    out.update(_ledger_cost_report(ledger_path))
+    ledger_metrics = _ledger_cost_report(ledger_path)
+    for key, value in ledger_metrics.items():
+        out.setdefault(key, value)
     return out
 
 
