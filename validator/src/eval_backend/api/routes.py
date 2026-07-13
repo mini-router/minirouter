@@ -355,14 +355,6 @@ def _ensure_webhook_secret_configured(secret: str) -> str:
     return configured
 
 
-def _payload_block_name(payload: dict[str, Any]) -> str | None:
-    block = payload.get("block")
-    if isinstance(block, str):
-        value = block.strip().lower()
-        return value or None
-    return None
-
-
 def _verify_github_signature(raw_body: bytes, signature: str | None, secret: str) -> None:
     configured_secret = _ensure_webhook_secret_configured(secret)
     if not signature or not signature.startswith("sha256="):
@@ -537,7 +529,6 @@ async def github_webhook(request: Request, settings: Settings = Depends(get_sett
         pr_number = pull_request.get("number")
         head_sha = (pull_request.get("head") or {}).get("sha")
         team_name = payload.get("sender", {}).get("login")
-        block_name = _payload_block_name(payload)
         submission = create_pr_submission(
             session,
             runtime_settings,
@@ -551,7 +542,7 @@ async def github_webhook(request: Request, settings: Settings = Depends(get_sett
                 submission.status = "closed"
                 submission.updated_at = _utcnow()
             cancel_submission_jobs(session, submission.id, reason="pull request closed")
-        elif block_name == "submission":
+        else:
             submission.status = "queued"
             submission.latest_score = None
             submission.latest_eval_id = None
@@ -568,12 +559,8 @@ async def github_webhook(request: Request, settings: Settings = Depends(get_sett
                     "pr_number": submission.pr_number,
                     "head_sha": submission.head_sha,
                     "team_name": submission.miner_id,
-                    "block": "submission",
                 },
             )
-        else:
-            submission.status = "awaiting_ci"
-            submission.updated_at = _utcnow()
         session.commit()
         try:
             commit_state: str | None = "pending"
@@ -584,9 +571,6 @@ async def github_webhook(request: Request, settings: Settings = Depends(get_sett
                 else:
                     commit_state = "failure"
                     commit_description = "Pull request closed"
-            elif block_name != "submission":
-                commit_state = "failure"
-                commit_description = "Submission block required"
             if commit_state is not None:
                 await set_commit_status(
                     settings,

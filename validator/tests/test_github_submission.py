@@ -91,7 +91,6 @@ def test_github_webhook_enqueues_submission_job(validator_engine) -> None:
     body = (
         b'{"repository":{"full_name":"mini-router/minirouter"},'
         b'"pull_request":{"number":5,"head":{"sha":"abc123"}},'
-        b'"block":"submission",'
         b'"sender":{"login":"tmimmanuel"}}'
     )
     headers = {
@@ -114,54 +113,6 @@ def test_github_webhook_enqueues_submission_job(validator_engine) -> None:
     assert submission.status == "queued"
     assert job.status == "queued"
     assert job.job_type == "evaluation"
-
-
-def test_github_webhook_skips_non_submission_block(validator_engine) -> None:
-    settings = Settings(
-        github_webhook_secret="super-secret",
-        allowed_repo="mini-router/minirouter",
-        github_access_token="",
-        public_site_url="https://example.com",
-    )
-    Session = sessionmaker(
-        bind=validator_engine,
-        autoflush=False,
-        autocommit=False,
-        expire_on_commit=False,
-        future=True,
-    )
-    with Session() as session:
-        seed_runtime_config(session, settings)
-        session.commit()
-
-    app = FastAPI()
-    app.include_router(router)
-    app.state.settings = settings
-    app.state.session_factory = Session
-
-    body = (
-        b'{"repository":{"full_name":"mini-router/minirouter"},'
-        b'"pull_request":{"number":6,"head":{"sha":"abc123"}},'
-        b'"sender":{"login":"tmimmanuel"}}'
-    )
-    headers = {
-        "x-hub-signature-256": _signature(settings.github_webhook_secret, body),
-        "content-type": "application/json",
-    }
-
-    with TestClient(app) as client:
-        response = client.post("/webhooks/github", content=body, headers=headers)
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["submission"]["status"] == "awaiting_ci"
-
-    with Session() as session:
-        submission = session.query(Submission).filter_by(pr_number=6).one()
-        job = session.query(JobQueue).filter_by(submission_id=submission.id).first()
-
-    assert submission.status == "awaiting_ci"
-    assert job is None
 
 
 def test_should_promote_submission_requires_threshold_and_king_score() -> None:

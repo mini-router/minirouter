@@ -40,14 +40,6 @@ def session_scope(session_factory) -> Iterator[Session]:
         raise
     finally:
         session.close()
-
-
-def _is_submission_block(job: JobQueue) -> bool:
-    payload = job.payload_json or {}
-    block = payload.get("block")
-    return isinstance(block, str) and block.strip().lower() == "submission"
-
-
 def process_once(session_factory, settings: Settings) -> int:
     session = session_factory()
     submission = None
@@ -158,16 +150,6 @@ def process_once(session_factory, settings: Settings) -> int:
             if submission is None:
                 raise ValueError(f"submission {job.submission_id} not found")
             submission_id = submission.id
-            if submission.source == "github_pr" and not _is_submission_block(job):
-                job.status = "cancelled"
-                job.last_error = "pull request is not marked block=submission"
-                job.heartbeat_at = now
-                job.updated_at = now
-                submission.status = "awaiting_ci"
-                submission.updated_at = now
-                session.commit()
-                logger.info("skipping non-submission github pr id=%s", submission.id)
-                return 1
             submission.status = "running"
             if submission.source == "github_pr":
                 try:
