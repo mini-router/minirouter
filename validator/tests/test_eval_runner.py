@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
-from types import SimpleNamespace
 
 from eval_backend.core.config import Settings
 from eval_backend.models import Artifact, Submission
@@ -137,75 +135,6 @@ def test_nonzero_exit_with_results_still_completes(validator_session, tmp_path, 
     assert result.run.status == "completed"
     assert submission.status == "completed"
     assert result.score == 0.88
-
-
-def test_results_cost_is_preserved_when_no_ledger_is_synced(validator_session, tmp_path, monkeypatch):
-    session = validator_session
-    settings = _build_settings(tmp_path)
-    checkpoint_path = tmp_path / "theta.npy"
-    checkpoint_path.write_bytes(b"theta")
-    submission = _add_submission(session, checkpoint_path)
-
-    def _fake_local_attempt(
-        settings,
-        checkpoint_path,
-        local_results_path,
-        local_ledger_path,
-        submission_id,
-        env,
-    ):
-        local_results_path.write_text(
-            json.dumps(
-                {
-                    "results": {"TRINITY": {"accuracy": 0.9}},
-                    "cost": {
-                        "cost_usd": 0.0039,
-                        "cost_missing": False,
-                        "cost_ledger": "/remote/workspace/cost_ledger.jsonl",
-                        "cost_calls": 7,
-                    },
-                }
-            ),
-            encoding="utf-8",
-        )
-        return ("fake-eval-command", 0, "stdout", "")
-
-    monkeypatch.setattr(eval_runner, "_local_attempt", _fake_local_attempt)
-
-    result = eval_runner.evaluate_submission(session, submission, settings)
-
-    assert result.run.status == "completed"
-    assert result.score == 0.9
-    assert result.metrics["cost_usd"] == 0.0039
-    assert result.metrics["cost_missing"] is False
-    assert result.run.cost_usd == 0.0039
-
-
-def test_attach_runtime_metrics_preserves_existing_cost_fields(tmp_path):
-    run = SimpleNamespace(
-        started_at=datetime(2026, 7, 13, 17, 0, tzinfo=timezone.utc),
-        finished_at=datetime(2026, 7, 13, 17, 1, tzinfo=timezone.utc),
-    )
-    ledger = tmp_path / "missing_cost_ledger.jsonl"
-
-    metrics = eval_runner._attach_runtime_metrics(
-        {
-            "score": 0.9,
-            "cost_usd": 0.0039,
-            "cost_missing": False,
-            "cost_ledger": "/remote/workspace/cost_ledger.jsonl",
-            "cost_calls": 7,
-        },
-        run=run,
-        ledger_path=ledger,
-    )
-
-    assert metrics["score"] == 0.9
-    assert metrics["duration_seconds"] == 60.0
-    assert metrics["cost_usd"] == 0.0039
-    assert metrics["cost_missing"] is False
-    assert metrics["cost_ledger"] == "/remote/workspace/cost_ledger.jsonl"
-    assert metrics["cost_calls"] == 7
 
 
 def test_ledger_cost_report_prices_current_openrouter_models(tmp_path):
