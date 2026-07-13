@@ -132,7 +132,8 @@ def validate_bundle(
     bundle_dir:
         Path to the bundle (typically ``submissions/final_model``).
     expected_n_total:
-        Expected θ length. Defaults to the canonical :func:`params.make_spec`
+        Fallback θ length when the bundle does not declare one in
+        ``summary.json``. Defaults to the canonical :func:`params.make_spec`
         ``n_total`` (13,312).
 
     Returns
@@ -150,9 +151,6 @@ def validate_bundle(
         result.add_error(f"bundle path is not a directory: {root}")
         return result
 
-    spec = P.make_spec()
-    n_expected = spec.n_total if expected_n_total is None else expected_n_total
-
     _check_required_files(root, result)
     _check_optional_files(root, result)
 
@@ -160,23 +158,12 @@ def validate_bundle(
     summary_path = root / "summary.json"
     theta: np.ndarray | None = None
     summary: dict[str, Any] | None = None
-
-    if theta_path.is_file() and theta_path.stat().st_size > 0:
-        theta = _load_theta(theta_path, result)
-        if theta is not None:
-            result.add_info(
-                f"best_theta.npy shape={theta.shape} dtype={theta.dtype}"
-            )
-            if theta.size != n_expected:
-                result.add_error(
-                    f"best_theta.npy length {theta.size} != expected n_total={n_expected}"
-                )
-            else:
-                result.add_info(f"theta length matches n_total={n_expected}")
+    n_expected = expected_n_total if expected_n_total is not None else P.make_spec().n_total
 
     if summary_path.is_file() and summary_path.stat().st_size > 0:
         summary = _load_summary(summary_path, result)
         if summary is not None:
+            summary_n_total: int | None = None
             present = [k for k in SUMMARY_USEFUL_KEYS if k in summary]
             missing = [k for k in SUMMARY_USEFUL_KEYS if k not in summary]
             if present:
@@ -185,21 +172,43 @@ def validate_bundle(
                 result.add_warning(
                     f"summary.json missing recommended keys: {', '.join(missing)}"
                 )
-            if "n_total" in summary and theta is not None:
+            if "n_total" in summary:
                 try:
-                    summary_n = int(summary["n_total"])
+                    summary_n_total = int(summary["n_total"])
                 except (TypeError, ValueError):
                     result.add_warning("summary.json n_total is not an integer")
                 else:
-                    if summary_n != theta.size:
-                        result.add_warning(
-                            f"summary.json n_total={summary_n} disagrees with "
-                            f"best_theta.npy length={theta.size}"
-                        )
+                    n_expected = summary_n_total
+                    result.add_info(f"summary.json n_total={summary_n_total}")
             if "benchmark" in summary:
                 result.add_info(f"benchmark={summary['benchmark']!r}")
             if "best_fitness" in summary:
                 result.add_info(f"best_fitness={summary['best_fitness']}")
+
+    if theta_path.is_file() and theta_path.stat().st_size > 0:
+        theta = _load_theta(theta_path, result)
+        if theta is not None:
+            result.add_info(
+                f"best_theta.npy shape={theta.shape} dtype={theta.dtype}"
+            )
+            if theta.size != n_expected:
+                result.add_warning(
+                    f"best_theta.npy length {theta.size} != expected n_total={n_expected}"
+                )
+            else:
+                result.add_info(f"theta length matches n_total={n_expected}")
+
+    if theta is not None and summary is not None and "n_total" in summary:
+        try:
+            summary_n = int(summary["n_total"])
+        except (TypeError, ValueError):
+            pass
+        else:
+            if summary_n != theta.size:
+                result.add_warning(
+                    f"summary.json n_total={summary_n} disagrees with "
+                    f"best_theta.npy length={theta.size}"
+                )
 
     for name in OPTIONAL_FILES:
         _check_optional_json(root, name, result)
