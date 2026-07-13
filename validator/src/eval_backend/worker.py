@@ -17,6 +17,7 @@ from .services.eval_runner import evaluate_submission
 from .services.github import publish_submission_result
 from .services.github import set_commit_status
 from .services.queue import enqueue_submission_job
+from .services.runtime_config import apply_runtime_defaults, get_runtime_config
 from .services.train_runner import run_train_job
 
 logger = logging.getLogger("eval_backend.worker")
@@ -40,6 +41,7 @@ def process_once(session_factory, settings: Settings) -> int:
     submission = None
     result = None
     try:
+        runtime_settings = apply_runtime_defaults(settings, get_runtime_config(session, settings))
         logger.info("polling for queued jobs")
         job = (
             session.execute(
@@ -78,7 +80,7 @@ def process_once(session_factory, settings: Settings) -> int:
                 train.submission_id,
                 ", ".join(train.benchmark_names_json or []) or "unknown",
             )
-            train_result = run_train_job(session, train, settings)
+            train_result = run_train_job(session, train, runtime_settings)
             job.status = "completed" if train_result.train.status == "completed" else "failed"
             job.last_error = train_result.train.error
             job.heartbeat_at = train_result.train.finished_at
@@ -126,11 +128,11 @@ def process_once(session_factory, settings: Settings) -> int:
 
                 asyncio.run(
                     set_commit_status(
-                        settings,
+                        runtime_settings,
                         submission,
                         state="pending",
                         description="Evaluation running",
-                        target_url=f"{settings.public_site_url.rstrip('/')}/submission/{submission.id}",
+                        target_url=f"{runtime_settings.public_site_url.rstrip('/')}/submission/{submission.id}",
                     )
                 )
             except Exception:
@@ -150,7 +152,7 @@ def process_once(session_factory, settings: Settings) -> int:
         result = evaluate_submission(
             session,
             submission,
-            settings,
+            runtime_settings,
             checkpoint_path_override=checkpoint_override,
             train_id=int(payload["train_id"]) if payload.get("train_id") is not None else None,
             input_artifact_id=str(payload["input_artifact_id"]) if payload.get("input_artifact_id") else None,
@@ -178,7 +180,7 @@ def process_once(session_factory, settings: Settings) -> int:
         try:
             import asyncio
 
-            asyncio.run(publish_submission_result(settings, submission, result))
+            asyncio.run(publish_submission_result(runtime_settings, submission, result))
         except Exception:
             pass
     return 1
