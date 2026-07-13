@@ -34,6 +34,14 @@ jobs:
           path: pr
           persist-credentials: false
 
+      - name: Checkout validator scripts
+        if: steps.classify.outputs.should_queue == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          path: base
+          persist-credentials: false
+
       - name: Label PR and classify submission
         id: classify
         uses: actions/github-script@v7
