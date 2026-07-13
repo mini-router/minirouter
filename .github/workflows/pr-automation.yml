@@ -113,6 +113,7 @@ jobs:
                 (path) =>
                   path.startsWith('docs/') ||
                   path === 'README.md' ||
+                  path === 'CONTRIBUTING.md' ||
                   path === 'CONTRIBUTOIN.md' ||
                   path === 'CONTRIBUTION.md'
               )
@@ -328,6 +329,7 @@ jobs:
                 (path) =>
                   path.startsWith('docs/') ||
                   path === 'README.md' ||
+                  path === 'CONTRIBUTING.md' ||
                   path === 'CONTRIBUTOIN.md' ||
                   path === 'CONTRIBUTION.md'
               )
