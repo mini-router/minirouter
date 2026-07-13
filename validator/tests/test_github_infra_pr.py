@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -93,8 +94,7 @@ def test_github_webhook_without_artifact_stays_awaiting_ci(
         assert jobs == []
 
 
-@pytest.mark.asyncio
-async def test_publish_submission_result_skips_pr_close_without_artifact(monkeypatch):
+def test_publish_submission_result_skips_pr_close_without_artifact(monkeypatch):
     close_mock = AsyncMock()
     merge_mock = AsyncMock()
     monkeypatch.setattr(github_module, "close_pull_request", close_mock)
@@ -119,10 +119,12 @@ async def test_publish_submission_result_skips_pr_close_without_artifact(monkeyp
     )
     settings = Settings(github_access_token="token")
 
-    await github_module.publish_submission_result(
-        settings,
-        submission,
-        EvaluationResult(run=run, score=None, metrics={"missing_checkpoint": True}),
+    asyncio.run(
+        github_module.publish_submission_result(
+            settings,
+            submission,
+            EvaluationResult(run=run, score=None, metrics={"missing_checkpoint": True}),
+        )
     )
 
     close_mock.assert_not_called()
