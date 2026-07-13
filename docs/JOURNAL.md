@@ -18,6 +18,24 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-13 — BFCL multi-call grader misaligned candidate/gold calls  #mistake #fix #repro
+**Context:** grading BFCL function-call answers with more than one call in `_check_bfcl`
+(orchestration/reward.py).
+**Expected:** a correct set of calls scores 1.0 regardless of order.
+**Actual:** `score_text("bfcl_simple", '[{"name":"f","arguments":{"x":1}},{"name":"f","arguments":{"x":2}}]',
+{"ground_truth": [{"f":{"x":[1,2]}}, {"f":{"x":[1]}}]})` returned 0.0 even though a valid pairing
+exists (`x=1`→`[1]`, `x=2`→`[1,2]`).
+**Root cause:** candidate/gold calls were aligned by `sorted(..., key=json.dumps(...))` on both sides,
+but candidate args are concrete values while gold args are allowed-value *lists* — the scalar-vs-list
+serialization (keyed on `arguments` first under `sort_keys=True`) sorts the two differently, so the
+positional `zip` paired up mismatched calls.
+**Fix / decision:** replace the sort-and-zip with `_bfcl_match_all_calls` — a backtracking bipartite
+match that pairs each gold call with a distinct candidate under `_bfcl_call_matches` (backtracking so a
+greedy early pick can't block a valid pairing). Single-call scoring is unchanged. Added
+`tests/test_bfcl_multicall.py` (offline); 46 existing bfcl/reward tests still pass.
+**Follow-up:** the shipped `bfcl_simple` split is single-call, so this hardens the multi-call path
+before it is exercised rather than fixing a currently-observed eval regression.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.

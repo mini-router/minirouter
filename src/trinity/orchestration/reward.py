@@ -647,6 +647,38 @@ def _bfcl_call_matches(
     return True
 
 
+def _bfcl_match_all_calls(
+    cand_calls: list[tuple[str, dict[str, object]]],
+    gold_calls: list[tuple[str, dict[str, list[object]]]],
+) -> bool:
+    """True iff each gold call can be paired with a *distinct* candidate call under
+    :func:`_bfcl_call_matches` — i.e. a bipartite perfect matching exists.
+
+    Candidate arguments are concrete values while gold arguments are allowed-value
+    lists, so the two sides cannot be aligned by sorting on a shared JSON key: the
+    scalar-vs-list serialization sorts them differently and a positional ``zip``
+    then pairs up the wrong calls, scoring a correct multi-call answer 0. Solve the
+    pairing directly, backtracking so a greedy early choice cannot block an
+    otherwise-valid matching. Call counts per item are tiny, so this is cheap.
+    """
+    if len(cand_calls) != len(gold_calls):
+        return False
+    used = [False] * len(cand_calls)
+
+    def _match(gi: int) -> bool:
+        if gi == len(gold_calls):
+            return True
+        for ci, cand_call in enumerate(cand_calls):
+            if not used[ci] and _bfcl_call_matches(cand_call, gold_calls[gi]):
+                used[ci] = True
+                if _match(gi + 1):
+                    return True
+                used[ci] = False
+        return False
+
+    return _match(0)
+
+
 def _check_bfcl(candidate: str, reference: object) -> bool:
     raw = _extract_json_payload(candidate)
     if raw is None:
@@ -678,20 +710,7 @@ def _check_bfcl(candidate: str, reference: object) -> bool:
             return False
         gold_calls.append(call)
 
-    if len(cand_calls) != len(gold_calls):
-        return False
-
-    key = lambda call: json.dumps(
-        {"name": call[0], "arguments": call[1]},
-        sort_keys=True,
-        ensure_ascii=False,
-    )
-    cand_calls_sorted = sorted(cand_calls, key=key)
-    gold_calls_sorted = sorted(gold_calls, key=key)
-    return all(
-        _bfcl_call_matches(candidate_call, gold_call)
-        for candidate_call, gold_call in zip(cand_calls_sorted, gold_calls_sorted)
-    )
+    return _bfcl_match_all_calls(cand_calls, gold_calls)
 
 
 # ---------------------------------------------------------------------------
