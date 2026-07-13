@@ -9,6 +9,7 @@ from .api.routes import admin_router, router
 from .core.config import Settings
 from .db import Base, build_engine, build_session_factory, ensure_schema
 from .services.admin_auth import seed_admin_user
+from .services.review_control import seed_review_control
 from .services.runtime_config import seed_runtime_config
 
 
@@ -24,6 +25,7 @@ async def lifespan(app: FastAPI):
     app.state.session_factory = build_session_factory(engine)
     with app.state.session_factory() as session:
         seed_admin_user(session, settings)
+        seed_review_control(session)
         seed_runtime_config(session, settings)
         session.commit()
     yield

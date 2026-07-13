@@ -61,6 +61,7 @@ DEFAULT_GITHUB_ACCESS_TOKEN = ""
 DEFAULT_GITHUB_POST_COMMENT_ON_EVAL = True
 DEFAULT_GITHUB_AUTO_MERGE_SUBMISSIONS = False
 DEFAULT_GITHUB_MERGE_METHOD = "merge"
+DEFAULT_GITHUB_REVIEW_SCORE_THRESHOLD = 0.8
 DEFAULT_ALLOWED_REPO = "mini-router/minirouter"
 DEFAULT_MINER_REPO_URL = "https://github.com/mini-router/minirouter"
 DEFAULT_PUBLIC_SITE_URL = "https://minirouter.work.gd"
@@ -124,6 +125,7 @@ class Settings:
     github_post_comment_on_eval: bool = DEFAULT_GITHUB_POST_COMMENT_ON_EVAL
     github_auto_merge_submissions: bool = DEFAULT_GITHUB_AUTO_MERGE_SUBMISSIONS
     github_merge_method: str = DEFAULT_GITHUB_MERGE_METHOD
+    github_review_score_threshold: float = DEFAULT_GITHUB_REVIEW_SCORE_THRESHOLD
     allowed_repo: str = DEFAULT_ALLOWED_REPO
     miner_repo_url: str = DEFAULT_MINER_REPO_URL
     public_site_url: str = DEFAULT_PUBLIC_SITE_URL
@@ -194,6 +196,9 @@ class Settings:
             github_auto_merge_submissions=get("GITHUB_AUTO_MERGE_SUBMISSIONS", "false").lower()
             in {"1", "true", "yes", "on"},
             github_merge_method=get("GITHUB_MERGE_METHOD", DEFAULT_GITHUB_MERGE_METHOD),
+            github_review_score_threshold=float(
+                get("GITHUB_REVIEW_SCORE_THRESHOLD", str(DEFAULT_GITHUB_REVIEW_SCORE_THRESHOLD))
+            ),
             allowed_repo=get("ALLOWED_REPO", DEFAULT_ALLOWED_REPO),
             miner_repo_url=get("MINER_REPO_URL", DEFAULT_MINER_REPO_URL),
             public_site_url=get("PUBLIC_SITE_URL", DEFAULT_PUBLIC_SITE_URL),

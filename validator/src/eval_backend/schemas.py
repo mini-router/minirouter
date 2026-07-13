@@ -206,3 +206,12 @@ class AdminRuntimeConfigUpdate(BaseModel):
     eval_max_items: int = 20
     eval_provider: str = "chutes"
     eval_models_config: str = "configs/models.chutes.yaml"
+
+
+class ReviewControlOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    enabled: bool
+    started_by: str | None = None
+    started_at: datetime | None = None
+    updated_at: datetime

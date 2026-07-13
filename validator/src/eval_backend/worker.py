@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Iterator
 
-from sqlalchemy import select
+from sqlalchemy import case, or_, select
 from sqlalchemy.orm import Session
 
 from .core.config import Settings
@@ -16,6 +16,7 @@ from .models import JobQueue, Submission, TrainRun
 from .services.eval_runner import evaluate_submission
 from .services.github import publish_submission_result
 from .services.github import set_commit_status
+from .services.review_control import get_review_control
 from .services.queue import enqueue_submission_job
 from .services.runtime_config import apply_runtime_defaults, get_runtime_config
 from .services.train_runner import run_train_job
@@ -42,19 +43,25 @@ def process_once(session_factory, settings: Settings) -> int:
     result = None
     try:
         runtime_settings = apply_runtime_defaults(settings, get_runtime_config(session, settings))
+        review_control = get_review_control(session)
         logger.info("polling for queued jobs")
-        job = (
-            session.execute(
-                select(JobQueue)
-                .where(JobQueue.status == "queued")
-                .order_by(JobQueue.priority.desc(), JobQueue.created_at.asc())
-                .with_for_update(skip_locked=True)
+        base_stmt = select(JobQueue).outerjoin(Submission, JobQueue.submission_id == Submission.id)
+        queued_stmt = base_stmt.where(JobQueue.status == "queued")
+        if not review_control.enabled:
+            queued_stmt = queued_stmt.where(
+                or_(Submission.id.is_(None), Submission.source != "github_pr")
             )
-            .scalars()
-            .first()
-        )
+        queued_stmt = queued_stmt.order_by(
+            case((Submission.source == "github_pr", 0), else_=1),
+            JobQueue.priority.desc(),
+            JobQueue.created_at.asc(),
+            JobQueue.id.asc(),
+        ).with_for_update(skip_locked=True)
+        job = session.execute(queued_stmt).scalars().first()
         if job is None:
-            logger.info("no queued jobs found")
+            if not review_control.enabled:
+                logger.info("review gate disabled; queued GitHub PR submissions are waiting")
+            logger.info("no eligible queued jobs found")
             return 0
         job.status = "running"
         job.claimed_by = "worker"
@@ -156,6 +163,8 @@ def process_once(session_factory, settings: Settings) -> int:
             checkpoint_path_override=checkpoint_override,
             train_id=int(payload["train_id"]) if payload.get("train_id") is not None else None,
             input_artifact_id=str(payload["input_artifact_id"]) if payload.get("input_artifact_id") else None,
+            force_remote_only=submission.source == "github_pr",
+            allow_local_fallback=False if submission.source == "github_pr" else None,
         )
         job.status = "completed" if result.run.status == "completed" else "failed"
         job.last_error = result.run.error

@@ -26,6 +26,7 @@ from ..schemas import (
     JobQueueResponse,
     LeaderboardEntry,
     LeaderboardResponse,
+    ReviewControlOut,
     TrainCreateRequest,
     TrainCreateResponse,
     TrainOut,
@@ -43,6 +44,7 @@ from ..services.runtime_config import (
     get_runtime_config,
     update_runtime_config,
 )
+from ..services.review_control import get_review_control, pause_review, start_review
 from ..services.eval_runner import evaluate_submission
 from ..services.github import create_pr_submission
 from ..services.github import set_commit_status
@@ -329,6 +331,16 @@ def _runtime_config_to_schema(session: Session, settings: Settings) -> AdminRunt
     )
 
 
+def _review_control_to_schema(session: Session) -> ReviewControlOut:
+    row = get_review_control(session)
+    return ReviewControlOut(
+        enabled=row.enabled,
+        started_by=row.started_by,
+        started_at=row.started_at,
+        updated_at=row.updated_at,
+    )
+
+
 def _ensure_webhook_secret_configured(secret: str) -> str:
     configured = (secret or "").strip()
     if not configured or configured == "replace-me":
@@ -526,7 +538,7 @@ async def github_webhook(request: Request, settings: Settings = Depends(get_sett
                 settings,
                 submission,
                 state="pending",
-                description="Awaiting manual CI start",
+                description="Awaiting review start",
                 target_url=f"{settings.public_site_url.rstrip('/')}/submission/{submission.id}",
             )
         except Exception:
@@ -598,7 +610,7 @@ async def github_submission_upload(
                 settings,
                 submission,
                 state="pending",
-                description="Queued for backend worker",
+                description="Awaiting review start",
                 target_url=f"{settings.public_site_url.rstrip('/')}/submission/{submission.id}",
             )
         except Exception:
@@ -804,6 +816,52 @@ def admin_update_config(
         )
         session.commit()
         return _runtime_config_to_schema(session, settings)
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        session.close()
+
+
+@admin_router.get("/review", response_model=ReviewControlOut)
+def admin_get_review_control(
+    request: Request,
+    user: AdminUser = Depends(_require_admin_user),
+) -> ReviewControlOut:
+    session = get_session(request)
+    try:
+        return _review_control_to_schema(session)
+    finally:
+        session.close()
+
+
+@admin_router.post("/review/start", response_model=ReviewControlOut)
+def admin_start_review(
+    request: Request,
+    user: AdminUser = Depends(_require_admin_user),
+) -> ReviewControlOut:
+    session = get_session(request)
+    try:
+        start_review(session, started_by=user.username)
+        session.commit()
+        return _review_control_to_schema(session)
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        session.close()
+
+
+@admin_router.post("/review/pause", response_model=ReviewControlOut)
+def admin_pause_review(
+    request: Request,
+    user: AdminUser = Depends(_require_admin_user),
+) -> ReviewControlOut:
+    session = get_session(request)
+    try:
+        pause_review(session)
+        session.commit()
+        return _review_control_to_schema(session)
     except Exception as exc:
         session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
