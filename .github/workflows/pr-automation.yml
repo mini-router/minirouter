@@ -154,6 +154,7 @@ jobs:
               labels.has('submission') &&
               names.includes('submissions/final_model/best_theta.npy')
             core.setOutput('should_queue', String(shouldQueue))
+            core.setOutput('labels_json', JSON.stringify([...labels]))
             core.setOutput('repo_full_name', `${owner}/${repo}`)
             core.setOutput('pr_number', String(pr.number))
             core.setOutput('head_sha', pr.head.sha)
@@ -176,9 +177,11 @@ jobs:
 
             const payload = {
               repository: { full_name: '${{ steps.classify.outputs.repo_full_name }}' },
+              labels: JSON.parse('${{ steps.classify.outputs.labels_json }}'),
               pull_request: {
                 number: Number('${{ steps.classify.outputs.pr_number }}'),
                 head: { sha: '${{ steps.classify.outputs.head_sha }}' },
+                labels: JSON.parse('${{ steps.classify.outputs.labels_json }}').map((name) => ({ name })),
               },
               sender: { login: '${{ steps.classify.outputs.team_name }}' },
             }
@@ -366,6 +369,7 @@ jobs:
               labels.has('submission') &&
               names.includes('submissions/final_model/best_theta.npy')
             core.setOutput('should_queue', String(shouldQueue))
+            core.setOutput('labels_json', JSON.stringify([...labels]))
             core.setOutput('repo_full_name', `${owner}/${repo}`)
             core.setOutput('pr_number', String(pr.number))
             core.setOutput('head_sha', pr.head.sha)
@@ -388,9 +392,11 @@ jobs:
 
             const payload = {
               repository: { full_name: '${{ steps.classify.outputs.repo_full_name }}' },
+              labels: JSON.parse('${{ steps.classify.outputs.labels_json }}'),
               pull_request: {
                 number: Number('${{ steps.classify.outputs.pr_number }}'),
                 head: { sha: '${{ steps.classify.outputs.head_sha }}' },
+                labels: JSON.parse('${{ steps.classify.outputs.labels_json }}').map((name) => ({ name })),
               },
               sender: { login: '${{ steps.classify.outputs.team_name }}' },
             }
