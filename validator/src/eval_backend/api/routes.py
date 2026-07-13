@@ -541,7 +541,15 @@ async def github_webhook(request: Request, settings: Settings = Depends(get_sett
                 submission.updated_at = _utcnow()
             cancel_submission_jobs(session, submission.id, reason="pull request closed")
         else:
-            submission.status = "awaiting_ci"
+            if submission.submission_artifact_id is None and submission.status not in {
+                "queued",
+                "running",
+                "completed",
+                "failed",
+                "closed",
+                "cancelled",
+            }:
+                submission.status = "awaiting_ci"
             submission.updated_at = _utcnow()
         session.commit()
         try:
