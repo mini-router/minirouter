@@ -97,9 +97,7 @@ def process_once(session_factory, settings: Settings) -> int:
                     source_root = fetch_github_pr_source_sync(
                         runtime_settings,
                         submission,
-                        destination_root=runtime_settings.workspace_root
-                        / "github_sources"
-                        / submission.id,
+                        destination_root=runtime_settings.workspace_root / "github_sources" / submission.id,
                     )
                 logger.info(
                     "processing train job id=%s train id=%s submission id=%s benchmark=%s",

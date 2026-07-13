@@ -72,7 +72,9 @@ async def fetch_github_pr_source(
     root.mkdir(parents=True, exist_ok=True)
 
     archive_path = root / "source.tar.gz"
-    headers: dict[str, str] = {"Accept": "application/octet-stream"}
+    headers: dict[str, str] = {
+        "Accept": "application/vnd.github+json",
+    }
     if settings.github_access_token:
         headers["Authorization"] = f"Bearer {settings.github_access_token}"
 
