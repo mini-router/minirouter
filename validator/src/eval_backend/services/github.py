@@ -83,8 +83,6 @@ def create_pr_submission(
         if changed:
             if artifact is not None:
                 existing.status = "queued"
-            elif existing.status not in {"completed", "failed", "running"}:
-                existing.status = "awaiting_ci"
             existing.latest_score = None
             existing.latest_eval_id = None
             existing.best_eval_id = None
