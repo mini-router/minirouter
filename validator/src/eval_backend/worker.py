@@ -15,12 +15,15 @@ from .core.config import Settings
 from .db import Base, build_engine, build_session_factory, ensure_schema
 from .models import JobQueue, Submission, TrainRun
 from .services.eval_runner import evaluate_submission
+from .services.github import close_pull_request
+from .services.github import merge_pull_request
 from .services.github import publish_submission_result
 from .services.github import set_commit_status
+from .services.github import should_promote_submission
 from .services.review_control import get_review_control
 from .services.queue import enqueue_submission_job
 from .services.source_fetch import fetch_github_pr_source_sync, find_submission_checkpoint
-from .services.runtime_config import apply_runtime_defaults, get_runtime_config
+from .services.runtime_config import apply_runtime_defaults, get_runtime_config, update_king_score
 from .services.train_runner import run_train_job
 
 logger = logging.getLogger("eval_backend.worker")
@@ -37,8 +40,6 @@ def session_scope(session_factory) -> Iterator[Session]:
         raise
     finally:
         session.close()
-
-
 def process_once(session_factory, settings: Settings) -> int:
     session = session_factory()
     submission = None
@@ -46,7 +47,8 @@ def process_once(session_factory, settings: Settings) -> int:
     train = None
     job = None
     try:
-        runtime_settings = apply_runtime_defaults(settings, get_runtime_config(session, settings))
+        runtime = get_runtime_config(session, settings)
+        runtime_settings = apply_runtime_defaults(settings, runtime)
         review_control = get_review_control(session)
         logger.info("polling for queued jobs")
         queued_stmt = select(JobQueue).where(JobQueue.status == "queued")
@@ -205,6 +207,37 @@ def process_once(session_factory, settings: Settings) -> int:
             job.heartbeat_at = result.run.finished_at
             job.updated_at = result.run.finished_at or now
             session.commit()
+            if submission.source == "github_pr":
+                accepted = should_promote_submission(
+                    result.run.score,
+                    runtime_settings.github_review_score_threshold,
+                    runtime.king_score,
+                )
+                try:
+                    import asyncio
+
+                    asyncio.run(
+                        publish_submission_result(
+                            runtime_settings,
+                            submission,
+                            result,
+                            accepted=accepted,
+                        )
+                    )
+                except Exception:
+                    pass
+                try:
+                    import asyncio
+
+                    if accepted:
+                        asyncio.run(merge_pull_request(runtime_settings, submission))
+                        if result.run.score is not None:
+                            update_king_score(session, runtime_settings, result.run.score)
+                            session.commit()
+                    else:
+                        asyncio.run(close_pull_request(runtime_settings, submission))
+                except Exception:
+                    pass
             logger.info(
                 "finished evaluation job id=%s submission id=%s status=%s score=%s",
                 job.id,
@@ -254,14 +287,6 @@ def process_once(session_factory, settings: Settings) -> int:
             return 1
     finally:
         session.close()
-
-    if submission is not None and result is not None and submission.source == "github_pr":
-        try:
-            import asyncio
-
-            asyncio.run(publish_submission_result(runtime_settings, submission, result))
-        except Exception:
-            pass
     return 1
 
 

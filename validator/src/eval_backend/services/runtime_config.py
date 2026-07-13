@@ -21,6 +21,7 @@ class RuntimeDefaults:
     eval_provider: str
     eval_models_config: str
     eval_execution_mode: str
+    king_score: float
 
 
 def _default_runtime(settings: Settings) -> RuntimeDefaults:
@@ -30,6 +31,7 @@ def _default_runtime(settings: Settings) -> RuntimeDefaults:
         eval_provider=settings.eval_provider,
         eval_models_config=settings.eval_models_config,
         eval_execution_mode=settings.eval_execution_mode,
+        king_score=settings.github_review_score_threshold,
     )
 
 
@@ -44,6 +46,7 @@ def seed_runtime_config(session: Session, settings: Settings) -> CompetitionRunt
             default_eval_provider=defaults.eval_provider,
             default_eval_models_config=defaults.eval_models_config,
             default_eval_execution_mode=defaults.eval_execution_mode,
+            king_score=defaults.king_score,
         )
         session.add(row)
         session.flush()
@@ -59,6 +62,8 @@ def seed_runtime_config(session: Session, settings: Settings) -> CompetitionRunt
         existing.default_eval_models_config = defaults.eval_models_config
     if not existing.default_eval_execution_mode.strip():
         existing.default_eval_execution_mode = defaults.eval_execution_mode
+    if existing.king_score is None:
+        existing.king_score = defaults.king_score
     existing.updated_at = _utcnow()
     session.flush()
     return existing
@@ -76,6 +81,7 @@ def get_runtime_config(session: Session, settings: Settings) -> RuntimeDefaults:
         eval_provider=row.default_eval_provider or settings.eval_provider,
         eval_models_config=row.default_eval_models_config or settings.eval_models_config,
         eval_execution_mode=row.default_eval_execution_mode or settings.eval_execution_mode,
+        king_score=row.king_score if row.king_score is not None else _default_runtime(settings).king_score,
     )
 
 
@@ -116,6 +122,20 @@ def update_runtime_config(
     row.default_eval_models_config = eval_models_config.strip() or settings.eval_models_config
     mode = eval_execution_mode.strip().lower()
     row.default_eval_execution_mode = mode if mode in {"local_cpu", "remote_gpu"} else settings.eval_execution_mode
+    if row.king_score is None:
+        row.king_score = _default_runtime(settings).king_score
+    row.updated_at = _utcnow()
+    session.flush()
+    return row
+
+
+def update_king_score(session: Session, settings: Settings, king_score: float) -> CompetitionRuntimeConfig:
+    row = session.execute(
+        select(CompetitionRuntimeConfig).where(CompetitionRuntimeConfig.id == 1)
+    ).scalar_one_or_none()
+    if row is None:
+        row = seed_runtime_config(session, settings)
+    row.king_score = float(king_score)
     row.updated_at = _utcnow()
     session.flush()
     return row

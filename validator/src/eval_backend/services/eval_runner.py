@@ -70,6 +70,18 @@ def _flatten_metrics(payload: Any) -> dict[str, Any]:
         ):
             if key in payload:
                 flat[key] = payload[key]
+        cost = payload.get("cost")
+        if isinstance(cost, dict):
+            for key in (
+                "cost_usd",
+                "cost_missing",
+                "cost_ledger",
+                "cost_calls",
+                "cost_prompt_tokens",
+                "cost_completion_tokens",
+            ):
+                if key in cost and key not in flat:
+                    flat[key] = cost[key]
         for key in ("results", "metrics", "TRINITY"):
             value = payload.get(key)
             if isinstance(value, dict):
@@ -197,7 +209,8 @@ def _attach_runtime_metrics(metrics: dict[str, Any], *, run: EvaluationRun, ledg
             max(0.0, (run.finished_at - run.started_at).total_seconds()),
             2,
         )
-    out.update(_ledger_cost_report(ledger_path))
+    for key, value in _ledger_cost_report(ledger_path).items():
+        out.setdefault(key, value)
     return out
 
 
@@ -411,6 +424,27 @@ def _remote_path(path: str | Path) -> str:
     return str(Path(path).expanduser())
 
 
+def _remote_repo_dir_expr(raw_dir: str) -> str:
+    """Return a shell-safe remote repo path expression.
+
+    Relative paths are anchored under $HOME on the remote host so the
+    evaluator does not depend on the SSH session's starting directory.
+    """
+    value = raw_dir.strip()
+    if not value:
+        return '"$HOME"'
+
+    path = Path(value)
+    if path.is_absolute():
+        return shlex.quote(str(path.expanduser()))
+
+    if value == "~":
+        return '"$HOME"'
+    if value.startswith("~/"):
+        return f'"$HOME/{value[2:]}"'
+    return f'"$HOME/{value}"'
+
+
 def _remote_workspace(settings: Settings, submission_id: str) -> Path:
     return Path(settings.trinity_remote_workspace_root).expanduser() / "submissions" / submission_id
 
@@ -461,7 +495,7 @@ def _build_remote_command(
     ledger_path: Path,
     workspace: Path,
 ) -> str:
-    repo_dir = Path(settings.trinity_remote_dir).expanduser()
+    repo_dir = _remote_repo_dir_expr(settings.trinity_remote_dir)
     formatted = _format_command(
         settings.remote_eval_command_template,
         repo_dir=repo_dir,
@@ -477,9 +511,9 @@ def _build_remote_command(
     return (
         f"mkdir -p {shlex.quote(str(ledger_path.parent))} && : > {shlex.quote(str(ledger_path))} && "
         f"export TRINITY_COST_LEDGER={shlex.quote(str(ledger_path))}; "
-        f"export TRINITY_REMOTE_DIR={shlex.quote(str(repo_dir))}; "
+        f"export TRINITY_REMOTE_DIR={repo_dir}; "
         f"export TRINITY_GPU_INDEX={shlex.quote(str(getattr(settings, 'trinity_gpu_index', 5)))}; "
-        f"cd {shlex.quote(str(repo_dir))} && "
+        f"cd {repo_dir} && "
         "source .venv/bin/activate && "
         "source scripts/remote_env.sh && "
         f"{formatted}"

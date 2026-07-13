@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
-from .core.config import Settings
+from .core.config import DEFAULT_GITHUB_REVIEW_SCORE_THRESHOLD, Settings
 
 
 Base = declarative_base()
@@ -60,6 +60,9 @@ def ensure_schema(engine) -> None:
         conn.exec_driver_sql(
             "ALTER TABLE competition_runtime_config ADD COLUMN IF NOT EXISTS default_eval_execution_mode VARCHAR(32)"
         )
+        conn.exec_driver_sql(
+            "ALTER TABLE competition_runtime_config ADD COLUMN IF NOT EXISTS king_score DOUBLE PRECISION"
+        )
         conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN artifact_name DROP NOT NULL")
         conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN artifact_path DROP NOT NULL")
         conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN artifact_sha256 DROP NOT NULL")
@@ -76,6 +79,10 @@ def ensure_schema(engine) -> None:
         conn.exec_driver_sql(
             "UPDATE competition_runtime_config "
             "SET default_eval_execution_mode = COALESCE(NULLIF(default_eval_execution_mode, ''), 'remote_gpu')"
+        )
+        conn.exec_driver_sql(
+            "UPDATE competition_runtime_config "
+            f"SET king_score = COALESCE(king_score, {DEFAULT_GITHUB_REVIEW_SCORE_THRESHOLD})"
         )
 
 

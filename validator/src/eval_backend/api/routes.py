@@ -330,6 +330,7 @@ def _runtime_config_to_schema(session: Session, settings: Settings) -> AdminRunt
         eval_provider=runtime.eval_provider,
         eval_models_config=runtime.eval_models_config,
         eval_execution_mode=runtime.eval_execution_mode,
+        king_score=runtime.king_score,
         updated_at=row.updated_at if row is not None else None,
     )
 
@@ -352,6 +353,32 @@ def _ensure_webhook_secret_configured(secret: str) -> str:
             detail="webhook secret is not configured; set GITHUB_WEBHOOK_SECRET",
         )
     return configured
+
+
+def _payload_label_names(payload: dict[str, Any]) -> set[str]:
+    names: set[str] = set()
+
+    def add_labels(value: Any) -> None:
+        if not isinstance(value, list):
+            return
+        for item in value:
+            name = ""
+            if isinstance(item, str):
+                name = item.strip()
+            elif isinstance(item, dict):
+                name = str(item.get("name") or "").strip()
+            if name:
+                names.add(name.lower())
+
+    add_labels(payload.get("labels"))
+    pull_request = payload.get("pull_request")
+    if isinstance(pull_request, dict):
+        add_labels(pull_request.get("labels"))
+    return names
+
+
+def _payload_has_label(payload: dict[str, Any], label: str) -> bool:
+    return label.strip().lower() in _payload_label_names(payload)
 
 
 def _verify_github_signature(raw_body: bytes, signature: str | None, secret: str) -> None:
@@ -578,7 +605,7 @@ async def github_webhook(request: Request, settings: Settings = Depends(get_sett
                 submission.status = "closed"
                 submission.updated_at = _utcnow()
             cancel_submission_jobs(session, submission.id, reason="pull request closed")
-        else:
+        elif is_submission:
             submission.status = "queued"
             submission.latest_score = None
             submission.latest_eval_id = None
@@ -597,9 +624,12 @@ async def github_webhook(request: Request, settings: Settings = Depends(get_sett
                     "team_name": submission.miner_id,
                 },
             )
+        else:
+            submission.status = "awaiting_ci"
+            submission.updated_at = _utcnow()
         session.commit()
         try:
-            commit_state: str | None = "pending"
+            commit_state: str | None = "pending" if is_submission else None
             commit_description = "Queued for review"
             if action == "closed":
                 if submission.status in {"completed", "failed"}:
@@ -607,6 +637,8 @@ async def github_webhook(request: Request, settings: Settings = Depends(get_sett
                 else:
                     commit_state = "failure"
                     commit_description = "Pull request closed"
+            elif not is_submission:
+                commit_state = None
             if commit_state is not None:
                 await set_commit_status(
                     settings,
