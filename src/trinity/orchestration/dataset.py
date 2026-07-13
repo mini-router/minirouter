@@ -13,6 +13,7 @@ Design constraints (see docs/SPEC.md §6, §8):
 - The ``answer`` field is whatever ``reward.score`` needs for that benchmark:
     * ifeval        -> prompt metadata with instruction ids + kwargs
     * rlpr          -> prompt metadata with source benchmark + ground-truth
+    * bfcl_simple   -> a JSON-serializable ground-truth function-call schema
     * math500 / aime  -> reference answer string (boxed-answer / last-number match)
     * mmlu / gpqa     -> the correct option LETTER ("A".."D")
     * livecodebench   -> a dict test spec {"tests": [...], "fn_name": ...}
@@ -26,6 +27,7 @@ Public API
 The HuggingFace dataset ids used (when ``datasets`` + network are available):
 - ifeval        : ``google/IFEval``
 - rlpr          : ``openbmb/RLPR-Evaluation``
+- bfcl_simple   : BFCL v4 single-turn JSON files from the official Gorilla repository
 - math500       : ``HuggingFaceH4/MATH-500`` (fallback ``qwedsacf/competition_math``)
 - mmlu          : ``cais/mmlu`` (config ``all``)
 - gpqa          : ``Idavidrein/gpqa`` (config ``gpqa_diamond``)
@@ -46,6 +48,7 @@ __all__ = ["load_tasks", "sample_minibatch", "SUPPORTED_BENCHMARKS"]
 SUPPORTED_BENCHMARKS: tuple[str, ...] = (
     "ifeval",
     "rlpr",
+    "bfcl_simple",
     "math500",
     "mmlu",
     "gpqa",
@@ -54,6 +57,12 @@ SUPPORTED_BENCHMARKS: tuple[str, ...] = (
 
 # Letters used for multiple-choice option indexing (MMLU/GPQA).
 _CHOICE_LETTERS: tuple[str, ...] = ("A", "B", "C", "D", "E", "F", "G", "H")
+
+_BFCL_SUPPORTED_FILES: tuple[str, ...] = (
+    "BFCL_v4_simple_python.json",
+    "BFCL_v4_simple_javascript.json",
+    "BFCL_v4_simple_java.json",
+)
 _IFEVAL_RAW_URL = (
     "https://raw.githubusercontent.com/google-research/google-research/06076564b3311330f3560e8cfba86d359bec31af/"
     "instruction_following_eval/data/input_data.jsonl"
@@ -84,6 +93,9 @@ _RLPR_RAW_BASE = (
     "https://huggingface.co/datasets/openbmb/RLPR-Evaluation/resolve/"
     "cd6b36bbecba006a8d25fedf634567ea37f9a512/"
 )
+_BFCL_FILE_TO_CATEGORY: dict[str, str] = {
+    name: name.removeprefix("BFCL_v4_").removesuffix(".json") for name in _BFCL_SUPPORTED_FILES
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -147,7 +159,12 @@ def _row_get(row: Any, *keys: str, default: Any = None) -> Any:
 
 @lru_cache(maxsize=None)
 def _fetch_jsonl_rows(url: str) -> list[dict[str, Any]] | None:
-    """Fetch a JSONL file from ``url`` and return parsed rows, or ``None``."""
+    """Fetch a JSONL file from ``url`` and return parsed rows, or ``None``.
+
+    BFCL's official repository stores question files and possible-answer files as
+    JSONL blobs in GitHub raw URLs, so we fetch them directly instead of relying
+    on ``datasets.load_dataset``.
+    """
     try:
         with urllib.request.urlopen(url, timeout=30) as response:
             text = response.read().decode("utf-8")
@@ -181,9 +198,16 @@ def _try_load_parquet(url: str) -> Any | None:
         return None
 
 
-# --------------------------------------------------------------------------- #
-# Per-benchmark HuggingFace parsers (return list[Task] or None on failure)
-# --------------------------------------------------------------------------- #
+def _bfcl_categories_for_split(split: str) -> list[str]:
+    s = (split or "").strip().lower()
+    if s not in {"test", "eval", "validation", "valid"}:
+        raise ValueError(
+            "bfcl_simple is evaluation-only; use split='test'/'eval' instead of a training split"
+        )
+    # BFCL v4 simple is intentionally limited to the single-turn categories.
+    return list(_BFCL_SUPPORTED_FILES)
+
+
 def _load_ifeval_hf(split: str) -> list[Task] | None:
     """Load the official IFEval prompt set from the Google Research repo.
 
@@ -304,6 +328,95 @@ def _load_rlpr_hf(split: str) -> list[Task] | None:
     return tasks
 
 
+def _extract_bfcl_question(row: Any) -> str:
+    """Extract the first user message from a BFCL question row."""
+    question = _row_get(row, "question", default=[])
+    try:
+        # BFCL stores the question as [[{"role": "user", "content": "..."}], ...]
+        messages = question[0]
+        for msg in messages:
+            if _row_get(msg, "role", default="") == "user":
+                content = _row_get(msg, "content", default="")
+                if content:
+                    return str(content)
+    except Exception:
+        pass
+    return str(_row_get(row, "prompt", "question_text", default="")).strip()
+
+
+def _format_bfcl_prompt(question: str, functions: list[dict[str, Any]], category: str) -> str:
+    """Render a BFCL question into a compact function-call prompt."""
+    lines = [
+        "You are a function-calling assistant.",
+        "Return the best function call(s) as JSON only.",
+        f"Category: {category}",
+        "",
+        "User request:",
+        question.strip(),
+        "",
+        "Available functions:",
+        json.dumps(functions, indent=2, ensure_ascii=False),
+        "",
+        "Return a JSON object or array of objects with keys `name` and `arguments`.",
+    ]
+    return "\n".join(lines)
+
+
+def _load_bfcl_hf(split: str) -> list[Task] | None:
+    """Load the official BFCL v4 single-turn JSONL files from GitHub raw URLs."""
+    files = _bfcl_categories_for_split(split)
+    tasks: list[Task] = []
+    for filename in files:
+        category = _BFCL_FILE_TO_CATEGORY.get(filename, filename)
+        question_url = (
+            "https://raw.githubusercontent.com/ShishirPatil/gorilla/"
+            "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8/"
+            f"berkeley-function-call-leaderboard/bfcl_eval/data/{filename}"
+        )
+        answer_url = (
+            "https://raw.githubusercontent.com/ShishirPatil/gorilla/"
+            "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8/"
+            f"berkeley-function-call-leaderboard/bfcl_eval/data/possible_answer/{filename}"
+        )
+        questions = _fetch_jsonl_rows(question_url)
+        answers = _fetch_jsonl_rows(answer_url)
+        if not questions or not answers:
+            continue
+
+        answer_by_id = {str(row.get("id", "")): row for row in answers if row.get("id")}
+        for i, row in enumerate(questions):
+            row_id = str(row.get("id", f"{category}-{i}"))
+            gold = answer_by_id.get(row_id)
+            if gold is None:
+                continue
+            question = _extract_bfcl_question(row)
+            functions = list(_row_get(row, "function", default=[]))
+            ground_truth = gold.get("ground_truth", [])
+            tasks.append(
+                Task(
+                    task_id=row_id,
+                    benchmark="bfcl_simple",
+                    prompt=_format_bfcl_prompt(question, functions, category),
+                    answer={
+                        "ground_truth": ground_truth,
+                        "category": category,
+                        "functions": functions,
+                        "question": question,
+                        "source": "ShishirPatil/gorilla",
+                    },
+                    meta={
+                        "source": "ShishirPatil/gorilla",
+                        "category": category,
+                        "file": filename,
+                    },
+                )
+            )
+    return tasks or None
+
+
+# --------------------------------------------------------------------------- #
+# Per-benchmark HuggingFace parsers (return list[Task] or None on failure)
+# --------------------------------------------------------------------------- #
 def _load_math500_hf(split: str) -> list[Task] | None:
     """MATH-500 loader. answer = reference final answer string."""
     ds = _try_load_hf("HuggingFaceH4/MATH-500", split=split or "test")
@@ -339,18 +452,16 @@ def _load_math500_hf(split: str) -> list[Task] | None:
 def _mmlu_split_for_split(split: str) -> str:
     """Map a logical split onto a real ``cais/mmlu`` split name.
 
-    ``cais/mmlu`` has NO split named ``train`` — its splits are ``auxiliary_train``
-    (the designated training pool, same row schema as ``test``), ``dev``,
-    ``validation``, and ``test``. Requesting ``split="train"`` (as ``train.py``
-    does) therefore fails to load and silently falls back to the 2-item toy set.
-    Map ``train`` -> ``auxiliary_train`` and pass the real split names through.
+    ``cais/mmlu`` does not expose a ``train`` split. Its training pool is
+    ``auxiliary_train``, while ``dev``/``validation``/``test`` are the other
+    published splits. The public loader should accept the logical training
+    split used by ``train.py`` and resolve it to the real upstream name.
     """
     s = (split or "").strip().lower()
-    if s in ("train", "auxiliary_train"):
+    if s in {"train", "auxiliary_train"}:
         return "auxiliary_train"
-    if s in ("dev", "validation", "val"):
+    if s in {"dev", "validation", "val"}:
         return "validation" if s.startswith("val") else s
-    # Default / eval / anything else -> the graded test split.
     return "test"
 
 
@@ -479,7 +590,7 @@ def _load_livecodebench_hf(split: str) -> list[Task] | None:
                 prompt=str(question),
                 answer={
                     "tests": tests,
-                    "fn_name": _row_get(row, "fn_name", "func_name"),
+                    "fn_name": _lcb_fn_name(row),
                     "starter_code": _row_get(row, "starter_code"),
                 },
                 meta={
@@ -519,12 +630,40 @@ def _lcb_version_for_split(split: str) -> str:
     return "release_v1"
 
 
+def _lcb_fn_name(row: Any) -> str | None:
+    """Extract the call-based entry-point name for a LiveCodeBench row.
+
+    LiveCodeBench stores it inside a JSON ``metadata`` blob under ``func_name``;
+    some mirrors also surface it as a top-level ``fn_name``/``func_name`` column.
+    Returns ``None`` for stdin/stdout problems (which have no call entry point) so
+    the reward checker keeps its historical stdin behavior for them.
+    """
+    import json
+
+    direct = _row_get(row, "fn_name", "func_name")
+    if direct:
+        return str(direct)
+    meta = _row_get(row, "metadata")
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except (ValueError, TypeError):
+            meta = None
+    if isinstance(meta, dict):
+        fn = meta.get("func_name") or meta.get("fn_name")
+        if fn:
+            return str(fn)
+    return None
+
+
 def _parse_lcb_tests(row: Any) -> list[dict[str, str]]:
     """Best-effort extraction of LiveCodeBench public test cases.
 
     LiveCodeBench schemas vary across mirrors. We accept either a JSON-encoded
     string or an already-parsed list under several common keys, and normalise to
-    a list of ``{"input": ..., "output": ...}`` dicts. Returns ``[]`` if nothing
+    a list of ``{"input": ..., "output": ...}`` dicts. Each case's ``testtype``
+    (``"stdin"`` vs ``"functional"``) is preserved when present so the reward
+    checker can pick stdin-vs-call-based execution. Returns ``[]`` if nothing
     parseable is found (the reward checker treats empty tests as unscoreable).
     """
     import json
@@ -544,7 +683,11 @@ def _parse_lcb_tests(row: Any) -> list[dict[str, str]]:
         if isinstance(case, dict):
             inp = case.get("input", case.get("stdin", ""))
             out = case.get("output", case.get("expected_output", ""))
-            tests.append({"input": str(inp), "output": str(out)})
+            entry = {"input": str(inp), "output": str(out)}
+            ttype = case.get("testtype")
+            if ttype is not None:
+                entry["testtype"] = str(ttype)
+            tests.append(entry)
     return tests
 
 
@@ -718,6 +861,38 @@ def _toy_tasks(benchmark: str) -> list[Task]:
                 meta={"source": "toy", "instruction_id_list": ["startend:quotation"]},
             ),
         ]
+    if benchmark == "bfcl_simple":
+        return [
+            Task(
+                task_id="bfcl-toy-0",
+                benchmark="bfcl_simple",
+                prompt=(
+                    "You can use calculate_triangle_area(base, height, unit) to "
+                    "compute triangle area. Return only the JSON function call."
+                ),
+                answer={
+                    "ground_truth": [
+                        {
+                            "calculate_triangle_area": {
+                                "base": [10],
+                                "height": [5],
+                                "unit": ["units", ""],
+                            }
+                        }
+                    ],
+                    "category": "simple_python",
+                    "functions": [
+                        {
+                            "name": "calculate_triangle_area",
+                            "description": "Calculate the area of a triangle given its base and height.",
+                        }
+                    ],
+                    "question": "Find the area of a triangle with a base of 10 units and height of 5 units.",
+                    "source": "toy",
+                },
+                meta={"source": "toy", "category": "simple_python"},
+            )
+        ]
     raise ValueError(
         f"Unknown benchmark {benchmark!r}. Supported: {SUPPORTED_BENCHMARKS}"
     )
@@ -726,6 +901,7 @@ def _toy_tasks(benchmark: str) -> list[Task]:
 _HF_LOADERS = {
     "ifeval": _load_ifeval_hf,
     "rlpr": _load_rlpr_hf,
+    "bfcl_simple": _load_bfcl_hf,
     "math500": _load_math500_hf,
     "mmlu": _load_mmlu_hf,
     "gpqa": _load_gpqa_hf,

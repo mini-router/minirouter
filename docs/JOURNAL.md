@@ -34,6 +34,51 @@ to `extract_last_number`. Added `tests/test_reward_math_forms.py` (22 cases) cov
 plus guards that wrong values, inequalities, and empty-with-no-number still score 0.
 **Follow-up:** unit-bearing answers (`\boxed{5\text{ cm}}` vs `5`) are still missed; deferred
 because stripping `\text{...}` risks false positives on textual answers like `\text{Monday}`.
+## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
+**Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
+was unreachable, including on CI where no database service was provisioned.
+**Expected:** CI should exercise the production Postgres path and fail loudly when the test database
+is misconfigured.
+**Actual:** the shared ``validator_engine`` fixture skipped on connection errors, so the validator job
+could go green without running regression tests that depend on Postgres semantics.
+**Root cause:** CI did not start Postgres and the fixture treated unreachable databases as skippable
+even in automation.
+**Fix / decision:** provision ``postgres:16`` in the ``test-validator`` CI job, set
+``VALIDATOR_TEST_DATABASE_URL``, fail (not skip) when ``CI``/``GITHUB_ACTIONS`` is set but Postgres is
+unavailable, and add ``test_conftest.py`` to assert the fixture runs under CI.
+**Follow-up:** none — SQLite usage under ``validator/tests/`` was already removed on ``main``.
+## 2026-07-09 — benchmarks.livecodebench.load() was dead, and its test hid it  #mistake #gotcha
+**Context:** `configs/benchmarks.yaml` registers `loader: "benchmarks.livecodebench"`, and
+`benchmarks/__init__.py` documents the contract as "each loader exposes `load(split, **kw)`".
+**Expected:** `benchmarks.livecodebench.load("test", max_items=1)` returns a `list[Task]`.
+**Actual:** `TypeError: load_tasks() takes 1 positional argument but 2 positional arguments
+(and 2 keyword-only arguments) were given`. The canonical entrypoint raised on **every** call.
+**Root cause:** `load()` passed `("livecodebench", split)` positionally, but the benchmark name
+belongs to the *imported* `_load_tasks(benchmark, split, ...)`, not to the sibling
+`load_tasks(split, *, ...)` it actually called — that one takes a single positional.
+**Fix / decision:** `load()` now delegates to `load_tasks(split, ...)`, so the benchmark name is
+named in exactly one place.
+**The real lesson — the test asserted the bug.** `test_livecodebench_facade_delegates`
+monkeypatched `LCB.load_tasks` with a *four*-positional stub, so the buggy two-positional call
+type-checked against the fake and the suite stayed green over a dead entrypoint. A stub whose
+signature does not match the function it replaces cannot catch a signature bug. Patched the real
+delegation boundary (`LCB._load_tasks`) instead, and added a test that calls `load()` without
+patching `load_tasks` at all.
+**Follow-up:** `allow_toy_fallback` is still accepted and silently dropped by both wrappers;
+left alone here since the toy-set fallback behaviour is tracked separately in #65.
+## 2026-07-11 — Inline `#` comments in secrets.env values are stripped safely  #mistake #fix
+**Context:** issue #67 / PR #68 — `_parse_env_line()` kept trailing inline comments as part of env values
+(`KEY=sk-abc  # note` and `KEY="sk-abc"  # note`).
+**Expected:** annotated secrets.env lines should load only the secret; `#` inside quoted values should be
+preserved; malformed lines like `KEY="abc"oops` must not silently truncate.
+**Actual:** full-line comments worked, but inline trailing comments were kept; an intermediate fix silently
+dropped any suffix after a closing quote even when it was not a `#` comment.
+**Root cause:** the parser never trimmed inline comment suffixes correctly and briefly ignored non-comment
+trailing text on quoted values.
+**Fix / decision:** parse quoted values by finding the closing quote, allow only optional whitespace plus
+`#` comments after the quote, raise `ValueError` on malformed trailing text, strip ` #...` from unquoted
+values, and add regression tests in `tests/test_envfile.py`.
+**Follow-up:** none.
 
 ## 2026-07-09 — results_table summary crashed on a missing random_routing baseline  #mistake #gotcha
 **Context:** aggregating `experiments/**/eval*.json` into the multi-task R1/R2/R4 table.
@@ -133,7 +178,6 @@ passing `test`/`validation`/`dev` through, then route `_load_mmlu_hf` through it
 split name.
 **Follow-up:** complementary to #7 (fail-loud-on-toy-fallback); this fixes the *reason* the MMLU
 load failed rather than only surfacing it.
-
 ## 2026-07-09 — Submission eval now batches benchmark items + host alias fixed  #fix #perf #validator
 **Context:** validator submission eval was still processing benchmark items one by one, and the remote
 GPU host field used by the worker did not match the config dataclass.
@@ -163,6 +207,7 @@ HF row parsing, and pass@1 scoring, and update the README to call out LiveCodeBe
 automatic grader description.
 **Follow-up:** if we later wire `configs/benchmarks.yaml` into a runtime loader, the module is now in
 place.
+
 ## 2026-07-09 — role prompt assembly unit tests  #decision #repro
 **Context:** ``roles/prompts.py`` implements SPEC §4.4 system contracts and the
 ``render_transcript`` / ``build_messages`` helpers used by the inner loop, but had
@@ -295,7 +340,6 @@ so it stays independent of the separate `import sys` --selftest fix (#25).
 `trinity_remote_host`; added `validator/tests/test_eval_runner_remote_host.py` to assert SSH host resolution
 uses the real Settings field.
 **Follow-up:** none.
-
 
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
@@ -1158,19 +1202,6 @@ Per user request (document everything + structured output):
 - Cost ~$22 (ledger-tracked). No GPU was empty (other tenants), but evals are light (~4 GB) so they
   coexist on a shared H200.
 
-## 2026-07-10 — IFEval benchmark wiring added  #decision #repro
-
-Implemented a new `ifeval` benchmark loader/facade:
-- IFEval loads the official Google Research `input_data.jsonl` and stores `instruction_id_list` +
-  `kwargs` in `Task.answer`.
-- Reward support is routed through `trinity.orchestration.reward.score_text`.
-- The checker is a local deterministic heuristic aligned to the published instruction families
-  (`punctuation`, `keywords`, `length_constraints`, `detectable_format`, `change_case`, `startend`,
-  `combination`).
-
-The dataset does not publish a separate train/test split, so the loader intentionally treats the file as
-a single logical benchmark set and keeps the split argument for API compatibility.
-
 ## 2026-07-12 — IFEval review fixes: pinned source + fail-closed language scoring  #fix #repro
 
 The PR review caught two reproducibility/correctness issues:
@@ -1187,3 +1218,20 @@ Addressed PR 104 review feedback for `rlpr`:
 - made `WebInstruct-verified-val_Avg2` score generically instead of forcing choice-only routing
 - blocked training-split loading so `rlpr` stays evaluation-only in this repo
 - made RLPR parquet load failures raise instead of silently falling back to toy data
+
+## 2026-07-10 — BFCL simple-slice benchmark wiring added  #decision #repro
+
+Implemented a new `bfcl_simple` benchmark loader/facade:
+- BFCL loads only the official v4 single-turn JSONL question/answer files directly from the Gorilla repo raw URLs.
+- Reward support is now routed through `trinity.orchestration.reward.score_text` for `bfcl_simple`.
+
+Scoring is exact JSON function-call matching against the official ground-truth schema. Multi-turn/live BFCL
+categories remain out of scope until the loader preserves full dialogue context.
+
+## 2026-07-12 — BFCL review fixes  #decision #repro
+
+Addressed PR 102 review feedback for `bfcl_simple`:
+
+- pinned the Gorilla raw-source snapshot instead of reading from `main`
+- blocked `train` splits so the benchmark stays evaluation-only in this repo
+- kept the simplified single-turn scope explicit in the loader/docs

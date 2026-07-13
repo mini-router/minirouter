@@ -1,4 +1,4 @@
-"""LiveCodeBench benchmark facade.
+"""BFCL simple-slice benchmark facade.
 
 This module keeps the config-facing benchmark entrypoint in one place while the
 actual loading logic stays in ``trinity.orchestration.dataset``.
@@ -17,8 +17,13 @@ def load(
     seed: int = 0,
     allow_toy_fallback: bool = False,
 ):
-    """Load LiveCodeBench tasks for the requested split."""
-    return load_tasks(split, max_items=max_items, seed=seed)
+    """Load BFCL simple-slice tasks for the requested split."""
+    return load_tasks(
+        "bfcl_simple",
+        split,
+        max_items=max_items,
+        seed=seed,
+    )
 
 
 def load_tasks(
@@ -30,7 +35,7 @@ def load_tasks(
 ):
     """Alias for config/codepaths that expect a ``load_tasks`` symbol."""
     return _load_tasks(
-        "livecodebench",
+        "bfcl_simple",
         split,
         max_items=max_items,
         seed=seed,

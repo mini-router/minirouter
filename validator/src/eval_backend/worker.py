@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Iterator
 
-from sqlalchemy import select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.orm import Session
 
 from .core.config import Settings
@@ -15,7 +15,10 @@ from .db import Base, build_engine, build_session_factory, ensure_schema
 from .models import JobQueue, Submission, TrainRun
 from .services.eval_runner import evaluate_submission
 from .services.github import publish_submission_result
+from .services.github import set_commit_status
+from .services.review_control import get_review_control
 from .services.queue import enqueue_submission_job
+from .services.runtime_config import apply_runtime_defaults, get_runtime_config
 from .services.train_runner import run_train_job
 
 logger = logging.getLogger("eval_backend.worker")
@@ -39,18 +42,32 @@ def process_once(session_factory, settings: Settings) -> int:
     submission = None
     result = None
     try:
+        runtime_settings = apply_runtime_defaults(settings, get_runtime_config(session, settings))
+        review_control = get_review_control(session)
         logger.info("polling for queued jobs")
+        queued_stmt = select(JobQueue).where(JobQueue.status == "queued")
+        if not review_control.enabled:
+            github_pr_exists = exists(
+                select(1).where(
+                    Submission.id == JobQueue.submission_id,
+                    Submission.source == "github_pr",
+                )
+            )
+            queued_stmt = queued_stmt.where(or_(JobQueue.submission_id.is_(None), ~github_pr_exists))
         job = (
             session.execute(
-                select(JobQueue)
-                .where(JobQueue.status == "queued")
-                .order_by(JobQueue.priority.desc(), JobQueue.created_at.asc())
-                .with_for_update(skip_locked=True)
+                queued_stmt.order_by(
+                    JobQueue.priority.desc(),
+                    JobQueue.created_at.asc(),
+                    JobQueue.id.asc(),
+                ).with_for_update(skip_locked=True)
             )
             .scalars()
             .first()
         )
         if job is None:
+            if not review_control.enabled:
+                logger.info("review gate disabled; queued GitHub PR submissions are waiting")
             logger.info("no queued jobs found")
             return 0
         job.status = "running"
@@ -77,7 +94,7 @@ def process_once(session_factory, settings: Settings) -> int:
                 train.submission_id,
                 ", ".join(train.benchmark_names_json or []) or "unknown",
             )
-            train_result = run_train_job(session, train, settings)
+            train_result = run_train_job(session, train, runtime_settings)
             job.status = "completed" if train_result.train.status == "completed" else "failed"
             job.last_error = train_result.train.error
             job.heartbeat_at = train_result.train.finished_at
@@ -119,6 +136,21 @@ def process_once(session_factory, settings: Settings) -> int:
             logger.error("queued job %s references missing submission", job.id)
             return 1
         submission.status = "running"
+        if submission.source == "github_pr":
+            try:
+                import asyncio
+
+                asyncio.run(
+                    set_commit_status(
+                        runtime_settings,
+                        submission,
+                        state="pending",
+                        description="Evaluation running",
+                        target_url=f"{runtime_settings.public_site_url.rstrip('/')}/submission/{submission.id}",
+                    )
+                )
+            except Exception:
+                pass
         checkpoint_override = None
         if payload.get("checkpoint_path"):
             from pathlib import Path
@@ -134,10 +166,12 @@ def process_once(session_factory, settings: Settings) -> int:
         result = evaluate_submission(
             session,
             submission,
-            settings,
+            runtime_settings,
             checkpoint_path_override=checkpoint_override,
             train_id=int(payload["train_id"]) if payload.get("train_id") is not None else None,
             input_artifact_id=str(payload["input_artifact_id"]) if payload.get("input_artifact_id") else None,
+            force_remote_only=submission.source == "github_pr",
+            allow_local_fallback=False if submission.source == "github_pr" else None,
         )
         job.status = "completed" if result.run.status == "completed" else "failed"
         job.last_error = result.run.error
@@ -162,7 +196,7 @@ def process_once(session_factory, settings: Settings) -> int:
         try:
             import asyncio
 
-            asyncio.run(publish_submission_result(settings, submission, result))
+            asyncio.run(publish_submission_result(runtime_settings, submission, result))
         except Exception:
             pass
     return 1
