@@ -76,13 +76,13 @@ async def _score_policy(
                 f"score={score:.3f}",
                 flush=True,
             )
-            return traj
+            return score
 
-        trajs = await gather_in_batches(
+        scores = await gather_in_batches(
             [one(task, i) for i, task in enumerate(tasks, start=1)],
             batch_size=batch_size,
         )
-    return float(mean(R.score(t) for t in trajs))
+    return float(mean(scores))
 
 
 async def _score_submission_policy(
@@ -120,13 +120,13 @@ async def _score_submission_policy(
                 f"[submission] item {i}/{total} done {verdict} score={score:.3f}",
                 flush=True,
             )
-            return traj
+            return score
 
-        trajs = await gather_in_batches(
+        scores = await gather_in_batches(
             [one(task, i) for i, task in enumerate(tasks, start=1)],
             batch_size=batch_size,
         )
-    score = float(mean(R.score(t) for t in trajs)) if trajs else 0.0
+    score = float(mean(scores)) if scores else 0.0
     print(f"[submission] completed score={score:.4f}", flush=True)
     return score
 
