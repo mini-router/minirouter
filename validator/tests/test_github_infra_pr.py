@@ -123,7 +123,13 @@ def test_publish_submission_result_skips_pr_close_without_artifact(monkeypatch):
         github_module.publish_submission_result(
             settings,
             submission,
-            EvaluationResult(run=run, score=None, metrics={"missing_checkpoint": True}),
+            EvaluationResult(
+                run=run,
+                score=None,
+                metrics={"missing_checkpoint": True},
+                stdout="",
+                stderr="",
+            ),
         )
     )
 
