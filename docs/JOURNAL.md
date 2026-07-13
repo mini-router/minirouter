@@ -18,6 +18,21 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-13 — Worker dead-lettered jobs after uncaught eval errors  #mistake #decision #repro
+**Context:** issue #50 reported that the validator worker could block the queue when an uncaught
+evaluation error rolled back the in-flight transaction.
+**Expected:** failed jobs and submissions should move to a terminal `failed` state so later queue
+entries can be processed.
+**Actual:** `process_once()` still rolled back and re-raised on exception, leaving the claimed
+`JobQueue` row eligible for endless retries.
+**Root cause:** failure recovery only called `session.rollback()` without persisting dead-letter
+state in a fresh transaction.
+**Fix / decision:** mark the claimed `JobQueue` row and related submission `failed` after rollback,
+return from `process_once()` instead of re-raising, and log GitHub publish failures. Added
+`validator/tests/test_worker.py` against the JobQueue worker path.
+**Follow-up:** optionally persist a failed `EvaluationRun`/`TrainRun` row when the crash happens
+before the runner creates one.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.
