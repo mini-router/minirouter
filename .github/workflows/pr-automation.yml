@@ -410,6 +410,14 @@ jobs:
             core.setOutput('head_sha', pr.head.sha)
             core.setOutput('team_name', pr.user?.login || 'github-actions')
 
+      - name: Checkout validator scripts
+        if: steps.classify.outputs.should_queue == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          path: base
+          persist-credentials: false
+
       - name: Validate submission bundle
         if: steps.classify.outputs.should_queue == 'true'
         shell: bash
