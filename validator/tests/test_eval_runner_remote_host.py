@@ -58,6 +58,8 @@ def test_remote_attempt_uses_trinity_remote_host(tmp_path, monkeypatch):
     assert ssh_hosts[0] == "my-gpu-host"
     assert rc == 0
     assert isinstance(command, str)
+    assert 'cd "$HOME/trinity"' in command
+    assert "cd trinity &&" not in command
     assert stdout == ""
     assert stderr == ""
 

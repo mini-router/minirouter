@@ -411,6 +411,27 @@ def _remote_path(path: str | Path) -> str:
     return str(Path(path).expanduser())
 
 
+def _remote_repo_dir_expr(raw_dir: str) -> str:
+    """Return a shell-safe remote repo path expression.
+
+    Relative paths are anchored under $HOME on the remote host so the
+    evaluator does not depend on the SSH session's starting directory.
+    """
+    value = raw_dir.strip()
+    if not value:
+        return '"$HOME"'
+
+    path = Path(value)
+    if path.is_absolute():
+        return shlex.quote(str(path.expanduser()))
+
+    if value == "~":
+        return '"$HOME"'
+    if value.startswith("~/"):
+        return f'"$HOME/{value[2:]}"'
+    return f'"$HOME/{value}"'
+
+
 def _remote_workspace(settings: Settings, submission_id: str) -> Path:
     return Path(settings.trinity_remote_workspace_root).expanduser() / "submissions" / submission_id
 
@@ -461,7 +482,7 @@ def _build_remote_command(
     ledger_path: Path,
     workspace: Path,
 ) -> str:
-    repo_dir = Path(settings.trinity_remote_dir).expanduser()
+    repo_dir = _remote_repo_dir_expr(settings.trinity_remote_dir)
     formatted = _format_command(
         settings.remote_eval_command_template,
         repo_dir=repo_dir,
@@ -477,9 +498,9 @@ def _build_remote_command(
     return (
         f"mkdir -p {shlex.quote(str(ledger_path.parent))} && : > {shlex.quote(str(ledger_path))} && "
         f"export TRINITY_COST_LEDGER={shlex.quote(str(ledger_path))}; "
-        f"export TRINITY_REMOTE_DIR={shlex.quote(str(repo_dir))}; "
+        f"export TRINITY_REMOTE_DIR={repo_dir}; "
         f"export TRINITY_GPU_INDEX={shlex.quote(str(getattr(settings, 'trinity_gpu_index', 5)))}; "
-        f"cd {shlex.quote(str(repo_dir))} && "
+        f"cd {repo_dir} && "
         "source .venv/bin/activate && "
         "source scripts/remote_env.sh && "
         f"{formatted}"
