@@ -49,6 +49,7 @@ from ..services.eval_runner import evaluate_submission
 from ..services.github import create_pr_submission
 from ..services.github import set_commit_status
 from ..services.artifacts import persist_stored_artifact
+from ..services.queue import cancel_submission_jobs
 from ..services.queue import enqueue_submission_job
 from ..services.queue import enqueue_submission_pipeline_job
 from ..services.queue import enqueue_train_job
@@ -521,6 +522,7 @@ async def github_webhook(request: Request, settings: Settings = Depends(get_sett
         if repo_full_name and repo_full_name != settings.allowed_repo:
             raise HTTPException(status_code=403, detail="repository not allowed")
 
+        action = str(payload.get("action") or "").strip().lower()
         pull_request = payload.get("pull_request") or {}
         pr_number = pull_request.get("number")
         head_sha = (pull_request.get("head") or {}).get("sha")
@@ -533,28 +535,43 @@ async def github_webhook(request: Request, settings: Settings = Depends(get_sett
             head_sha=head_sha,
             team_name=team_name,
         )
-        submission.status = "queued"
-        submission.latest_score = None
-        submission.latest_eval_id = None
-        submission.best_eval_id = None
-        enqueue_submission_job(
-            session,
-            submission,
-            payload_json={
-                "submission_id": submission.id,
-                "benchmark_names": submission.benchmark_names_json,
-                "source": submission.source,
-            },
-        )
+        if action == "closed":
+            if submission.status not in {"completed", "failed"}:
+                submission.status = "closed"
+                submission.updated_at = _utcnow()
+            cancel_submission_jobs(session, submission.id, reason="pull request closed")
+        else:
+            submission.status = "queued"
+            submission.latest_score = None
+            submission.latest_eval_id = None
+            submission.best_eval_id = None
+            enqueue_submission_job(
+                session,
+                submission,
+                payload_json={
+                    "submission_id": submission.id,
+                    "benchmark_names": submission.benchmark_names_json,
+                    "source": submission.source,
+                },
+            )
         session.commit()
         try:
-            await set_commit_status(
-                settings,
-                submission,
-                state="pending",
-                description="Awaiting review start",
-                target_url=f"{settings.public_site_url.rstrip('/')}/submission/{submission.id}",
-            )
+            commit_state: str | None = "pending"
+            commit_description = "Awaiting review start"
+            if action == "closed":
+                if submission.status in {"completed", "failed"}:
+                    commit_state = None
+                else:
+                    commit_state = "failure"
+                    commit_description = "Pull request closed"
+            if commit_state is not None:
+                await set_commit_status(
+                    settings,
+                    submission,
+                    state=commit_state,
+                    description=commit_description,
+                    target_url=f"{settings.public_site_url.rstrip('/')}/submission/{submission.id}",
+                )
         except Exception:
             pass
         return SubmissionCreateResponse(submission=_submission_to_schema(submission), evaluation=None)
