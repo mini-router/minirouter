@@ -12,10 +12,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..core.config import Settings
-from ..models import EvaluationRun, Submission, TrainRun
+from ..models import EvaluationRun, JobQueue, Submission, TrainRun
 from ..schemas import (
     EvaluationOut,
     HealthResponse,
+    JobQueueOut,
+    JobQueueResponse,
     LeaderboardEntry,
     LeaderboardResponse,
     TrainCreateRequest,
@@ -205,6 +207,46 @@ def _train_to_schema(run: TrainRun) -> TrainOut:
         started_at=run.started_at,
         finished_at=run.finished_at,
         created_at=run.created_at,
+    )
+
+
+def _job_kind(job: JobQueue) -> str:
+    payload = job.payload_json or {}
+    if job.job_type == "train":
+        return "train"
+    if payload.get("train_id") is not None:
+        return "evaluation"
+    return "submission"
+
+
+def _job_to_schema(job: JobQueue) -> JobQueueOut:
+    payload = job.payload_json if isinstance(job.payload_json, dict) else {}
+    train_id = payload.get("train_id")
+    if isinstance(train_id, str) and train_id.isdigit():
+        train_id = int(train_id)
+    elif not isinstance(train_id, int):
+        train_id = None
+    return JobQueueOut(
+        id=job.id,
+        job_type=job.job_type,
+        kind=_job_kind(job),
+        job_id=job.job_id,
+        submission_id=job.submission_id,
+        train_id=train_id,
+        queue_name=job.queue_name,
+        status=job.status,
+        priority=job.priority,
+        dedupe_key=job.dedupe_key,
+        claimed_by=job.claimed_by,
+        claimed_at=job.claimed_at,
+        heartbeat_at=job.heartbeat_at,
+        attempts=job.attempts,
+        max_attempts=job.max_attempts,
+        next_run_at=job.next_run_at,
+        last_error=job.last_error,
+        payload=payload,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
     )
 
 
@@ -580,6 +622,31 @@ def leaderboard(request: Request, limit: int = 100) -> LeaderboardResponse:
                 )
             )
         return LeaderboardResponse(items=board)
+    finally:
+        session.close()
+
+
+@router.get("/api/jobs", response_model=JobQueueResponse)
+def list_jobs(
+    request: Request,
+    status: str | None = None,
+    job_type: str | None = None,
+    limit: int = 100,
+) -> JobQueueResponse:
+    session = get_session(request)
+    try:
+        stmt = select(JobQueue).order_by(JobQueue.created_at.desc(), JobQueue.id.desc())
+        if status:
+            status_values = [part.strip() for part in status.split(",") if part.strip()]
+            if status_values:
+                stmt = stmt.where(JobQueue.status.in_(status_values))
+        else:
+            stmt = stmt.where(JobQueue.status.in_(("queued", "running")))
+        if job_type:
+            stmt = stmt.where(JobQueue.job_type == job_type.strip())
+        stmt = stmt.limit(max(1, min(limit, 500)))
+        items = session.execute(stmt).scalars().all()
+        return JobQueueResponse(items=[_job_to_schema(job) for job in items])
     finally:
         session.close()
 
