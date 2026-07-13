@@ -200,37 +200,6 @@ jobs:
 
             core.info(`Registered submission for PR #${payload.pull_request.number}`)
 
-      - name: Package submission bundle
-        if: steps.classify.outputs.should_queue == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          tar -czf submission.tar.gz -C pr submissions/final_model
-
-      - name: Upload submission to backend
-        if: steps.classify.outputs.should_queue == 'true'
-        shell: bash
-        env:
-          BACKEND_BASE_URL: ${{ vars.BACKEND_BASE_URL }}
-          MINIROUTER_WEBHOOK_SECRET: ${{ secrets.MINIROUTER_WEBHOOK_SECRET }}
-        run: |
-          set -euo pipefail
-          backend_base="${BACKEND_BASE_URL:-https://minirouter.work.gd}"
-          : "${MINIROUTER_WEBHOOK_SECRET:?}"
-          response="$(
-            curl -fsS \
-              -H "X-MiniRouter-Webhook-Secret: ${MINIROUTER_WEBHOOK_SECRET}" \
-              -F "file=@submission.tar.gz;type=application/gzip" \
-              -F "repo_full_name=${{ steps.classify.outputs.repo_full_name }}" \
-              -F "pr_number=${{ steps.classify.outputs.pr_number }}" \
-              -F "head_sha=${{ steps.classify.outputs.head_sha }}" \
-              -F "team_name=${{ steps.classify.outputs.team_name }}" \
-              "${backend_base%/}/webhooks/github/submission"
-          )"
-          submission_id="$(
-            printf '%s' "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin)["submission"]["id"])'
-          )"
-          echo "submission_id=${submission_id}"
 
   start_submission:
     if: github.event_name == 'workflow_dispatch'
