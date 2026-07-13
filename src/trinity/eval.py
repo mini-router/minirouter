@@ -28,6 +28,7 @@ import yaml
 from .coordinator import params as P
 from .coordinator.policy import CoordinatorPolicy
 from .coordinator.runtime import resolve_device_dtype
+from .costing import default_cost_ledger_path, ledger_cost_report
 from .orchestration.async_utils import gather_in_batches
 from .llm.pool_factory import build_pool
 from .orchestration import reward as R
@@ -36,98 +37,6 @@ from .orchestration.session import run_trajectory
 from .types import ROLE_ORDER, Role
 
 _REPO = Path(__file__).resolve().parents[2]
-_COST_PRICES = {
-    "fireworks:accounts/fireworks/models/deepseek-v4-pro": (1.74, 3.48),
-    "fireworks:accounts/fireworks/models/glm-5p2": (1.40, 4.40),
-    "fireworks:accounts/fireworks/models/kimi-k2p6": (0.95, 4.00),
-    "openrouter:deepseek-v4-pro": (0.435, 0.87),
-    "openrouter:glm-5p2": (1.40, 4.40),
-    "openrouter:kimi-k2p6": (0.95, 4.00),
-    "openrouter:nvidia/nemotron-3-super-120b-a12b:free": (0.0, 0.0),
-    "openrouter:google/gemma-4-31b-it:free": (0.0, 0.0),
-    "openrouter:openai/gpt-oss-120b:free": (0.0, 0.0),
-    "openrouter:qwen/qwen3-coder:free": (0.0, 0.0),
-    "chutes:deepseek-ai/DeepSeek-V3.2-TEE": (1.00, 1.00),
-    "chutes:zai-org/GLM-5-TEE": (1.40, 4.40),
-    "chutes:moonshotai/Kimi-K2.5-TEE": (0.66, 3.50),
-    "chutes:MiniMaxAI/MiniMax-M2.5-TEE": (0.15, 1.20),
-    "chutes:google/gemma-4-31B-turbo-TEE": (0.12, 0.37),
-    "chutes:Qwen/Qwen3-32B-TEE": (0.10, 0.42),
-}
-
-
-def _cost_key(provider: str, model: str) -> str:
-    return f"{provider}:{model}"
-
-
-def _ledger_cost_report(ledger_path: Path) -> dict:
-    if not ledger_path.exists():
-        return {
-            "cost_usd": 0.0,
-            "cost_missing": True,
-            "cost_ledger": str(ledger_path),
-        }
-
-    per_model: dict[str, dict[str, float | int]] = {}
-    total = 0.0
-    prompt_tokens = 0
-    completion_tokens = 0
-    calls = 0
-    with ledger_path.open("r", encoding="utf-8") as handle:
-        for raw_line in handle:
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            provider = str(row.get("provider", "")).strip()
-            model = str(row.get("m", "")).strip()
-            pt = int(row.get("p", 0) or 0)
-            ct = int(row.get("c", 0) or 0)
-            pin, pout = _COST_PRICES.get(_cost_key(provider, model), (0.0, 0.0))
-            usd = pt / 1e6 * pin + ct / 1e6 * pout
-            total += usd
-            prompt_tokens += pt
-            completion_tokens += ct
-            calls += 1
-            bucket = per_model.setdefault(
-                _cost_key(provider, model),
-                {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0, "usd": 0.0},
-            )
-            bucket["prompt_tokens"] = int(bucket["prompt_tokens"]) + pt
-            bucket["completion_tokens"] = int(bucket["completion_tokens"]) + ct
-            bucket["calls"] = int(bucket["calls"]) + 1
-            bucket["usd"] = float(bucket["usd"]) + usd
-
-    return {
-        "cost_usd": round(total, 4),
-        "cost_missing": False,
-        "cost_ledger": str(ledger_path),
-        "cost_calls": calls,
-        "cost_prompt_tokens": prompt_tokens,
-        "cost_completion_tokens": completion_tokens,
-        "cost_per_model": {
-            key: {
-                "prompt_tokens": int(row["prompt_tokens"]),
-                "completion_tokens": int(row["completion_tokens"]),
-                "calls": int(row["calls"]),
-                "usd": round(float(row["usd"]), 4),
-            }
-            for key, row in sorted(per_model.items())
-        },
-    }
-
-
-def _default_cost_ledger_path(out_path: str | None) -> Path:
-    if os.environ.get("TRINITY_COST_LEDGER"):
-        return Path(os.environ["TRINITY_COST_LEDGER"]).expanduser()
-    if out_path:
-        return Path(out_path).expanduser().with_suffix(".cost_ledger.jsonl")
-    return Path.cwd() / "cost_ledger.jsonl"
-
-
 class RandomPolicy:
     """Random (agent, role) each turn — the R4 routing baseline (no GPU)."""
 
@@ -262,7 +171,7 @@ async def _score_single_model(
 
 
 async def evaluate(args) -> dict:
-    cost_ledger_path = _default_cost_ledger_path(args.out)
+    cost_ledger_path = default_cost_ledger_path(args.out)
     cost_ledger_path.parent.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("TRINITY_COST_LEDGER", str(cost_ledger_path))
 
@@ -308,7 +217,7 @@ async def evaluate(args) -> dict:
         )
         results = {"TRINITY": s_trinity}
         runtime_seconds = round(time.perf_counter() - t0, 2)
-        cost = _ledger_cost_report(cost_ledger_path)
+        cost = ledger_cost_report(cost_ledger_path)
         out = {
             "benchmark": args.benchmark,
             "results": results,
@@ -390,7 +299,7 @@ async def evaluate(args) -> dict:
         "best_single": best_single,
     }
     runtime_seconds = round(time.perf_counter() - t0, 2)
-    cost = _ledger_cost_report(cost_ledger_path)
+    cost = ledger_cost_report(cost_ledger_path)
     out = {
         "benchmark": args.benchmark,
         "results": results,

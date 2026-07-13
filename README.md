@@ -52,10 +52,10 @@ prefix rule is documented in `CONTRIBUTOIN.md`, and the submit-ready model bundl
 `submissions/final_model/` when a run is ready to evaluate or publish.
 
 The repository also includes a GitHub Actions PR automation workflow. It labels PRs by path,
-tags miner submission PRs, packages `submissions/final_model/`, uploads the bundle through the
-public `/submit` endpoint, waits for the worker to advance the submission status, comments back the
-result, and then merges the PR when the run completes.
-No separate GitHub bot is required for that flow.
+tags miner submission PRs, marks valid submissions as `awaiting_ci`, and leaves them pending until
+a maintainer starts the manual dispatch workflow. The backend worker then evaluates the bundle,
+comments back the result, and updates the PR commit status. No separate GitHub bot is required for
+that flow.
 
 The validator backend stores submissions and evaluation runs in Postgres. Set
 `DATABASE_URL` in the repo-root `secrets.env` before starting the API or worker.
@@ -231,14 +231,17 @@ The PR automation workflow lives in `.github/workflows/pr-automation.yml`.
 It:
 
 - adds labels such as `web`, `validator`, `train`, `eval`, `benchmark`, `docs`, `miner`, and `submission`
-- queues miner submission PRs in the validator backend
-- leaves evaluation and merge handling to the backend service
+- registers miner submission PRs in the validator backend as `awaiting_ci`
+- leaves the PR pending until a maintainer starts the manual dispatch workflow
+- queues the uploaded bundle in the validator backend, which then runs the worker and publishes the result
 
 Repository setup:
 
 - set `GITHUB_WEBHOOK_SECRET` in the validator `secrets.env`
 - set `MINIROUTER_WEBHOOK_SECRET` as a GitHub Actions secret with the same value
 - optionally set `BACKEND_BASE_URL` as a repository variable if the backend URL changes
-- the workflow posts submission archives to `POST /submit`
+- the PR-open path registers submission metadata with `POST /webhooks/github`
+- the manual dispatch path uploads `submissions/final_model/` to `POST /webhooks/github/submission`
+- start a submission from the GitHub Actions UI by running `PR automation` with a PR number
 - set `EVAL_PROVIDER=chutes` and `EVAL_MODELS_CONFIG=configs/models.chutes.yaml` for default
   validator evals using the Chutes pool

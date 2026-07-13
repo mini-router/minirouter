@@ -5,9 +5,10 @@ import logging
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Iterator
 
-from sqlalchemy import select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.orm import Session
 
 from .core.config import Settings
@@ -15,7 +16,11 @@ from .db import Base, build_engine, build_session_factory, ensure_schema
 from .models import JobQueue, Submission, TrainRun
 from .services.eval_runner import evaluate_submission
 from .services.github import publish_submission_result
+from .services.github import set_commit_status
+from .services.review_control import get_review_control
 from .services.queue import enqueue_submission_job
+from .services.source_fetch import fetch_github_pr_source_sync, find_submission_checkpoint
+from .services.runtime_config import apply_runtime_defaults, get_runtime_config
 from .services.train_runner import run_train_job
 
 logger = logging.getLogger("eval_backend.worker")
@@ -38,19 +43,35 @@ def process_once(session_factory, settings: Settings) -> int:
     session = session_factory()
     submission = None
     result = None
+    train = None
+    job = None
     try:
+        runtime_settings = apply_runtime_defaults(settings, get_runtime_config(session, settings))
+        review_control = get_review_control(session)
         logger.info("polling for queued jobs")
+        queued_stmt = select(JobQueue).where(JobQueue.status == "queued")
+        if not review_control.enabled:
+            github_pr_exists = exists(
+                select(1).where(
+                    Submission.id == JobQueue.submission_id,
+                    Submission.source == "github_pr",
+                )
+            )
+            queued_stmt = queued_stmt.where(or_(JobQueue.submission_id.is_(None), ~github_pr_exists))
         job = (
             session.execute(
-                select(JobQueue)
-                .where(JobQueue.status == "queued")
-                .order_by(JobQueue.priority.desc(), JobQueue.created_at.asc())
-                .with_for_update(skip_locked=True)
+                queued_stmt.order_by(
+                    JobQueue.priority.desc(),
+                    JobQueue.created_at.asc(),
+                    JobQueue.id.asc(),
+                ).with_for_update(skip_locked=True)
             )
             .scalars()
             .first()
         )
         if job is None:
+            if not review_control.enabled:
+                logger.info("review gate disabled; queued GitHub PR submissions are waiting")
             logger.info("no queued jobs found")
             return 0
         job.status = "running"
@@ -60,101 +81,177 @@ def process_once(session_factory, settings: Settings) -> int:
         job.heartbeat_at = now
         session.flush()
         payload = job.payload_json or {}
-        if job.job_type == "train":
-            train = session.get(TrainRun, int(job.job_id))
-            if train is None:
-                job.status = "failed"
-                job.last_error = f"train {job.job_id} not found"
-                session.flush()
-                session.commit()
-                logger.error("queued job %s references missing train", job.id)
-                return 1
-            submission = session.get(Submission, train.submission_id) if train.submission_id else None
-            logger.info(
-                "processing train job id=%s train id=%s submission id=%s benchmark=%s",
-                job.id,
-                train.id,
-                train.submission_id,
-                ", ".join(train.benchmark_names_json or []) or "unknown",
-            )
-            train_result = run_train_job(session, train, settings)
-            job.status = "completed" if train_result.train.status == "completed" else "failed"
-            job.last_error = train_result.train.error
-            job.heartbeat_at = train_result.train.finished_at
-            job.updated_at = train_result.train.finished_at or now
-            if train_result.train.status == "completed" and train_result.output_artifact is not None:
-                checkpoint_path = (
-                    (train_result.output_artifact.meta_json or {}).get("checkpoint_path")
-                    or train_result.output_artifact.storage_uri
-                )
-                if submission is not None:
-                    enqueue_submission_job(
-                        session,
+        job_id = job.id
+        submission_id = job.submission_id
+        train_id = None
+        try:
+            if job.job_type == "train":
+                train = session.get(TrainRun, int(job.job_id))
+                if train is None:
+                    raise ValueError(f"train {job.job_id} not found")
+                train_id = train.id
+                submission = session.get(Submission, train.submission_id) if train.submission_id else None
+                submission_id = submission.id if submission is not None else submission_id
+                source_root = None
+                if submission is not None and submission.source == "github_pr":
+                    source_root = fetch_github_pr_source_sync(
+                        runtime_settings,
                         submission,
-                        job_type="evaluation",
-                        payload_json={
-                            "submission_id": submission.id,
-                            "train_id": train.id,
-                            "input_artifact_id": train_result.output_artifact.id,
-                            "checkpoint_path": checkpoint_path,
-                            "benchmark_names": train.benchmark_names_json,
-                            "source": submission.source,
-                        },
+                        destination_root=runtime_settings.workspace_root / "github_sources" / submission.id,
                     )
+                logger.info(
+                    "processing train job id=%s train id=%s submission id=%s benchmark=%s",
+                    job.id,
+                    train.id,
+                    train.submission_id,
+                    ", ".join(train.benchmark_names_json or []) or "unknown",
+                )
+                train_result = run_train_job(
+                    session,
+                    train,
+                    runtime_settings,
+                    source_root_override=source_root,
+                )
+                job.status = "completed" if train_result.train.status == "completed" else "failed"
+                job.last_error = train_result.train.error
+                job.heartbeat_at = train_result.train.finished_at
+                job.updated_at = train_result.train.finished_at or now
+                if train_result.train.status == "completed" and train_result.output_artifact is not None:
+                    checkpoint_path = (
+                        (train_result.output_artifact.meta_json or {}).get("checkpoint_path")
+                        or train_result.output_artifact.storage_uri
+                    )
+                    if submission is not None:
+                        enqueue_submission_job(
+                            session,
+                            submission,
+                            job_type="evaluation",
+                            payload_json={
+                                "submission_id": submission.id,
+                                "train_id": train.id,
+                                "input_artifact_id": train_result.output_artifact.id,
+                                "checkpoint_path": checkpoint_path,
+                                "benchmark_names": train.benchmark_names_json,
+                                "source": submission.source,
+                            },
+                        )
+                session.commit()
+                logger.info(
+                    "finished train job id=%s train id=%s status=%s",
+                    job.id,
+                    train.id,
+                    train_result.train.status,
+                )
+                return 1
+
+            submission = session.get(Submission, job.submission_id) if job.submission_id else None
+            if submission is None:
+                raise ValueError(f"submission {job.submission_id} not found")
+            submission_id = submission.id
+            submission.status = "running"
+            if submission.source == "github_pr":
+                try:
+                    import asyncio
+
+                    asyncio.run(
+                        set_commit_status(
+                            runtime_settings,
+                            submission,
+                            state="pending",
+                            description="Evaluation running",
+                            target_url=f"{runtime_settings.public_site_url.rstrip('/')}/submission/{submission.id}",
+                        )
+                    )
+                except Exception:
+                    pass
+
+            source_root = None
+            if submission.source == "github_pr":
+                source_root = fetch_github_pr_source_sync(
+                    runtime_settings,
+                    submission,
+                    destination_root=runtime_settings.workspace_root / "github_sources" / submission.id,
+                )
+            checkpoint_override = None
+            if payload.get("checkpoint_path"):
+                checkpoint_override = Path(str(payload["checkpoint_path"]))
+            elif source_root is not None:
+                checkpoint_override = find_submission_checkpoint(source_root)
+            if submission.source == "github_pr" and checkpoint_override is None:
+                raise ValueError(
+                    f"submission {submission.id} does not have submissions/final_model/best_theta.npy"
+                )
+            logger.info(
+                "processing evaluation job id=%s submission id=%s source=%s benchmark=%s",
+                job.id,
+                submission.id,
+                submission.source,
+                submission.benchmark,
+            )
+            result = evaluate_submission(
+                session,
+                submission,
+                runtime_settings,
+                checkpoint_path_override=checkpoint_override,
+                train_id=int(payload["train_id"]) if payload.get("train_id") is not None else None,
+                input_artifact_id=str(payload["input_artifact_id"]) if payload.get("input_artifact_id") else None,
+                force_remote_only=runtime_settings.eval_execution_mode == "remote_gpu",
+                allow_local_fallback=False
+                if runtime_settings.eval_execution_mode == "remote_gpu"
+                else None,
+            )
+            job.status = "completed" if result.run.status == "completed" else "failed"
+            job.last_error = result.run.error
+            job.heartbeat_at = result.run.finished_at
+            job.updated_at = result.run.finished_at or now
             session.commit()
             logger.info(
-                "finished train job id=%s train id=%s status=%s",
+                "finished evaluation job id=%s submission id=%s status=%s score=%s",
                 job.id,
-                train.id,
-                train_result.train.status,
+                submission.id,
+                result.run.status,
+                result.score,
             )
-            return 1
-
-        submission = session.get(Submission, job.submission_id) if job.submission_id else None
-        if submission is None:
-            job.status = "failed"
-            job.last_error = f"submission {job.submission_id} not found"
-            session.flush()
+        except Exception as exc:
+            error_message = str(exc)
+            session.rollback()
+            job = session.get(JobQueue, job_id)
+            train = session.get(TrainRun, train_id) if train_id is not None else None
+            submission = session.get(Submission, submission_id) if submission_id is not None else None
+            if job is not None:
+                now = datetime.now(timezone.utc)
+                job.status = "failed"
+                job.last_error = error_message
+                job.heartbeat_at = now
+                job.updated_at = now
+            if train is not None:
+                train.status = "failed"
+                train.phase = "failed"
+                train.message = error_message
+                train.error = error_message
+                train.finished_at = datetime.now(timezone.utc)
+            if submission is not None:
+                submission.status = "failed"
+                submission.updated_at = datetime.now(timezone.utc)
+                submission.finished_at = datetime.now(timezone.utc)
             session.commit()
-            logger.error("queued job %s references missing submission", job.id)
-            return 1
-        submission.status = "running"
-        checkpoint_override = None
-        if payload.get("checkpoint_path"):
-            from pathlib import Path
+            logger.exception("worker failed while processing queued submission")
+            if submission is not None and submission.source == "github_pr":
+                try:
+                    import asyncio
 
-            checkpoint_override = Path(str(payload["checkpoint_path"]))
-        logger.info(
-            "processing evaluation job id=%s submission id=%s source=%s benchmark=%s",
-            job.id,
-            submission.id,
-            submission.source,
-            submission.benchmark,
-        )
-        result = evaluate_submission(
-            session,
-            submission,
-            settings,
-            checkpoint_path_override=checkpoint_override,
-            train_id=int(payload["train_id"]) if payload.get("train_id") is not None else None,
-            input_artifact_id=str(payload["input_artifact_id"]) if payload.get("input_artifact_id") else None,
-        )
-        job.status = "completed" if result.run.status == "completed" else "failed"
-        job.last_error = result.run.error
-        job.heartbeat_at = result.run.finished_at
-        job.updated_at = result.run.finished_at or now
-        session.commit()
-        logger.info(
-            "finished evaluation job id=%s submission id=%s status=%s score=%s",
-            job.id,
-            submission.id,
-            result.run.status,
-            result.score,
-        )
-    except Exception:
-        session.rollback()
-        logger.exception("worker failed while processing queued submission")
-        raise
+                    asyncio.run(
+                        set_commit_status(
+                            runtime_settings,
+                            submission,
+                            state="failure",
+                            description="Evaluation failed",
+                            target_url=f"{runtime_settings.public_site_url.rstrip('/')}/submission/{submission.id}",
+                        )
+                    )
+                except Exception:
+                    pass
+            return 1
     finally:
         session.close()
 
@@ -162,7 +259,7 @@ def process_once(session_factory, settings: Settings) -> int:
         try:
             import asyncio
 
-            asyncio.run(publish_submission_result(settings, submission, result))
+            asyncio.run(publish_submission_result(runtime_settings, submission, result))
         except Exception:
             pass
     return 1

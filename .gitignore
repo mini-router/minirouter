@@ -22,3 +22,4 @@ validator/build/
 validator/secrets.env
 validator/.env
 validator/.env.*
+test_logs/

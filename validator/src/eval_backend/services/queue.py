@@ -33,6 +33,9 @@ def enqueue_submission_job(
         "job_type": job_type,
         "benchmarks": list(submission.benchmark_names_json or []),
         "source": submission.source,
+        "repo_full_name": submission.repo_full_name,
+        "pr_number": submission.pr_number,
+        "head_sha": submission.head_sha,
     }
     if existing is not None:
         existing.job_id = submission.id
@@ -69,6 +72,31 @@ def enqueue_submission_job(
     session.add(queue)
     session.flush()
     return queue
+
+
+def cancel_submission_jobs(
+    session: Session,
+    submission_id: str,
+    *,
+    reason: str = "pull request closed",
+) -> list[JobQueue]:
+    jobs = session.execute(
+        select(JobQueue).where(
+            JobQueue.submission_id == submission_id,
+            JobQueue.status == "queued",
+        )
+    ).scalars().all()
+    now = _utcnow()
+    for job in jobs:
+        job.status = "cancelled"
+        job.claimed_by = None
+        job.claimed_at = None
+        job.heartbeat_at = None
+        job.last_error = reason
+        job.updated_at = now
+    if jobs:
+        session.flush()
+    return jobs
 
 
 def enqueue_train_job(
@@ -135,8 +163,10 @@ def enqueue_submission_pipeline_job(
     priority: int = 0,
     payload_json: dict[str, Any] | None = None,
 ) -> JobQueue | None:
+    if submission.source != "github_pr" and submission.submission_artifact_id is None:
+        return None
     if settings.pipeline_mode == PIPELINE_TRAIN_EVAL:
-        if submission.submission_artifact_id is None:
+        if submission.source != "github_pr" and submission.submission_artifact_id is None:
             return None
         train = TrainRun(
             submission_id=submission.id,
@@ -168,11 +198,12 @@ def enqueue_submission_pipeline_job(
                 "benchmarks": list(train.benchmark_names_json or []),
                 "source": submission.source,
                 "submission_artifact_id": submission.submission_artifact_id,
+                "repo_full_name": submission.repo_full_name,
+                "pr_number": submission.pr_number,
+                "head_sha": submission.head_sha,
             },
         )
 
-    if submission.submission_artifact_id is None:
-        return None
     return enqueue_submission_job(
         session,
         submission,

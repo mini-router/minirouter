@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+import re
 from typing import Iterable
 
 
@@ -51,6 +52,21 @@ def _normalize_pipeline_mode(raw: str) -> str:
     return DEFAULT_PIPELINE_MODE
 
 
+def _ensure_submission_only(template: str) -> str:
+    """Force submission-eval templates to stay in submission-only mode.
+
+    Stale local secrets have historically overwritten the default command
+    templates without ``--submission-only``. That caused the worker to run the
+    full benchmark harness and fail later on baseline rate limits even though
+    the submitted router itself had already finished.
+    """
+    normalized = template.strip()
+    if not normalized or "--submission-only" in normalized:
+        return normalized
+    pattern = re.compile(r"(python(?:\s+-u)?\s+-m\s+trinity\.eval)(\s+)", re.IGNORECASE)
+    return pattern.sub(r"\1 --submission-only\2", normalized, count=1)
+
+
 DEFAULT_DATABASE_URL = "postgresql+psycopg://minirouter:minirouter@127.0.0.1:5432/minirouter"
 DEFAULT_ARTIFACT_ROOT = Path("./data/artifacts")
 DEFAULT_WORKSPACE_ROOT = Path("./data/workspaces")
@@ -61,6 +77,7 @@ DEFAULT_GITHUB_ACCESS_TOKEN = ""
 DEFAULT_GITHUB_POST_COMMENT_ON_EVAL = True
 DEFAULT_GITHUB_AUTO_MERGE_SUBMISSIONS = False
 DEFAULT_GITHUB_MERGE_METHOD = "merge"
+DEFAULT_GITHUB_REVIEW_SCORE_THRESHOLD = 0.8
 DEFAULT_ALLOWED_REPO = "mini-router/minirouter"
 DEFAULT_MINER_REPO_URL = "https://github.com/mini-router/minirouter"
 DEFAULT_PUBLIC_SITE_URL = "https://minirouter.work.gd"
@@ -91,11 +108,14 @@ DEFAULT_EVAL_RESULT_POINTER = "results.TRINITY"
 DEFAULT_EVAL_MAX_ITEMS = 20
 DEFAULT_EVAL_BATCH_SIZE = 1
 DEFAULT_EVAL_BENCHMARK = "math500"
+DEFAULT_EVAL_EXECUTION_MODE = "remote_gpu"
 DEFAULT_GIT_AUTHOR_NAME = "Minirouter Evaluator"
 DEFAULT_GIT_AUTHOR_EMAIL = "eval-bot@example.com"
+DEFAULT_ADMIN_USERNAME = "minirouteryama"
+DEFAULT_ADMIN_PASSWORD = "minirouterstrongpass@333"
+DEFAULT_ADMIN_SESSION_TTL_HOURS = 168
 DEFAULT_TRINITY_SECRETS_FILE = "./secrets.env"
 DEFAULT_EVAL_TIMEOUT_SECONDS = 1800
-DEFAULT_EVAL_EXECUTION_MODE = "remote_gpu"
 DEFAULT_EVAL_ALLOW_LOCAL_FALLBACK = True
 DEFAULT_TRAIN_PROVIDER = DEFAULT_EVAL_PROVIDER
 DEFAULT_TRAIN_MODELS_CONFIG = DEFAULT_EVAL_MODELS_CONFIG
@@ -121,6 +141,7 @@ class Settings:
     github_post_comment_on_eval: bool = DEFAULT_GITHUB_POST_COMMENT_ON_EVAL
     github_auto_merge_submissions: bool = DEFAULT_GITHUB_AUTO_MERGE_SUBMISSIONS
     github_merge_method: str = DEFAULT_GITHUB_MERGE_METHOD
+    github_review_score_threshold: float = DEFAULT_GITHUB_REVIEW_SCORE_THRESHOLD
     allowed_repo: str = DEFAULT_ALLOWED_REPO
     miner_repo_url: str = DEFAULT_MINER_REPO_URL
     public_site_url: str = DEFAULT_PUBLIC_SITE_URL
@@ -140,6 +161,9 @@ class Settings:
     eval_benchmark: str = DEFAULT_EVAL_BENCHMARK
     git_author_name: str = DEFAULT_GIT_AUTHOR_NAME
     git_author_email: str = DEFAULT_GIT_AUTHOR_EMAIL
+    admin_username: str = DEFAULT_ADMIN_USERNAME
+    admin_password: str = DEFAULT_ADMIN_PASSWORD
+    admin_session_ttl_hours: int = DEFAULT_ADMIN_SESSION_TTL_HOURS
     trinity_secrets_file: str = DEFAULT_TRINITY_SECRETS_FILE
     eval_timeout_seconds: int = DEFAULT_EVAL_TIMEOUT_SECONDS
     eval_execution_mode: str = DEFAULT_EVAL_EXECUTION_MODE
@@ -176,7 +200,7 @@ class Settings:
             if origin.strip()
         ]
 
-        return cls(
+        settings = cls(
             database_url=get("DATABASE_URL", DEFAULT_DATABASE_URL),
             artifact_root=_resolve_repo_path(root, get("ARTIFACT_ROOT", str(DEFAULT_ARTIFACT_ROOT))),
             workspace_root=_resolve_repo_path(root, get("WORKSPACE_ROOT", str(DEFAULT_WORKSPACE_ROOT))),
@@ -188,6 +212,9 @@ class Settings:
             github_auto_merge_submissions=get("GITHUB_AUTO_MERGE_SUBMISSIONS", "false").lower()
             in {"1", "true", "yes", "on"},
             github_merge_method=get("GITHUB_MERGE_METHOD", DEFAULT_GITHUB_MERGE_METHOD),
+            github_review_score_threshold=float(
+                get("GITHUB_REVIEW_SCORE_THRESHOLD", str(DEFAULT_GITHUB_REVIEW_SCORE_THRESHOLD))
+            ),
             allowed_repo=get("ALLOWED_REPO", DEFAULT_ALLOWED_REPO),
             miner_repo_url=get("MINER_REPO_URL", DEFAULT_MINER_REPO_URL),
             public_site_url=get("PUBLIC_SITE_URL", DEFAULT_PUBLIC_SITE_URL),
@@ -215,6 +242,11 @@ class Settings:
             eval_benchmark=get("EVAL_BENCHMARK", DEFAULT_EVAL_BENCHMARK),
             git_author_name=get("GIT_AUTHOR_NAME", DEFAULT_GIT_AUTHOR_NAME),
             git_author_email=get("GIT_AUTHOR_EMAIL", DEFAULT_GIT_AUTHOR_EMAIL),
+            admin_username=get("ADMIN_USERNAME", DEFAULT_ADMIN_USERNAME),
+            admin_password=get("ADMIN_PASSWORD", DEFAULT_ADMIN_PASSWORD),
+            admin_session_ttl_hours=int(
+                get("ADMIN_SESSION_TTL_HOURS", str(DEFAULT_ADMIN_SESSION_TTL_HOURS))
+            ),
             trinity_secrets_file=get("TRINITY_SECRETS_FILE", DEFAULT_TRINITY_SECRETS_FILE),
             eval_timeout_seconds=int(get("EVAL_TIMEOUT_SECONDS", str(DEFAULT_EVAL_TIMEOUT_SECONDS))),
             eval_execution_mode=get("EVAL_EXECUTION_MODE", DEFAULT_EVAL_EXECUTION_MODE),
@@ -235,6 +267,9 @@ class Settings:
             sync_eval_on_submit=get("SYNC_EVAL_ON_SUBMIT", "false").lower()
             in {"1", "true", "yes", "on"},
         )
+        settings.remote_eval_command_template = _ensure_submission_only(settings.remote_eval_command_template)
+        settings.local_eval_command_template = _ensure_submission_only(settings.local_eval_command_template)
+        return settings
 
     @property
     def trinity_gpu_host(self) -> str:

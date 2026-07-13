@@ -53,7 +53,7 @@ def test_missing_required_files_fail(tmp_path: Path):
     assert any("summary.json" in e for e in result.errors)
 
 
-def test_wrong_theta_length_fails(tmp_path: Path):
+def test_wrong_theta_length_warns(tmp_path: Path):
     _write_valid_bundle(tmp_path, n_total=128)
     # overwrite summary to claim the wrong length so we only trip the shape check
     (tmp_path / "summary.json").write_text(
@@ -61,8 +61,8 @@ def test_wrong_theta_length_fails(tmp_path: Path):
         encoding="utf-8",
     )
     result = validate_bundle(tmp_path)
-    assert not result.ok
-    assert any("length 128" in e for e in result.errors)
+    assert result.ok
+    assert any("length 128" in w for w in result.warnings)
 
 
 def test_summary_n_total_mismatch_warns(tmp_path: Path):

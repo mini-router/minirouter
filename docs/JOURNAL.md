@@ -286,6 +286,19 @@ made it fail-safe — a missing/empty choice (or missing `message`) yields an em
 (`text=""`, `finish_reason="error"`) while still accounting `usage`, mirroring the null-`content`
 handling. Added `tests/test_pool_parse.py` (7 cases). Scoped to the parsing path only (not the imports)
 so it stays independent of the separate `import sys` --selftest fix (#25).
+**Follow-up:** none — self-contained client-robustness fix.
+## 2026-07-08 — Remote eval used nonexistent settings.trinity_gpu_host  #mistake #fix
+**Context:** issue #46 reported that validator remote GPU evaluation failed before SSH with
+`AttributeError: 'Settings' object has no attribute 'trinity_gpu_host'`.
+**Expected:** `_remote_attempt()` should read the configured remote host from `Settings.trinity_remote_host`
+(`TRINITY_GPU_HOST` env).
+**Actual:** `eval_runner.py` referenced `settings.trinity_gpu_host`, which is not defined on `Settings`.
+**Root cause:** field rename/typo — config exposes `trinity_remote_host` but the runner still used the old name.
+**Fix / decision:** replaced both `trinity_gpu_host` references in `eval_runner.py` with
+`trinity_remote_host`; added `validator/tests/test_eval_runner_remote_host.py` to assert SSH host resolution
+uses the real Settings field.
+**Follow-up:** none.
+
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
 fell back to local CPU and still reported completion.
