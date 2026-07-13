@@ -47,7 +47,14 @@ def _run_name(settings: Settings, train: TrainRun) -> str:
     return f"{settings.train_run_name_prefix}-{train.id}"
 
 
-def _submission_source_root(settings: Settings, train: TrainRun) -> Path | None:
+def _submission_source_root(
+    settings: Settings,
+    train: TrainRun,
+    *,
+    source_root_override: Path | None = None,
+) -> Path | None:
+    if source_root_override is not None:
+        return source_root_override.expanduser().resolve()
     if train.submission_id is None:
         return None
     submission = train.submission
@@ -69,8 +76,14 @@ def _train_run_dir(settings: Settings, train: TrainRun, repo_dir: Path) -> Path:
     return repo_dir / "experiments" / benchmark / _run_name(settings, train)
 
 
-def _build_train_command(settings: Settings, train: TrainRun, *, workspace: Path) -> str:
-    repo_dir = _submission_source_root(settings, train) or Path(settings.local_repo_dir).expanduser().resolve()
+def _build_train_command(
+    settings: Settings,
+    train: TrainRun,
+    *,
+    workspace: Path,
+    source_root_override: Path | None = None,
+) -> str:
+    repo_dir = _submission_source_root(settings, train, source_root_override=source_root_override) or Path(settings.local_repo_dir).expanduser().resolve()
     venv_dir = Path(settings.local_repo_dir).expanduser().resolve()
     benchmark = train.benchmark_names_json[0] if train.benchmark_names_json else settings.train_benchmark
     warmstart_theta = ""
@@ -198,11 +211,17 @@ class TrainResult:
     stderr: str
 
 
-def run_train_job(session: Session, train: TrainRun, settings: Settings) -> TrainResult:
+def run_train_job(
+    session: Session,
+    train: TrainRun,
+    settings: Settings,
+    *,
+    source_root_override: Path | None = None,
+) -> TrainResult:
     workspace = _train_workspace(settings, train.id)
     workspace.mkdir(parents=True, exist_ok=True)
     cost_ledger_path = workspace / "cost_ledger.jsonl"
-    repo_dir = _submission_source_root(settings, train) or Path(settings.local_repo_dir).expanduser().resolve()
+    repo_dir = _submission_source_root(settings, train, source_root_override=source_root_override) or Path(settings.local_repo_dir).expanduser().resolve()
     train.started_at = _utcnow()
     train.status = "running"
     train.phase = "training"
@@ -225,7 +244,12 @@ def run_train_job(session: Session, train: TrainRun, settings: Settings) -> Trai
     env["TRAIN_POPSIZE"] = str(settings.train_popsize)
     env["TRAIN_M_CMA"] = str(settings.train_m_cma)
 
-    command = _build_train_command(settings, train, workspace=workspace)
+    command = _build_train_command(
+        settings,
+        train,
+        workspace=workspace,
+        source_root_override=source_root_override,
+    )
     rc, stdout, stderr = _run_bash_stream(
         command,
         cwd=repo_dir,
