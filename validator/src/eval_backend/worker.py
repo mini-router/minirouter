@@ -195,8 +195,10 @@ def process_once(session_factory, settings: Settings) -> int:
                 checkpoint_path_override=checkpoint_override,
                 train_id=int(payload["train_id"]) if payload.get("train_id") is not None else None,
                 input_artifact_id=str(payload["input_artifact_id"]) if payload.get("input_artifact_id") else None,
-                force_remote_only=submission.source == "github_pr",
-                allow_local_fallback=False if submission.source == "github_pr" else None,
+                force_remote_only=runtime_settings.eval_execution_mode == "remote_gpu",
+                allow_local_fallback=False
+                if runtime_settings.eval_execution_mode == "remote_gpu"
+                else None,
             )
             job.status = "completed" if result.run.status == "completed" else "failed"
             job.last_error = result.run.error
