@@ -37,17 +37,16 @@ def _session_factory(validator_engine):
 
 
 def test_process_once_marks_job_and_submission_failed_on_eval_exception(
-    validator_engine, validator_session, tmp_path, monkeypatch
+    validator_engine, tmp_path, monkeypatch
 ):
-    session = validator_session
-    submission = _submission("stuck-sub")
-    session.add(submission)
-    session.flush()
-    job = enqueue_submission_job(session, submission, job_type="evaluation")
-    session.flush()
-    session.commit()
-
     session_factory = _session_factory(validator_engine)
+    with session_factory() as session:
+        submission = _submission("stuck-sub")
+        session.add(submission)
+        session.flush()
+        job = enqueue_submission_job(session, submission, job_type="evaluation")
+        session.commit()
+        job_id = job.id
 
     def _boom(*args, **kwargs):
         raise RuntimeError("eval exploded")
@@ -59,7 +58,7 @@ def test_process_once_marks_job_and_submission_failed_on_eval_exception(
     assert processed == 1
     with session_factory() as verify_session:
         failed_submission = verify_session.get(Submission, "stuck-sub")
-        failed_job = verify_session.get(JobQueue, job.id)
+        failed_job = verify_session.get(JobQueue, job_id)
         assert failed_submission is not None
         assert failed_submission.status == "failed"
         assert failed_job is not None
@@ -67,18 +66,15 @@ def test_process_once_marks_job_and_submission_failed_on_eval_exception(
         assert "eval exploded" in (failed_job.last_error or "")
 
 
-def test_process_once_does_not_retry_failed_job(
-    validator_engine, validator_session, tmp_path, monkeypatch
-):
-    session = validator_session
-    submission = _submission("bad-sub")
-    session.add(submission)
-    session.flush()
-    enqueue_submission_job(session, submission, job_type="evaluation")
-    session.flush()
-    session.commit()
-
+def test_process_once_does_not_retry_failed_job(validator_engine, tmp_path, monkeypatch):
     session_factory = _session_factory(validator_engine)
+    with session_factory() as session:
+        submission = _submission("bad-sub")
+        session.add(submission)
+        session.flush()
+        enqueue_submission_job(session, submission, job_type="evaluation")
+        session.commit()
+
     calls = {"count": 0}
 
     def _fail_once(*args, **kwargs):
