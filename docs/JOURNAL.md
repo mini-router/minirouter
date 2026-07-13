@@ -18,6 +18,28 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-13 — CI red on main: stale test after size-check went warning-only (#160)  #mistake #gotcha
+**Context:** all open PRs showed a red `test-router` job; the CI failure log pointed at
+`test_wrong_theta_length_fails`, a test none of my diffs touch.
+**Expected:** a green suite on `main`.
+**Actual:** `assert not result.ok` failed — `validate_bundle` now returns `ok=True` with a
+warning for a wrong-length θ, and the test still expected a hard error. Reproduced only after
+syncing to the *latest* upstream `main` (CI runs each PR merged with the current base, which had
+advanced past the base my branches were cut from — that is why it "passed then failed").
+**Root cause:** #150 ("make submission size check warning-only", `f56e7af`) deliberately
+downgraded the θ-length mismatch from `add_error` to `add_warning` and made the bundle's own
+`summary.json` `n_total` the expected length — but did not update
+`test_wrong_theta_length_fails`, which still asserted the old error behaviour. A behaviour change
+that ships without updating its test reddens CI for every PR in the repo.
+**Fix / decision:** aligned the test with the intended behaviour — gave it a real mismatch
+(summary `n_total=256` vs a 128-long θ) and asserted the mismatch is a **warning** while the
+bundle still validates (`result.ok`). Renamed to `test_wrong_theta_length_warns`. Did NOT revert
+the code: #150's warning-only behaviour is intentional (layout can legitimately change).
+**Follow-up:** rebasing my other open PRs onto a `main` that carries this makes their `test-router`
+job green; the failure was never in their diffs.
+
+---
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.

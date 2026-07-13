@@ -53,16 +53,22 @@ def test_missing_required_files_fail(tmp_path: Path):
     assert any("summary.json" in e for e in result.errors)
 
 
-def test_wrong_theta_length_fails(tmp_path: Path):
+def test_wrong_theta_length_warns(tmp_path: Path):
+    # A θ length that differs from the expected layout is reported as a *warning*,
+    # not a hard error, so a newer valid layout is not blocked (PR #150). The
+    # summary declares n_total=256 while the θ is 128 long, so the size check has
+    # a genuine mismatch to flag.
     _write_valid_bundle(tmp_path, n_total=128)
-    # overwrite summary to claim the wrong length so we only trip the shape check
     (tmp_path / "summary.json").write_text(
-        json.dumps({"benchmark": "math500", "n_total": 128, "best_fitness": 0.1}),
+        json.dumps(
+            {"benchmark": "math500", "pool": ["a", "b", "c"], "n_total": 256, "best_fitness": 0.1}
+        ),
         encoding="utf-8",
     )
     result = validate_bundle(tmp_path)
-    assert not result.ok
-    assert any("length 128" in e for e in result.errors)
+    assert result.ok
+    assert not result.errors
+    assert any("length 128" in w for w in result.warnings)
 
 
 def test_summary_n_total_mismatch_warns(tmp_path: Path):
