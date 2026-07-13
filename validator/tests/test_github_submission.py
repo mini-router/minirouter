@@ -11,6 +11,7 @@ from eval_backend.api.routes import router
 from eval_backend.models import JobQueue, Submission
 from eval_backend.core.config import Settings
 from eval_backend.services.github import create_pr_submission
+from eval_backend.services.github import should_promote_submission
 from eval_backend.services.runtime_config import seed_runtime_config
 
 
@@ -112,3 +113,10 @@ def test_github_webhook_enqueues_submission_job(validator_engine) -> None:
     assert submission.status == "queued"
     assert job.status == "queued"
     assert job.job_type == "evaluation"
+
+
+def test_should_promote_submission_requires_threshold_and_king_score() -> None:
+    assert should_promote_submission(0.81, 0.8, 0.8) is True
+    assert should_promote_submission(0.8, 0.8, 0.8) is False
+    assert should_promote_submission(0.95, 0.8, 0.96) is False
+    assert should_promote_submission(None, 0.8, 0.8) is False

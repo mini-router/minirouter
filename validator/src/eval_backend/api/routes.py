@@ -330,6 +330,7 @@ def _runtime_config_to_schema(session: Session, settings: Settings) -> AdminRunt
         eval_provider=runtime.eval_provider,
         eval_models_config=runtime.eval_models_config,
         eval_execution_mode=runtime.eval_execution_mode,
+        king_score=runtime.king_score,
         updated_at=row.updated_at if row is not None else None,
     )
 

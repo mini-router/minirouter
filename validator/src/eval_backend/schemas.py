@@ -199,6 +199,7 @@ class AdminRuntimeConfigOut(BaseModel):
     eval_provider: str
     eval_models_config: str
     eval_execution_mode: str
+    king_score: float
     updated_at: datetime | None = None
 
 
