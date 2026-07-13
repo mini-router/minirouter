@@ -48,7 +48,7 @@ rebuilt from scratch with an open model pool and the miner-facing competition to
 ## Miner workflow
 
 Miners should work in their own branch, keep changes scoped, and open PRs for review. The branch
-prefix rule is documented in `CONTRIBUTOIN.md`, and the submit-ready model bundle should stay in
+prefix rule is documented in `CONTRIBUTING.md`, and the submit-ready model bundle should stay in
 `submissions/final_model/` when a run is ready to evaluate or publish.
 
 The repository also includes a GitHub Actions PR automation workflow. It labels PRs by path,
