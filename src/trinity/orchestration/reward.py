@@ -481,10 +481,16 @@ def _check_rlpr_webinstruct(candidate: str, reference: object) -> bool:
     if gold_letter is not None and cand_letter is not None:
         return cand_letter == gold_letter
 
-    if math_equal(cand, gold):
+    # Extract the math answer before comparing, mirroring _check_math. WebInstruct
+    # math items are told (format_hint) to give a \boxed{} final answer, so the raw
+    # candidate prose (e.g. "the area is \boxed{15}") never equals the bare gold
+    # value — normalize_math_answer does not strip \boxed or pull an answer out of text.
+    cand_math = extract_boxed(cand) or extract_last_number(cand) or cand
+    gold_math = extract_boxed(gold) or gold
+    if math_equal(cand_math, gold_math):
         return True
 
-    return normalize_math_answer(cand) == normalize_math_answer(gold)
+    return normalize_math_answer(cand_math) == normalize_math_answer(gold_math)
 
 
 # ---------------------------------------------------------------------------
