@@ -37,7 +37,10 @@ def test_benchmarks_registered():
 # --------------------------------------------------------------------------- #
 # Toy fallbacks load offline and deterministically
 # --------------------------------------------------------------------------- #
-def test_toy_fallbacks_load_offline():
+def test_toy_fallbacks_load_offline(monkeypatch):
+    # Force the offline path (CI has `datasets` + network and would otherwise
+    # load the real datasets) so the toy fallback is what is exercised here.
+    monkeypatch.setattr(D, "_try_load_hf", lambda *a, **k: None)
     for b in ("gsm8k", "humaneval", "bbh"):
         tasks = D.load_tasks(b, "test", max_items=None, seed=0)
         assert tasks and all(t.benchmark == b for t in tasks)
@@ -89,7 +92,10 @@ def test_humaneval_hf_row_shapes_assert_spec_and_grades(monkeypatch):
 
 
 def test_humaneval_toy_grades():
-    spec = D.load_tasks("humaneval", "test", max_items=None, seed=0)[0].answer
+    # Grade against the toy spec directly so the test is deterministic regardless
+    # of whether `datasets` + network are available (CI has both and would load
+    # the real HumanEval set, whose first task is not this `add` toy).
+    spec = D._toy_tasks("humaneval")[0].answer
     assert R.score_text("humaneval", _fence("def add(a, b):\n    return a + b\n"), spec) == 1.0
     assert R.score_text("humaneval", _fence("def add(a, b):\n    return 0\n"), spec) == 0.0
 
