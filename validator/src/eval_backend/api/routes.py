@@ -399,6 +399,32 @@ def _verify_shared_secret(provided: str | None, secret: str) -> None:
         raise HTTPException(status_code=401, detail="invalid webhook secret")
 
 
+def _ephemeral_webhook_submission(
+    *,
+    runtime_settings: Settings,
+    repo_full_name: str | None,
+    pr_number: int | None,
+    head_sha: str | None,
+    team_name: str | None,
+) -> Submission:
+    now = _utcnow()
+    submission = Submission(
+        id=str(uuid4()),
+        source="github_pr",
+        miner_id=team_name,
+        repo_full_name=repo_full_name,
+        pr_number=pr_number,
+        head_sha=head_sha,
+        benchmark_names_json=[runtime_settings.eval_benchmark] if runtime_settings.eval_benchmark else [],
+        status="ignored",
+        created_at=now,
+        updated_at=now,
+    )
+    submission.evaluations = []
+    submission.trains = []
+    return submission
+
+
 @router.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse()
@@ -556,6 +582,16 @@ async def github_webhook(request: Request, settings: Settings = Depends(get_sett
         head_sha = (pull_request.get("head") or {}).get("sha")
         team_name = payload.get("sender", {}).get("login")
         is_submission = _payload_has_label(payload, "submission")
+        if not is_submission:
+            submission = _ephemeral_webhook_submission(
+                runtime_settings=runtime_settings,
+                repo_full_name=repo_full_name,
+                pr_number=pr_number,
+                head_sha=head_sha,
+                team_name=team_name,
+            )
+            return SubmissionCreateResponse(submission=_submission_to_schema(submission), evaluation=None)
+
         submission = create_pr_submission(
             session,
             runtime_settings,

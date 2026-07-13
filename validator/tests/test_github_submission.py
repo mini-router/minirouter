@@ -122,7 +122,7 @@ def test_should_promote_submission_requires_threshold_and_king_score() -> None:
     assert should_promote_submission(None, 0.8, 0.8) is False
 
 
-def test_github_webhook_skips_non_submission_pr(validator_engine) -> None:
+def test_github_webhook_ignores_non_submission_pr(validator_engine) -> None:
     settings = Settings(
         github_webhook_secret="super-secret",
         allowed_repo="mini-router/minirouter",
@@ -160,11 +160,11 @@ def test_github_webhook_skips_non_submission_pr(validator_engine) -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["submission"]["status"] == "awaiting_ci"
+    assert payload["submission"]["status"] == "ignored"
 
     with Session() as session:
-        submission = session.query(Submission).filter_by(pr_number=6).one()
-        job = session.query(JobQueue).filter_by(submission_id=submission.id).first()
+        submission = session.query(Submission).filter_by(pr_number=6).first()
+        job = session.query(JobQueue).filter_by(pr_number=6).first()
 
-    assert submission.status == "awaiting_ci"
+    assert submission is None
     assert job is None
