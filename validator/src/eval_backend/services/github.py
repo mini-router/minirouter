@@ -390,7 +390,7 @@ async def publish_submission_result(
     except Exception:
         pass
 
-    if submission.source == "github_pr":
+    if submission.source == "github_pr" and submission.submission_artifact_id is not None:
         try:
             if should_merge:
                 await merge_pull_request(settings, submission)

@@ -18,6 +18,19 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-13 — Infra PRs were auto-closed after missing-checkpoint eval  #mistake #decision #repro
+**Context:** bugfix PRs #135 and #137 passed GitHub Actions CI but were closed within seconds by the
+production validator.
+**Expected:** contributor fix PRs without `submissions/final_model/` should stay open for maintainer
+review, like merged infra PR #119 (`MiniRouter / submission` stayed pending).
+**Actual:** `/webhooks/github` queued every PR for evaluation after #136, the worker failed with
+`missing_checkpoint`, and `publish_submission_result()` always called `close_pull_request()`.
+**Root cause:** registration treated metadata-only PRs like miner submissions; PR close/merge automation
+did not require `submission_artifact_id`.
+**Fix / decision:** only enqueue evaluation when a checkpoint artifact exists; only auto-close/merge PRs
+that uploaded a submission bundle. Added `validator/tests/test_github_infra_pr.py`.
+**Follow-up:** reopen/resubmit #50 and #33 after this lands so they are not auto-closed again.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.
