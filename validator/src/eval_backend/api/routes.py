@@ -50,7 +50,6 @@ from ..services.github import create_pr_submission
 from ..services.github import set_commit_status
 from ..services.artifacts import persist_stored_artifact
 from ..services.queue import cancel_submission_jobs
-from ..services.queue import enqueue_submission_job
 from ..services.queue import enqueue_submission_pipeline_job
 from ..services.queue import enqueue_train_job
 from ..services.storage import store_upload
@@ -542,23 +541,12 @@ async def github_webhook(request: Request, settings: Settings = Depends(get_sett
                 submission.updated_at = _utcnow()
             cancel_submission_jobs(session, submission.id, reason="pull request closed")
         else:
-            submission.status = "queued"
-            submission.latest_score = None
-            submission.latest_eval_id = None
-            submission.best_eval_id = None
-            enqueue_submission_job(
-                session,
-                submission,
-                payload_json={
-                    "submission_id": submission.id,
-                    "benchmark_names": submission.benchmark_names_json,
-                    "source": submission.source,
-                },
-            )
+            submission.status = "awaiting_ci"
+            submission.updated_at = _utcnow()
         session.commit()
         try:
             commit_state: str | None = "pending"
-            commit_description = "Awaiting review start"
+            commit_description = "Awaiting submission upload"
             if action == "closed":
                 if submission.status in {"completed", "failed"}:
                     commit_state = None
