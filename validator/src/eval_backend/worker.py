@@ -24,6 +24,10 @@ from .services.train_runner import run_train_job
 logger = logging.getLogger("eval_backend.worker")
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 @contextmanager
 def session_scope(session_factory) -> Iterator[Session]:
     session = session_factory()
@@ -37,10 +41,47 @@ def session_scope(session_factory) -> Iterator[Session]:
         session.close()
 
 
+def _mark_job_failed(session_factory, job_id: str, *, error: str) -> None:
+    session = session_factory()
+    try:
+        job = session.get(JobQueue, job_id)
+        if job is None or job.status not in {"queued", "running"}:
+            return
+        now = _utcnow()
+        job.status = "failed"
+        job.last_error = error
+        job.updated_at = now
+        job.heartbeat_at = now
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("failed to mark job %s as failed after worker error", job_id)
+    finally:
+        session.close()
+
+
+def _mark_submission_failed(session_factory, submission_id: str) -> None:
+    session = session_factory()
+    try:
+        submission = session.get(Submission, submission_id)
+        if submission is None or submission.status not in {"queued", "running"}:
+            return
+        submission.status = "failed"
+        submission.updated_at = _utcnow()
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("failed to mark submission %s as failed after worker error", submission_id)
+    finally:
+        session.close()
+
+
 def process_once(session_factory, settings: Settings) -> int:
     session = session_factory()
-    submission = None
+    job: JobQueue | None = None
+    submission: Submission | None = None
     result = None
+    runtime_settings = settings
     try:
         runtime_settings = apply_runtime_defaults(settings, get_runtime_config(session, settings))
         review_control = get_review_control(session)
@@ -185,10 +226,17 @@ def process_once(session_factory, settings: Settings) -> int:
             result.run.status,
             result.score,
         )
-    except Exception:
+    except Exception as exc:
         session.rollback()
-        logger.exception("worker failed while processing queued submission")
-        raise
+        logger.exception(
+            "worker failed while processing queued job %s",
+            job.id if job is not None else "unknown",
+        )
+        if job is not None:
+            _mark_job_failed(session_factory, job.id, error=str(exc))
+        if submission is not None:
+            _mark_submission_failed(session_factory, submission.id)
+        return 1
     finally:
         session.close()
 
@@ -198,7 +246,10 @@ def process_once(session_factory, settings: Settings) -> int:
 
             asyncio.run(publish_submission_result(runtime_settings, submission, result))
         except Exception:
-            pass
+            logger.exception(
+                "failed to publish github result for submission %s",
+                submission.id,
+            )
     return 1
 
 
