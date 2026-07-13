@@ -108,6 +108,34 @@ def test_load_env_file_skips_invalid_keys(tmp_path, isolated_key):
     assert os.environ[isolated_key] == "yes"
 
 
+def test_load_env_file_does_not_expand_dollar_variables(tmp_path, isolated_key, monkeypatch):
+    # A secret containing a ${VAR} sequence must be stored verbatim, not have the
+    # referenced env var substituted into it (os.path.expandvars corruption).
+    monkeypatch.setenv("SOME_EXISTING_VAR", "INJECTED")
+    path = tmp_path / "secrets.env"
+    path.write_text(f"{isolated_key}=sk-ab${{SOME_EXISTING_VAR}}cd\n", encoding="utf-8")
+    load_env_file(path)
+    assert os.environ[isolated_key] == "sk-ab${SOME_EXISTING_VAR}cd"
+
+
+def test_load_env_file_preserves_percent_sequences(tmp_path, isolated_key):
+    # On Windows os.path.expandvars also expands %VAR%; secrets with percent
+    # signs must survive unchanged on every platform.
+    path = tmp_path / "secrets.env"
+    path.write_text(f"{isolated_key}=fw_ab%USERNAME%cd\n", encoding="utf-8")
+    load_env_file(path)
+    assert os.environ[isolated_key] == "fw_ab%USERNAME%cd"
+
+
+def test_load_env_file_still_expands_leading_tilde(tmp_path, isolated_key):
+    # The documented ~/... path convention (secrets.env.example) is preserved.
+    path = tmp_path / "secrets.env"
+    path.write_text(f"{isolated_key}=~/trinity/ledger.jsonl\n", encoding="utf-8")
+    load_env_file(path)
+    assert os.environ[isolated_key] == os.path.expanduser("~/trinity/ledger.jsonl")
+    assert "~" not in os.environ[isolated_key]
+
+
 def test_load_project_env_prefers_repo_secrets(tmp_path, isolated_key, monkeypatch):
     monkeypatch.delenv("TRINITY_SECRETS_FILE", raising=False)
     (tmp_path / "secrets.env").write_text(f"{isolated_key}=from_repo\n", encoding="utf-8")

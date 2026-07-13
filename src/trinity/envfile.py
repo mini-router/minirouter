@@ -54,7 +54,13 @@ def _parse_env_line(line: str) -> tuple[str, str] | None:
     if not _KEY_RE.match(key):
         return None
     value = _parse_env_value(value)
-    value = os.path.expanduser(os.path.expandvars(value))
+    # Only expand a leading ``~`` (documented path convention, e.g.
+    # ``TRINITY_COST_LEDGER=~/ledger.jsonl`` in secrets.env.example). Do NOT run
+    # ``os.path.expandvars`` here: it rewrites ``$VAR`` / ``${VAR}`` (and
+    # ``%VAR%`` on Windows) anywhere in the value, silently corrupting API keys
+    # and other secrets that legitimately contain those characters. These files
+    # hold runtime secrets, not shell script; values are used verbatim.
+    value = os.path.expanduser(value)
     return key, value
 
 
