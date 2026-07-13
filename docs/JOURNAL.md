@@ -18,6 +18,25 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-12 — Per-role `decoding` config was loaded but never applied  #mistake #fix
+**Context:** issue #189 — every `configs/models*.yaml` ships a `decoding:` block with per-role
+`temperature`/`top_p`/`max_tokens` (thinker/worker/verifier).
+**Expected:** those per-role sampling params drive the corresponding turns.
+**Actual:** `OpenAICompatiblePool.__init__` loaded `self.decoding = cfg.get("decoding", {})` but nothing
+ever read it (`git grep '\.decoding' src/` returns only the assignment). `run_trajectory` drove every
+turn with hardcoded `temperature=0.0, top_p=1.0, max_tokens=4096`, so the whole `decoding:` surface was
+inert — tuning it had zero effect and no warning.
+**Root cause:** the config was wired into the pool but never threaded into the inner loop.
+**Fix / decision:** `run_trajectory` now resolves `(temperature, top_p, max_tokens)` per turn via
+`_resolve_decoding(pool, role, ...)` with precedence **explicit caller arg > `pool.decoding[role]` >
+built-in default**. The signature defaults became `None` sentinels so an unset param falls to config
+(else the default), while an explicitly-passed value still overrides. Pools with no `decoding` mapping
+(test stubs, configs without the block) fall straight through to today's defaults, so behavior is
+unchanged where no block is present. Added `tests/test_session_decoding.py` (per-role application,
+partial-block fallback, no-config default, explicit-override precedence).
+**Follow-up:** none — session-local wiring; eval/train `--max-tokens` still overrides per-role config
+when passed explicitly, which is the intended precedence.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.

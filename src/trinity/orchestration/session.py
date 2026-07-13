@@ -57,6 +57,32 @@ def _transcript_text(task: Task, turns: list[TurnRecord]) -> str:
     return "\n\n".join(parts)
 
 
+# Built-in decoding defaults, used when neither an explicit caller argument nor a
+# per-role ``decoding`` config value is present (SPEC §4.4 default sampling).
+_DEFAULT_TEMPERATURE = 0.0
+_DEFAULT_TOP_P = 1.0
+_DEFAULT_MAX_TOKENS = 4096
+
+
+def _resolve_decoding(pool, role: Role, *, temperature, top_p, max_tokens) -> tuple[float, float, int]:
+    """Resolve ``(temperature, top_p, max_tokens)`` for one turn.
+
+    Precedence: an explicit caller argument (non-``None``) wins; otherwise the
+    pool's per-role ``decoding[role]`` config value (from ``configs/models*.yaml``,
+    loaded onto ``OpenAICompatiblePool.decoding``); otherwise the built-in default.
+    Pools without a ``decoding`` mapping (e.g. test stubs) fall straight through to
+    the defaults, so behavior is unchanged when no config block is present.
+    """
+    cfg = getattr(pool, "decoding", None)
+    role_cfg = cfg.get(role.value, {}) if isinstance(cfg, dict) else {}
+    if not isinstance(role_cfg, dict):
+        role_cfg = {}
+    t = temperature if temperature is not None else role_cfg.get("temperature", _DEFAULT_TEMPERATURE)
+    p = top_p if top_p is not None else role_cfg.get("top_p", _DEFAULT_TOP_P)
+    m = max_tokens if max_tokens is not None else role_cfg.get("max_tokens", _DEFAULT_MAX_TOKENS)
+    return float(t), float(p), int(m)
+
+
 async def run_trajectory(
     task: Task,
     policy: Policy,
@@ -66,9 +92,9 @@ async def run_trajectory(
     max_turns: int = 5,
     sample: bool = False,
     rng=None,
-    max_tokens: int = 4096,
-    temperature: float = 0.0,
-    top_p: float = 1.0,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
+    top_p: float | None = None,
     reasoning: str | None = "minimal",
     request_timeout_s: float | None = None,
     verifier_requires_prior_worker: bool = True,
@@ -91,7 +117,12 @@ async def run_trajectory(
         )
 
         messages = _prompts.build_messages(role, task.prompt, traj.turns)
-        kwargs = dict(temperature=temperature, top_p=top_p, max_tokens=max_tokens)
+        turn_temperature, turn_top_p, turn_max_tokens = _resolve_decoding(
+            pool, role, temperature=temperature, top_p=top_p, max_tokens=max_tokens
+        )
+        kwargs = dict(
+            temperature=turn_temperature, top_p=turn_top_p, max_tokens=turn_max_tokens
+        )
         if client is not None:
             kwargs["client"] = client
         if reasoning is not None:
