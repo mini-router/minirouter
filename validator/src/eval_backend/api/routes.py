@@ -377,6 +377,23 @@ def health() -> HealthResponse:
     return HealthResponse()
 
 
+def _should_sync_eval(settings: Settings, submission: Submission) -> bool:
+    """Whether to run ``evaluate_submission`` inline for a just-registered submission.
+
+    A submission with no ``submission_artifact_id`` has no uploaded model bundle
+    (e.g. an infra/bugfix PR that never ships ``best_theta.npy``). Evaluating it
+    only produces a spurious ``missing_checkpoint`` failure that marks the PR's
+    submission ``failed`` — the behaviour that closes infra PRs (#143). The async
+    enqueue paths already skip such submissions (see ``queue.py`` and the pipeline
+    gate below); this keeps the *synchronous* path consistent with them.
+    """
+    return (
+        settings.sync_eval_on_submit
+        and not settings.uses_train_pipeline
+        and submission.submission_artifact_id is not None
+    )
+
+
 @router.post("/submit", response_model=SubmissionCreateResponse)
 async def submit(
     request: Request,
@@ -449,7 +466,7 @@ async def submit(
         session.flush()
         session.commit()
 
-        if settings.sync_eval_on_submit and not settings.uses_train_pipeline:
+        if _should_sync_eval(settings, submission):
             session.refresh(submission)
             evaluate_submission(session, submission, runtime_settings)
             session.commit()
