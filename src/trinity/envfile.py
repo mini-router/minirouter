@@ -8,6 +8,39 @@ from pathlib import Path
 _KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
+def _strip_trailing_env_comment(text: str) -> str:
+    """Drop a trailing inline comment (` # ...`) from an unquoted env value."""
+    pos = text.find(" #")
+    return text[:pos].rstrip() if pos != -1 else text
+
+
+def _parse_env_value(text: str) -> str:
+    """Parse the RHS of a KEY=VALUE line, honoring quotes and inline comments."""
+    text = text.strip()
+    if not text:
+        return text
+    if text[0] not in {"'", '"'}:
+        return _strip_trailing_env_comment(text)
+
+    quote = text[0]
+    i = 1
+    while i < len(text):
+        if text[i] == quote:
+            inner = text[1:i]
+            tail = text[i + 1 :]
+            if not tail or tail.isspace():
+                return inner
+            rest = tail.lstrip()
+            if rest.startswith("#"):
+                return inner
+            raise ValueError(
+                "quoted env value has trailing non-comment text after closing quote: "
+                f"{text!r}"
+            )
+        i += 1
+    raise ValueError(f"quoted env value is missing a closing quote: {text!r}")
+
+
 def _parse_env_line(line: str) -> tuple[str, str] | None:
     raw = line.strip()
     if not raw or raw.startswith("#"):
@@ -20,9 +53,7 @@ def _parse_env_line(line: str) -> tuple[str, str] | None:
     key = key.strip()
     if not _KEY_RE.match(key):
         return None
-    value = value.strip()
-    if value and len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        value = value[1:-1]
+    value = _parse_env_value(value)
     value = os.path.expanduser(os.path.expandvars(value))
     return key, value
 
@@ -36,8 +67,11 @@ def load_env_file(path: str | Path) -> Path | None:
     p = Path(path).expanduser()
     if not p.exists():
         return None
-    for line in p.read_text().splitlines():
-        parsed = _parse_env_line(line)
+    for lineno, line in enumerate(p.read_text().splitlines(), start=1):
+        try:
+            parsed = _parse_env_line(line)
+        except ValueError as exc:
+            raise ValueError(f"{p}:{lineno}: {exc}") from exc
         if parsed is None:
             continue
         key, value = parsed

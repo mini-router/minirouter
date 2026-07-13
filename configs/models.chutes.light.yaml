@@ -6,8 +6,8 @@ providers:
   chutes:
     base_url: "https://llm.chutes.ai/v1"
     api_key_env: "CHUTES_API_KEY"
-    timeout_s: 180
-    max_retries: 10
+    timeout_s: 60
+    max_retries: 3
     max_concurrency: 8
     reasoning_param: null
 

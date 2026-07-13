@@ -24,6 +24,7 @@ import yaml
 from .coordinator import params as P
 from .coordinator.policy import CoordinatorPolicy
 from .coordinator.runtime import resolve_device_dtype
+from .costing import ledger_cost_report
 from .llm.pool_factory import build_pool
 from .optim.fitness import FitnessConfig, evaluate_population
 from .optim.sep_cmaes import SepCMAES, default_popsize
@@ -121,13 +122,27 @@ async def train(args) -> dict:
     run_dir = _REPO / "experiments" / args.benchmark / args.run_name
     run_dir.mkdir(parents=True, exist_ok=True)
     history: list[dict] = []
+    import os
+
+    cost_ledger_path = Path(os.environ.get("TRINITY_COST_LEDGER", run_dir / "cost_ledger.jsonl")).expanduser()
+    cost_ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("TRINITY_COST_LEDGER", str(cost_ledger_path))
 
     run_kwargs = dict(
         max_turns=args.max_turns or sess.get("max_turns", 5),
         max_tokens=args.max_tokens,
         reasoning=args.reasoning,
         verifier_requires_prior_worker=sess.get("verifier_requires_prior_worker", True),
+        request_timeout_s=args.request_timeout_s or sess.get("request_timeout_s"),
+        trajectory_timeout_s=args.trajectory_timeout_s or sess.get("trajectory_timeout_s"),
     )
+    if run_kwargs.get("request_timeout_s") or run_kwargs.get("trajectory_timeout_s"):
+        print(
+            "[train] timeouts "
+            f"request={run_kwargs.get('request_timeout_s') or 'default'}s "
+            f"trajectory={run_kwargs.get('trajectory_timeout_s') or 'default'}s",
+            flush=True,
+        )
 
     gen = 0
     while not es.stop() and gen < generations:
@@ -167,6 +182,12 @@ async def train(args) -> dict:
         print(f"[gen {gen:3d}] mean={rec['gen_mean_fitness']:.3f} "
               f"max={rec['gen_max_fitness']:.3f} best={rec['best_fitness']:.3f} "
               f"({rec['seconds']}s)")
+        cost = ledger_cost_report(cost_ledger_path)
+        print(
+            f"[train] runtime={time.time() - t0:.2f}s cost=${cost['cost_usd']:.4f} "
+            f"ledger={cost['cost_ledger']}",
+            flush=True,
+        )
 
         np.save(run_dir / "best_theta.npy", best_x)
         (run_dir / "history.json").write_text(json.dumps(history, indent=2))
@@ -174,6 +195,7 @@ async def train(args) -> dict:
 
     best_x, best_f = es.best()
     np.save(run_dir / "best_theta.npy", best_x)
+    cost = ledger_cost_report(cost_ledger_path)
     summary = {
         "benchmark": args.benchmark,
         "pool": pool_models,
@@ -182,16 +204,24 @@ async def train(args) -> dict:
         "m_cma": m_cma,
         "generations": gen,
         "best_fitness": float(best_f),
+        "cost": cost,
         "run_dir": str(run_dir),
     }
     (run_dir / "summary.json").write_text(json.dumps(summary, indent=2))
-    print(f"[train] DONE. best_fitness={best_f:.4f}  -> {run_dir}")
+    print(
+        f"[train] DONE. best_fitness={best_f:.4f} cost=${cost['cost_usd']:.4f} -> {run_dir}",
+        flush=True,
+    )
     return summary
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Evolve the TRINITY coordinator with sep-CMA-ES")
-    ap.add_argument("--benchmark", required=True, help="math500 | mmlu | gpqa | livecodebench")
+    ap.add_argument(
+        "--benchmark",
+        required=True,
+        help="ifeval | math500 | mmlu | gpqa | livecodebench",
+    )
     ap.add_argument("--config", default=str(_REPO / "configs" / "trinity.yaml"))
     ap.add_argument("--models", default=str(_REPO / "configs" / "models.yaml"))
     ap.add_argument("--provider", default="fireworks",
@@ -202,6 +232,20 @@ def main() -> None:
     ap.add_argument("--max-turns", type=int, default=0, dest="max_turns", help="override K")
     ap.add_argument("--max-tokens", type=int, default=4096, dest="max_tokens")
     ap.add_argument("--reasoning", default="minimal")
+    ap.add_argument(
+        "--request-timeout-s",
+        type=float,
+        default=0.0,
+        dest="request_timeout_s",
+        help="per-provider request timeout for each LLM call inside a trajectory",
+    )
+    ap.add_argument(
+        "--trajectory-timeout-s",
+        type=float,
+        default=0.0,
+        dest="trajectory_timeout_s",
+        help="wall-clock timeout for one training trajectory",
+    )
     ap.add_argument("--generations", type=int, default=0, help="override config T")
     ap.add_argument("--popsize", type=int, default=0, help="override λ")
     ap.add_argument("--m-cma", type=int, default=0, dest="m_cma", help="override replications")
@@ -218,6 +262,8 @@ def main() -> None:
     args.popsize = args.popsize or None
     args.m_cma = args.m_cma or None
     args.max_turns = args.max_turns or None
+    args.request_timeout_s = args.request_timeout_s or None
+    args.trajectory_timeout_s = args.trajectory_timeout_s or None
     asyncio.run(train(args))
 
 

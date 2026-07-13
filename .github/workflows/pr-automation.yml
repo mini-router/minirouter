@@ -9,6 +9,12 @@ on:
       - ready_for_review
       - labeled
       - unlabeled
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to start
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -16,7 +22,8 @@ permissions:
   pull-requests: write
 
 jobs:
-  label_and_queue:
+  register_submission:
+    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PR contents
@@ -117,8 +124,6 @@ jobs:
               labels.add('miner')
             }
 
-            // Only real model artifacts count as a submission — docs under
-            // submissions/final_model/ (e.g. README.md) must not queue eval.
             const submissionArtifacts = [
               'submissions/final_model/best_theta.npy',
               'submissions/final_model/summary.json',
@@ -144,7 +149,6 @@ jobs:
               })
             }
 
-            // Require the checkpoint itself so metadata-only PRs never block on eval.
             const shouldQueue =
               labels.has('miner') &&
               labels.has('submission') &&
@@ -155,17 +159,216 @@ jobs:
             core.setOutput('head_sha', pr.head.sha)
             core.setOutput('team_name', pr.user?.login || 'github-actions')
 
-            if (!shouldQueue) {
-              core.info(`Labels applied: ${[...labels].join(', ') || 'none'}`)
+      - name: Register submission in backend
+        if: steps.classify.outputs.should_queue == 'true'
+        uses: actions/github-script@v7
+        env:
+          BACKEND_BASE_URL: ${{ vars.BACKEND_BASE_URL }}
+          MINIROUTER_WEBHOOK_SECRET: ${{ secrets.MINIROUTER_WEBHOOK_SECRET }}
+        with:
+          script: |
+            const crypto = require('crypto')
+            const backendBase = (process.env.BACKEND_BASE_URL || 'https://minirouter.work.gd').replace(/\/+$/, '')
+            const secret = process.env.MINIROUTER_WEBHOOK_SECRET
+            if (!secret) {
+              throw new Error('MINIROUTER_WEBHOOK_SECRET is not configured')
             }
 
-      - name: Checkout submission validator
-        if: steps.classify.outputs.should_queue == 'true'
+            const payload = {
+              repository: { full_name: '${{ steps.classify.outputs.repo_full_name }}' },
+              pull_request: {
+                number: Number('${{ steps.classify.outputs.pr_number }}'),
+                head: { sha: '${{ steps.classify.outputs.head_sha }}' },
+              },
+              sender: { login: '${{ steps.classify.outputs.team_name }}' },
+            }
+            const body = JSON.stringify(payload)
+            const signature =
+              'sha256=' + crypto.createHmac('sha256', secret).update(body).digest('hex')
+
+            const response = await fetch(`${backendBase}/webhooks/github`, {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/json',
+                'x-hub-signature-256': signature,
+              },
+              body,
+            })
+            if (!response.ok) {
+              throw new Error(`backend registration failed: ${response.status} ${await response.text()}`)
+            }
+
+            core.info(`Registered submission for PR #${payload.pull_request.number}`)
+
+  start_submission:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve PR metadata
+        id: prmeta
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = Number('${{ inputs.pr_number }}')
+            if (!Number.isFinite(prNumber) || prNumber <= 0) {
+              throw new Error(`Invalid PR number: ${{ inputs.pr_number }}`)
+            }
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            })
+
+            core.setOutput('repo_full_name', pr.head.repo.full_name)
+            core.setOutput('head_sha', pr.head.sha)
+            core.setOutput('head_ref', pr.head.ref)
+            core.setOutput('base_ref', pr.base.ref)
+            core.setOutput('pr_number', String(pr.number))
+            core.setOutput('team_name', pr.user?.login || 'github-actions')
+
+      - name: Checkout PR contents
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.ref }}
+          repository: ${{ steps.prmeta.outputs.repo_full_name }}
+          ref: ${{ steps.prmeta.outputs.head_sha }}
+          path: pr
+          persist-credentials: false
+
+      - name: Checkout validator scripts
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.prmeta.outputs.base_ref }}
           path: base
           persist-credentials: false
+
+      - name: Label PR and classify submission
+        id: classify
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+            const pr = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: Number('${{ steps.prmeta.outputs.pr_number }}'),
+            }).then((response) => response.data)
+
+            const labelSpecs = [
+              { name: 'web', color: '0ea5e9', description: 'Frontend changes' },
+              { name: 'validator', color: '8b5cf6', description: 'Validator backend changes' },
+              { name: 'train', color: '10b981', description: 'Training or routing changes' },
+              { name: 'eval', color: 'f59e0b', description: 'Evaluation changes' },
+              { name: 'benchmark', color: 'ef4444', description: 'Benchmark or config changes' },
+              { name: 'docs', color: '6b7280', description: 'Documentation changes' },
+              { name: 'miner', color: '14b8a6', description: 'Miner contribution PR' },
+              { name: 'submission', color: 'eab308', description: 'Final submission bundle' },
+            ]
+
+            async function ensureLabel(spec) {
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name: spec.name })
+              } catch (error) {
+                if (error.status !== 404) {
+                  throw error
+                }
+                await github.rest.issues.createLabel({
+                  owner,
+                  repo,
+                  name: spec.name,
+                  color: spec.color,
+                  description: spec.description,
+                })
+              }
+            }
+
+            for (const spec of labelSpecs) {
+              await ensureLabel(spec)
+            }
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number: pr.number,
+              per_page: 100,
+            })
+
+            const names = files.map((file) => file.filename)
+            const labels = new Set()
+            const any = (predicate) => names.some(predicate)
+
+            if (any((path) => path.startsWith('web/'))) {
+              labels.add('web')
+            }
+
+            if (any((path) => path.startsWith('validator/'))) {
+              labels.add('validator')
+              labels.add('eval')
+            }
+
+            if (any((path) => path.startsWith('src/'))) {
+              labels.add('train')
+            }
+
+            if (any((path) => path.startsWith('scripts/'))) {
+              labels.add('train')
+              labels.add('eval')
+            }
+
+            if (any((path) => path.startsWith('benchmarks/') || path.startsWith('configs/'))) {
+              labels.add('benchmark')
+            }
+
+            if (
+              any(
+                (path) =>
+                  path.startsWith('docs/') ||
+                  path === 'README.md' ||
+                  path === 'CONTRIBUTOIN.md' ||
+                  path === 'CONTRIBUTION.md'
+              )
+            ) {
+              labels.add('docs')
+            }
+
+            if (pr.head.ref.startsWith('sn74-')) {
+              labels.add('miner')
+            }
+
+            const submissionArtifacts = [
+              'submissions/final_model/best_theta.npy',
+              'submissions/final_model/summary.json',
+              'submissions/final_model/history.json',
+              'submissions/final_model/eval.json',
+            ]
+            const touchedSubmissionArtifact = any((path) =>
+              submissionArtifacts.includes(path)
+            )
+            if (touchedSubmissionArtifact) {
+              labels.add('submission')
+              labels.add('miner')
+            } else if (any((path) => path.startsWith('submissions/final_model/'))) {
+              labels.add('docs')
+            }
+
+            if (labels.size > 0) {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: pr.number,
+                labels: [...labels],
+              })
+            }
+
+            const shouldQueue =
+              labels.has('miner') &&
+              labels.has('submission') &&
+              names.includes('submissions/final_model/best_theta.npy')
+            core.setOutput('should_queue', String(shouldQueue))
+            core.setOutput('repo_full_name', `${owner}/${repo}`)
+            core.setOutput('pr_number', String(pr.number))
+            core.setOutput('head_sha', pr.head.sha)
+            core.setOutput('team_name', pr.user?.login || 'github-actions')
 
       - name: Validate submission bundle
         if: steps.classify.outputs.should_queue == 'true'
@@ -182,83 +385,66 @@ jobs:
           set -euo pipefail
           tar -czf submission.tar.gz -C pr submissions/final_model
 
-      - name: Upload submission to backend
-        id: submit
-        if: steps.classify.outputs.should_queue == 'true'
-        shell: bash
-        env:
-          BACKEND_BASE_URL: ${{ vars.BACKEND_BASE_URL }}
-        run: |
-          set -euo pipefail
-          backend_base="${BACKEND_BASE_URL:-https://minirouter.work.gd}"
-          response="$(
-            curl -fsS \
-              -F "file=@submission.tar.gz;type=application/gzip" \
-              -F "team_name=${{ steps.classify.outputs.team_name }}" \
-              -F "repo_full_name=${{ steps.classify.outputs.repo_full_name }}" \
-              -F "pr_number=${{ steps.classify.outputs.pr_number }}" \
-              -F "head_sha=${{ steps.classify.outputs.head_sha }}" \
-              "${backend_base}/submit"
-          )"
-          submission_id="$(
-            printf '%s' "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin)["submission"]["id"])'
-          )"
-          printf 'submission_id=%s\n' "$submission_id" >> "$GITHUB_OUTPUT"
-
-      - name: Wait for evaluation
+      - name: Register submission in backend
         if: steps.classify.outputs.should_queue == 'true'
         uses: actions/github-script@v7
         env:
           BACKEND_BASE_URL: ${{ vars.BACKEND_BASE_URL }}
+          MINIROUTER_WEBHOOK_SECRET: ${{ secrets.MINIROUTER_WEBHOOK_SECRET }}
         with:
           script: |
-            const backendBase = process.env.BACKEND_BASE_URL || 'https://minirouter.work.gd'
-            const submissionId = '${{ steps.submit.outputs.submission_id }}'
-            const pr = context.payload.pull_request
-            const submissionUrl = `${backendBase.replace(/\/+$/, '')}/api/submissions/${submissionId}`
-            const deadline = Date.now() + 60 * 60 * 1000
-
-            let submission = null
-            while (Date.now() < deadline) {
-              const response = await fetch(submissionUrl, { headers: { Accept: 'application/json' } })
-              if (!response.ok) {
-                throw new Error(`Submission status fetch failed (${response.status})`)
-              }
-
-              submission = await response.json()
-              const progressCurrent = submission.current_progress_current
-              const progressTotal = submission.current_progress_total
-              const progressText =
-                progressCurrent != null && progressTotal != null
-                  ? ` ${progressCurrent}/${progressTotal}`
-                  : ''
-              const phaseText = submission.current_phase || submission.status || 'unknown'
-              const messageText = submission.current_message ? ` - ${submission.current_message}` : ''
-              core.info(`Submission ${submissionId}: ${phaseText}${progressText}${messageText}`)
-              if (submission.status === 'completed' || submission.status === 'failed') {
-                break
-              }
-              await new Promise((resolve) => setTimeout(resolve, 20000))
+            const crypto = require('crypto')
+            const backendBase = (process.env.BACKEND_BASE_URL || 'https://minirouter.work.gd').replace(/\/+$/, '')
+            const secret = process.env.MINIROUTER_WEBHOOK_SECRET
+            if (!secret) {
+              throw new Error('MINIROUTER_WEBHOOK_SECRET is not configured')
             }
 
-            if (!submission) {
-              throw new Error('No submission payload returned from backend')
+            const payload = {
+              repository: { full_name: '${{ steps.classify.outputs.repo_full_name }}' },
+              pull_request: {
+                number: Number('${{ steps.classify.outputs.pr_number }}'),
+                head: { sha: '${{ steps.classify.outputs.head_sha }}' },
+              },
+              sender: { login: '${{ steps.classify.outputs.team_name }}' },
             }
-            if (submission.status !== 'completed' && submission.status !== 'failed') {
-              throw new Error(`Timed out waiting for submission ${submissionId}`)
+            const body = JSON.stringify(payload)
+            const signature =
+              'sha256=' + crypto.createHmac('sha256', secret).update(body).digest('hex')
+
+            const response = await fetch(`${backendBase}/webhooks/github`, {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/json',
+                'x-hub-signature-256': signature,
+              },
+              body,
+            })
+            if (!response.ok) {
+              throw new Error(`backend registration failed: ${response.status} ${await response.text()}`)
             }
 
-            if (submission.status === 'completed') {
-              try {
-                await github.rest.pulls.merge({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: pr.number,
-                  merge_method: 'merge',
-                })
-              } catch (error) {
-                core.warning(`Auto-merge failed: ${error.message}`)
-              }
-            } else {
-              core.warning(`Submission ${submission.id} failed; PR left open`)
-            }
+      - name: Upload submission to backend
+        if: steps.classify.outputs.should_queue == 'true'
+        shell: bash
+        env:
+          BACKEND_BASE_URL: ${{ vars.BACKEND_BASE_URL }}
+          MINIROUTER_WEBHOOK_SECRET: ${{ secrets.MINIROUTER_WEBHOOK_SECRET }}
+        run: |
+          set -euo pipefail
+          backend_base="${BACKEND_BASE_URL:-https://minirouter.work.gd}"
+          : "${MINIROUTER_WEBHOOK_SECRET:?}"
+          response="$(
+            curl -fsS \
+              -H "X-MiniRouter-Webhook-Secret: ${MINIROUTER_WEBHOOK_SECRET}" \
+              -F "file=@submission.tar.gz;type=application/gzip" \
+              -F "repo_full_name=${{ steps.classify.outputs.repo_full_name }}" \
+              -F "pr_number=${{ steps.classify.outputs.pr_number }}" \
+              -F "head_sha=${{ steps.classify.outputs.head_sha }}" \
+              -F "team_name=${{ steps.classify.outputs.team_name }}" \
+              "${backend_base%/}/webhooks/github/submission"
+          )"
+          submission_id="$(
+            printf '%s' "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin)["submission"]["id"])'
+          )"
+          echo "submission_id=${submission_id}"

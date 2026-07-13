@@ -11,6 +11,15 @@ Supported benchmarks
     Extract a ``\\boxed{...}`` answer (else the last number) from the final
     answer, normalize, and compare to ``task.answer``. Symbolic equality via
     ``sympy`` when importable, otherwise a numeric/string fallback.
+* ``ifeval``
+    Check instruction-following constraints from ``task.answer`` (instruction
+    ids + kwargs) using a local deterministic heuristic.
+* ``rlpr``
+    Route the RLPR suite to math or multiple-choice grading based on source
+    benchmark metadata, with WebInstruct handled generically.
+* ``bfcl_simple``
+    Parse a JSON function-call payload and compare it against the ground-truth
+    call schema stored in ``task.answer``.
 * ``mmlu`` / ``gpqa``
     Extract a single multiple-choice letter ``A-D`` (robust to phrasings such
     as ``"the answer is (B)"``, ``"B)"``, ``"B."``) and compare to
@@ -32,6 +41,7 @@ module loads on a machine without it.
 """
 from __future__ import annotations
 
+import collections
 import json
 import os
 import re
@@ -39,7 +49,7 @@ import subprocess
 import sys
 import tempfile
 from fractions import Fraction
-from typing import Sequence
+from typing import Any, Sequence
 
 from trinity.types import Role, Task, Trajectory
 
@@ -66,6 +76,16 @@ CHOICE_BENCHMARKS: frozenset[str] = frozenset({"mmlu", "gpqa", "gpqa-diamond", "
 CODE_BENCHMARKS: frozenset[str] = frozenset(
     {"livecodebench", "lcb", "bigcodebench", "bigcode"}
 )
+IFEVAL_BENCHMARKS: frozenset[str] = frozenset({"ifeval"})
+RLPR_BENCHMARKS: frozenset[str] = frozenset({"rlpr"})
+_RLPR_MATH_SOURCES: frozenset[str] = frozenset(
+    {"Math-500_Avg2", "Minerva_Avg4", "AIME2024_Avg16", "TheoremQA_Avg2"}
+)
+_RLPR_CHOICE_SOURCES: frozenset[str] = frozenset(
+    {"MMLUPro-1000_Avg2", "gpqa_diamond_Avg4"}
+)
+_RLPR_WEBINSTRUCT_SOURCES: frozenset[str] = frozenset({"WebInstruct-verified-val_Avg2"})
+BFCL_BENCHMARKS: frozenset[str] = frozenset({"bfcl_simple"})
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +166,16 @@ def has_answer(benchmark: str, text: str) -> bool:
         return extract_choice_letter(text) is not None
     if key in MATH_BENCHMARKS:
         return extract_boxed(text) is not None or extract_last_number(text) is not None
+    if key in RLPR_BENCHMARKS:
+        return (
+            extract_choice_letter(text) is not None
+            or extract_boxed(text) is not None
+            or extract_last_number(text) is not None
+        )
+    if key in IFEVAL_BENCHMARKS:
+        return bool(text.strip())
+    if key in BFCL_BENCHMARKS:
+        return _extract_json_payload(text) is not None
     if key in CODE_BENCHMARKS:
         return "```" in text or "def " in text or "import " in text
     return False
@@ -176,12 +206,491 @@ def score_text(benchmark: str, candidate: str, reference: object) -> float:
         return 1.0 if _check_math(candidate, reference) else 0.0
     if key in CHOICE_BENCHMARKS:
         return 1.0 if _check_choice(candidate, reference) else 0.0
+    if key in RLPR_BENCHMARKS:
+        return 1.0 if _check_rlpr(candidate, reference) else 0.0
+    if key in IFEVAL_BENCHMARKS:
+        return 1.0 if _check_ifeval(candidate, reference) else 0.0
+    if key in BFCL_BENCHMARKS:
+        return 1.0 if _check_bfcl(candidate, reference) else 0.0
     if key in CODE_BENCHMARKS:
         return 1.0 if _check_code(candidate, reference) else 0.0
     raise ValueError(
         f"Unknown benchmark {benchmark!r}. "
         f"Known: math={sorted(MATH_BENCHMARKS)}, "
         f"choice={sorted(CHOICE_BENCHMARKS)}, code={sorted(CODE_BENCHMARKS)}."
+    )
+
+
+# ---------------------------------------------------------------------------
+# IFEval: instruction-following heuristics
+# ---------------------------------------------------------------------------
+def _ifeval_words(text: str) -> list[str]:
+    return re.findall(r"\w+", text)
+
+
+def _ifeval_count_sentences(text: str) -> int:
+    chunks = [chunk.strip() for chunk in re.split(r"(?<=[.!?])\s+", text.strip())]
+    chunks = [chunk for chunk in chunks if chunk]
+    return len(chunks) if chunks else (1 if text.strip() else 0)
+
+
+def _ifeval_count_words(text: str) -> int:
+    return len(_ifeval_words(text))
+
+
+def _ifeval_count_paragraphs(text: str) -> int:
+    return len([part for part in re.split(r"\n\s*\n", text) if part.strip()])
+
+
+def _ifeval_count_bullets(text: str) -> int:
+    bullet_lists = re.findall(r"^\s*\*[^\*].*$", text, flags=re.MULTILINE)
+    bullet_lists_2 = re.findall(r"^\s*-.*$", text, flags=re.MULTILINE)
+    return len(bullet_lists) + len(bullet_lists_2)
+
+
+def _ifeval_count_highlights(text: str) -> int:
+    num_highlights = 0
+    highlights = re.findall(r"\*[^\n\*]*\*", text)
+    double_highlights = re.findall(r"\*\*[^\n\*]*\*\*", text)
+    for highlight in highlights:
+        if highlight.strip("*").strip():
+            num_highlights += 1
+    for highlight in double_highlights:
+        if highlight.removeprefix("**").removesuffix("**").strip():
+            num_highlights += 1
+    return num_highlights
+
+
+def _ifeval_count_sections(text: str, splitter: str) -> int:
+    splitter = str(splitter or "").strip()
+    if not splitter:
+        return 0
+    if splitter.upper() == "PARAGRAPH":
+        return _ifeval_count_paragraphs(text)
+    pattern = r"\s?" + re.escape(splitter) + r"\s?\d+\s?"
+    sections = re.split(pattern, text)
+    return max(0, len(sections) - 1)
+
+
+def _ifeval_detect_language(text: str, language: str) -> bool:
+    language = str(language or "").strip().lower()
+    if not language:
+        return False
+    try:
+        import langdetect  # type: ignore import-not-found
+
+        try:
+            return langdetect.detect(text) == language
+        except Exception:
+            return False
+    except Exception:
+        pass
+
+    if language in {"en", "eng", "english"}:
+        return bool(re.search(r"[A-Za-z]", text)) and sum(
+            1 for ch in text if ch.isalpha() and ord(ch) > 127
+        ) == 0
+    if language == "kn":
+        return any("\u0C80" <= ch <= "\u0CFF" for ch in text)
+    return False
+
+
+def _ifeval_json_format(text: str) -> bool:
+    value = (
+        text.strip()
+        .removeprefix("```json")
+        .removeprefix("```Json")
+        .removeprefix("```JSON")
+        .removeprefix("```")
+        .removesuffix("```")
+        .strip()
+    )
+    try:
+        json.loads(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _ifeval_quotation(text: str) -> bool:
+    value = text.strip()
+    return len(value) > 1 and value[0] == '"' and value[-1] == '"'
+
+
+def _ifeval_check_text_instruction(instruction_id: str, kwargs: dict[str, object], text: str) -> bool:
+    key = instruction_id.strip().lower()
+    kwargs = kwargs or {}
+
+    if key == "punctuation:no_comma":
+        return "," not in text
+    if key == "startend:quotation":
+        return _ifeval_quotation(text)
+    if key == "startend:end_checker":
+        end_phrase = str(kwargs.get("end_phrase", "")).strip().lower()
+        return text.strip().strip('"').lower().endswith(end_phrase)
+    if key == "language:response_language":
+        return _ifeval_detect_language(text, str(kwargs.get("language", "")))
+    if key == "length_constraints:number_words":
+        relation = str(kwargs.get("relation", "")).strip().lower()
+        threshold = int(kwargs.get("num_words", 0))
+        count = _ifeval_count_words(text)
+        return count < threshold if relation == "less than" else count >= threshold
+    if key == "length_constraints:number_sentences":
+        relation = str(kwargs.get("relation", "")).strip().lower()
+        threshold = int(kwargs.get("num_sentences", 0))
+        count = _ifeval_count_sentences(text)
+        return count < threshold if relation == "less than" else count >= threshold
+    if key == "length_constraints:number_paragraphs":
+        return _ifeval_count_paragraphs(text) == int(kwargs.get("num_paragraphs", 0))
+    if key == "length_constraints:nth_paragraph_first_word":
+        paragraphs = [part for part in re.split(r"\n\s*\n", text) if part.strip()]
+        nth_paragraph = int(kwargs.get("nth_paragraph", 0))
+        if not (1 <= nth_paragraph <= len(paragraphs)):
+            return False
+        words = _ifeval_words(paragraphs[nth_paragraph - 1])
+        return bool(words) and words[0].lower() == str(kwargs.get("first_word", "")).strip().lower()
+    if key == "detectable_content:number_placeholders":
+        return len(re.findall(r"\[.*?\]", text)) >= int(kwargs.get("num_placeholders", 0))
+    if key == "detectable_content:postscript":
+        marker = str(kwargs.get("postscript_marker", "P.S."))
+        value = text.lower()
+        if marker == "P.P.S":
+            pattern = r"\s*p\.\s?p\.\s?s.*$"
+        elif marker == "P.S.":
+            pattern = r"\s*p\.\s?s\..*$"
+        else:
+            pattern = r"\s*" + re.escape(marker.lower()) + r".*$"
+        return bool(re.findall(pattern, value, flags=re.MULTILINE))
+    if key == "detectable_format:constrained_response":
+        options = ("My answer is yes.", "My answer is no.", "My answer is maybe.")
+        return any(option in text.strip() for option in options)
+    if key == "detectable_format:json_format":
+        return _ifeval_json_format(text)
+    if key == "detectable_format:multiple_sections":
+        splitter = str(kwargs.get("section_spliter", kwargs.get("section_splitter", "Section")))
+        num_sections = int(kwargs.get("num_sections", 0))
+        return _ifeval_count_sections(text, splitter) >= num_sections
+    if key == "detectable_format:number_bullet_lists":
+        return _ifeval_count_bullets(text) == int(kwargs.get("num_bullets", 0))
+    if key == "detectable_format:number_highlighted_sections":
+        return _ifeval_count_highlights(text) >= int(kwargs.get("num_highlights", 0))
+    if key == "detectable_format:title":
+        return bool(re.findall(r"<<[^\n]+>>", text))
+    if key == "keywords:existence":
+        keywords = [str(keyword) for keyword in kwargs.get("keywords", [])]
+        return all(re.search(re.escape(keyword), text, flags=re.IGNORECASE) for keyword in keywords)
+    if key == "keywords:forbidden_words":
+        forbidden_words = [str(word) for word in kwargs.get("forbidden_words", [])]
+        return all(
+            not re.search(r"\b" + re.escape(word) + r"\b", text, flags=re.IGNORECASE)
+            for word in forbidden_words
+        )
+    if key == "keywords:frequency":
+        relation = str(kwargs.get("relation", "")).strip().lower()
+        keyword = re.escape(str(kwargs.get("keyword", "")))
+        threshold = int(kwargs.get("frequency", 0))
+        count = len(re.findall(keyword, text, flags=re.IGNORECASE))
+        return count < threshold if relation == "less than" else count >= threshold
+    if key == "keywords:letter_frequency":
+        relation = str(kwargs.get("let_relation", "")).strip().lower()
+        letter = str(kwargs.get("letter", "")).lower()
+        threshold = int(kwargs.get("let_frequency", 0))
+        count = collections.Counter(text.lower())[letter]
+        return count < threshold if relation == "less than" else count >= threshold
+    if key == "change_case:capital_word_frequency":
+        relation = str(kwargs.get("capital_relation", "")).strip().lower()
+        threshold = int(kwargs.get("capital_frequency", 0))
+        count = sum(1 for word in _ifeval_words(text) if word.isupper())
+        return count < threshold if relation == "less than" else count >= threshold
+    if key == "change_case:english_capital":
+        return text.isupper()
+    if key == "change_case:english_lowercase":
+        return text.islower()
+    if key == "combination:repeat_prompt":
+        prompt_to_repeat = str(kwargs.get("prompt_to_repeat", "")).strip().lower()
+        return text.strip().lower().startswith(prompt_to_repeat)
+    if key == "combination:two_responses":
+        responses = text.split("******")
+        valid_responses = []
+        for index, response in enumerate(responses):
+            if not response.strip():
+                if index != 0 and index != len(responses) - 1:
+                    return False
+            else:
+                valid_responses.append(response)
+        return len(valid_responses) == 2 and valid_responses[0].strip() != valid_responses[1].strip()
+
+    return False
+
+
+def _check_ifeval(candidate: str, reference: object) -> bool:
+    if not candidate:
+        return False
+    if not isinstance(reference, dict):
+        return False
+    instruction_ids = list(reference.get("instruction_id_list", []))
+    kwargs_list = list(reference.get("kwargs", []))
+    for idx, instruction_id in enumerate(instruction_ids):
+        kwargs = kwargs_list[idx] if idx < len(kwargs_list) and isinstance(kwargs_list[idx], dict) else {}
+        if not _ifeval_check_text_instruction(str(instruction_id), kwargs, candidate):
+            return False
+    return True
+
+
+# ---------------------------------------------------------------------------
+# RLPR: route to math / choice / generic WebInstruct scoring
+# ---------------------------------------------------------------------------
+def _rlpr_reference_source(reference: object) -> str:
+    if isinstance(reference, dict):
+        for key in ("source", "data_source", "benchmark"):
+            value = reference.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return ""
+
+
+def _check_rlpr(candidate: str, reference: object) -> bool:
+    """Route RLPR items to the right checker based on source benchmark."""
+    if not isinstance(reference, dict):
+        return False
+    gold = reference.get("ground_truth", reference)
+    source = _rlpr_reference_source(reference)
+    if source in _RLPR_MATH_SOURCES:
+        return _check_math(candidate, gold)
+    if source in _RLPR_CHOICE_SOURCES:
+        return _check_choice(candidate, gold)
+    if source in _RLPR_WEBINSTRUCT_SOURCES:
+        return _check_rlpr_webinstruct(candidate, gold)
+
+    if _normalize_reference_letter(gold) is not None:
+        return _check_choice(candidate, gold)
+    return _check_math(candidate, gold)
+
+
+def _check_rlpr_webinstruct(candidate: str, reference: object) -> bool:
+    """WebInstruct-verified-val mixes answer styles, so score it generically."""
+    if reference is None:
+        return False
+    gold = str(reference).strip()
+    cand = (candidate or "").strip()
+    if not cand or not gold:
+        return False
+
+    gold_letter = _normalize_reference_letter(gold)
+    cand_letter = extract_choice_letter(cand)
+    if gold_letter is not None and cand_letter is not None:
+        return cand_letter == gold_letter
+
+    if math_equal(cand, gold):
+        return True
+
+    return normalize_math_answer(cand) == normalize_math_answer(gold)
+
+
+# ---------------------------------------------------------------------------
+# BFCL: function-call JSON comparison
+# ---------------------------------------------------------------------------
+def _strip_code_fences(text: str) -> str:
+    s = text.strip()
+    if not s.startswith("```"):
+        return s
+    s = s[3:]
+    if s.lower().startswith("json"):
+        s = s[4:]
+    s = s.strip()
+    if s.endswith("```"):
+        s = s[:-3]
+    return s.strip()
+
+
+def _extract_json_payload(text: str) -> object | None:
+    """Best-effort JSON extraction for BFCL outputs."""
+    if not text:
+        return None
+    s = _strip_code_fences(text)
+    for candidate in (s, s[s.find("{") :] if "{" in s else "", s[s.find("[") :] if "[" in s else ""):
+        if not candidate:
+            continue
+        candidate = candidate.strip()
+        if candidate.endswith("```"):
+            candidate = candidate[:-3].strip()
+        if candidate.startswith("{") and "}" in candidate:
+            end = candidate.rfind("}")
+            if end > 0:
+                try:
+                    return json.loads(candidate[: end + 1])
+                except Exception:
+                    pass
+        if candidate.startswith("[") and "]" in candidate:
+            end = candidate.rfind("]")
+            if end > 0:
+                try:
+                    return json.loads(candidate[: end + 1])
+                except Exception:
+                    pass
+    try:
+        return json.loads(s)
+    except Exception:
+        return None
+
+
+def _coerce_bfcl_scalar(value: object) -> object:
+    if isinstance(value, str):
+        s = value.strip()
+        low = s.lower()
+        if low == "true":
+            return True
+        if low == "false":
+            return False
+        if low in {"null", "none"}:
+            return None
+        if re.fullmatch(r"-?\d+", s):
+            try:
+                return int(s)
+            except Exception:
+                return s
+        if re.fullmatch(r"-?(?:\d+\.\d+|\d+\.)", s):
+            try:
+                return float(s)
+            except Exception:
+                return s
+        return s
+    return value
+
+
+def _normalize_bfcl_value(value: object) -> object:
+    if isinstance(value, list):
+        return [_normalize_bfcl_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(k): _normalize_bfcl_value(v) for k, v in value.items()}
+    return _coerce_bfcl_scalar(value)
+
+
+def _bfcl_call_from_model(item: object) -> tuple[str, dict[str, object]] | None:
+    if not isinstance(item, dict) or not item:
+        return None
+    if "name" in item and ("arguments" in item or "args" in item):
+        name = str(item.get("name", "")).strip()
+        arguments = item.get("arguments", item.get("args", {}))
+        if isinstance(arguments, dict):
+            return name, arguments
+        return None
+    if len(item) == 1:
+        name, arguments = next(iter(item.items()))
+        if isinstance(arguments, dict):
+            return str(name).strip(), arguments
+    if all(isinstance(v, dict) for v in item.values()):
+        # Best-effort support for top-level maps of function name -> arguments.
+        name, arguments = next(iter(item.items()))
+        if isinstance(arguments, dict):
+            return str(name).strip(), arguments
+    return None
+
+
+def _bfcl_call_from_gold(item: object) -> tuple[str, dict[str, list[object]]] | None:
+    if not isinstance(item, dict) or not item:
+        return None
+    if len(item) == 1:
+        name, arguments = next(iter(item.items()))
+        if isinstance(arguments, dict):
+            normalized: dict[str, list[object]] = {}
+            for key, allowed in arguments.items():
+                if isinstance(allowed, list):
+                    normalized[str(key)] = [_normalize_bfcl_value(v) for v in allowed]
+                else:
+                    normalized[str(key)] = [_normalize_bfcl_value(allowed)]
+            return str(name).strip(), normalized
+    return None
+
+
+def _bfcl_missing_allowed(allowed: object) -> bool:
+    allowed = _normalize_bfcl_value(allowed)
+    if allowed in ("", None):
+        return True
+    if isinstance(allowed, list):
+        return any(_bfcl_missing_allowed(item) for item in allowed)
+    return False
+
+
+def _bfcl_value_matches(candidate: object, allowed: object) -> bool:
+    if isinstance(allowed, list):
+        options = allowed
+    else:
+        options = [allowed]
+    candidate_norm = _normalize_bfcl_value(candidate)
+    for opt in options:
+        opt_norm = _normalize_bfcl_value(opt)
+        if candidate_norm == opt_norm:
+            return True
+        if str(candidate_norm).strip() == str(opt_norm).strip():
+            return True
+    return False
+
+
+def _bfcl_call_matches(
+    candidate: tuple[str, dict[str, object]],
+    reference: tuple[str, dict[str, list[object]]],
+) -> bool:
+    cand_name, cand_args = candidate
+    ref_name, ref_args = reference
+    if cand_name != ref_name:
+        return False
+    if not set(cand_args).issubset(ref_args):
+        return False
+    for key, allowed in ref_args.items():
+        if key not in cand_args:
+            if _bfcl_missing_allowed(allowed):
+                continue
+            return False
+        if not _bfcl_value_matches(cand_args[key], allowed):
+            return False
+    return True
+
+
+def _check_bfcl(candidate: str, reference: object) -> bool:
+    raw = _extract_json_payload(candidate)
+    if raw is None:
+        return False
+    if isinstance(reference, dict) and "ground_truth" in reference:
+        gold_raw = reference["ground_truth"]
+    else:
+        gold_raw = reference
+    if not isinstance(gold_raw, list):
+        return False
+
+    cand_calls: list[tuple[str, dict[str, object]]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            call = _bfcl_call_from_model(item)
+            if call is None:
+                return False
+            cand_calls.append(call)
+    else:
+        call = _bfcl_call_from_model(raw)
+        if call is None:
+            return False
+        cand_calls.append(call)
+
+    gold_calls: list[tuple[str, dict[str, list[object]]]] = []
+    for item in gold_raw:
+        call = _bfcl_call_from_gold(item)
+        if call is None:
+            return False
+        gold_calls.append(call)
+
+    if len(cand_calls) != len(gold_calls):
+        return False
+
+    key = lambda call: json.dumps(
+        {"name": call[0], "arguments": call[1]},
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    cand_calls_sorted = sorted(cand_calls, key=key)
+    gold_calls_sorted = sorted(gold_calls, key=key)
+    return all(
+        _bfcl_call_matches(candidate_call, gold_call)
+        for candidate_call, gold_call in zip(cand_calls_sorted, gold_calls_sorted)
     )
 
 
@@ -543,20 +1052,25 @@ def extract_code(text: str) -> str:
     return text.strip()
 
 
-def _coerce_test_spec(reference: object) -> tuple[list, int]:
-    """Normalize a code reference into ``(tests, timeout_s)``.
+def _coerce_test_spec(reference: object) -> tuple[list, int, str | None]:
+    """Normalize a code reference into ``(tests, timeout_s, fn_name)``.
 
     The ``Task.answer`` for code benchmarks may be:
       * a ``list`` of tests, or
-      * a ``dict`` with key ``"tests"`` and optional ``"timeout_s"``, or
+      * a ``dict`` with key ``"tests"`` and optional ``"timeout_s"`` /
+        ``"fn_name"``, or
       * a JSON string encoding either of the above.
 
     Each test is one of:
       * a ``str`` of assert-based Python (executed after the candidate code), or
       * a ``dict`` ``{"stdin": str, "expected_stdout": str}`` for I/O tests, or
       * a 2-tuple/list ``(stdin, expected_stdout)``.
+
+    ``fn_name`` (LiveCodeBench call-based problems) is ``None`` for stdin/assert
+    specs and selects the functional execution path when present.
     """
     timeout_s = 10
+    fn_name: str | None = None
     spec: object = reference
     if isinstance(spec, str):
         try:
@@ -565,6 +1079,8 @@ def _coerce_test_spec(reference: object) -> tuple[list, int]:
             spec = [spec]
     if isinstance(spec, dict):
         timeout_s = int(spec.get("timeout_s", timeout_s))
+        raw_fn = spec.get("fn_name")
+        fn_name = str(raw_fn) if raw_fn else None
         tests = spec.get("tests", [])
     else:
         tests = spec
@@ -572,7 +1088,7 @@ def _coerce_test_spec(reference: object) -> tuple[list, int]:
         tests = []
     if not isinstance(tests, list):
         tests = [tests]
-    return tests, timeout_s
+    return tests, timeout_s, fn_name
 
 
 def _check_code(candidate: str, reference: object) -> bool:
@@ -580,12 +1096,14 @@ def _check_code(candidate: str, reference: object) -> bool:
     code = extract_code(candidate)
     if not code.strip():
         return False
-    tests, timeout_s = _coerce_test_spec(reference)
-    return run_pass_at_1(code, tests, timeout_s=timeout_s)
+    tests, timeout_s, fn_name = _coerce_test_spec(reference)
+    return run_pass_at_1(code, tests, timeout_s=timeout_s, fn_name=fn_name)
 
 
-def run_pass_at_1(code: str, tests: Sequence, timeout_s: int = 10) -> bool:
-    """Execute candidate ``code`` against ``tests`` in a subprocess sandbox.
+def run_pass_at_1(
+    code: str, tests: Sequence, timeout_s: int = 10, fn_name: str | None = None
+) -> bool:
+    """Execute candidate ``code`` against ``tests`` in an isolated subprocess.
 
     The candidate code is **never** executed in-process. Each invocation writes
     a temporary script and runs it with the current Python interpreter in a
@@ -602,11 +1120,18 @@ def run_pass_at_1(code: str, tests: Sequence, timeout_s: int = 10) -> bool:
       ``stdin`` on standard input, and its stdout is compared (whitespace-
       trimmed per line) to ``expected_stdout``. Use this for competitive-
       programming style benchmarks (LiveCodeBench).
+    * **call-based** (``dict`` with ``testtype == "functional"``, plus a
+      ``fn_name``): the candidate exposes ``fn_name`` as a ``Solution`` method or
+      module-level function; it is called with the newline-separated JSON
+      arguments in ``input`` and its return value is compared (tuples normalized
+      to lists) to the JSON ``output``. This is LiveCodeBench's functional flavor.
 
     Args:
         code: Candidate Python source (already fence-stripped).
         tests: Sequence of tests as described above.
         timeout_s: Per-test wall-clock timeout in seconds.
+        fn_name: Call-based entry-point name. When ``None`` (stdin problems),
+            every test uses the historical stdin/assert behavior.
 
     Returns:
         ``True`` iff the candidate passes all tests (and there is at least one
@@ -617,13 +1142,78 @@ def run_pass_at_1(code: str, tests: Sequence, timeout_s: int = 10) -> bool:
     if not tests:
         return False
     for test in tests:
-        if not _run_one_test(code, test, timeout_s):
+        if not _run_one_test(code, test, timeout_s, fn_name=fn_name):
             return False
     return True
 
 
-def _run_one_test(code: str, test: object, timeout_s: int) -> bool:
+def _functional_harness(fn_name: str, stdin_data: str, expected_output: str) -> str:
+    """Build a self-checking script for a LiveCodeBench call-based test.
+
+    LiveCodeBench passes newline-separated JSON arguments and expects a
+    JSON-encoded return value from ``fn_name`` (a ``Solution`` method or a
+    module-level function). The generated script decodes the args, calls the
+    function, normalizes tuples to lists (so ``(0, 1)`` matches ``[0, 1]``), and
+    asserts equality with the expected output — exiting ``0`` iff correct. All
+    three values are embedded as Python literals via ``repr`` so no candidate or
+    test text can break out of the harness.
+    """
+    lines = [
+        "import json as _json",
+        "def _norm(_x):",
+        "    if isinstance(_x, tuple):",
+        "        _x = list(_x)",
+        "    if isinstance(_x, list):",
+        "        return [_norm(_e) for _e in _x]",
+        "    if isinstance(_x, dict):",
+        "        return {_k: _norm(_v) for _k, _v in _x.items()}",
+        "    return _x",
+        f"_fn_name = {fn_name!r}",
+        f"_raw_in = {stdin_data!r}",
+        f"_raw_out = {expected_output!r}",
+        "_args = [_json.loads(_ln) for _ln in _raw_in.split(chr(10)) if _ln.strip() != '']",
+        "_obj = Solution() if 'Solution' in dir() else None",
+        "if _obj is not None and hasattr(_obj, _fn_name):",
+        "    _target = getattr(_obj, _fn_name)",
+        "else:",
+        "    _target = globals()[_fn_name]",
+        "_result = _norm(_target(*_args))",
+        "try:",
+        "    _expected = _norm(_json.loads(_raw_out))",
+        "except Exception:",
+        "    _expected = _raw_out.strip()",
+        "    _result = _result if isinstance(_result, str) else _json.dumps(_result)",
+        "    _result = _result.strip()",
+        "assert _result == _expected",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _run_one_test(
+    code: str, test: object, timeout_s: int, fn_name: str | None = None
+) -> bool:
     """Run a single test in an isolated subprocess. Returns pass/fail."""
+    # Call-based (LiveCodeBench "functional") path. The mode is chosen ONLY by an
+    # explicit ``testtype == "functional"`` — the authoritative per-test signal
+    # preserved by dataset.py — never by the mere presence of ``fn_name``.
+    # ``fn_name`` only names the callable target (Solution method / module
+    # function). This keeps a stray ``fn_name`` on a stdin (or untyped) case from
+    # silently switching the grader to the wrong path: anything not explicitly
+    # ``functional`` falls through to the stdin/assert handling below.
+    if isinstance(test, dict):
+        ttype = str(test.get("testtype", "")).strip().lower()
+        has_io = (
+            "stdin" in test
+            or "input" in test
+            or "expected_stdout" in test
+            or "output" in test
+        )
+        if ttype == "functional" and has_io:
+            stdin_data = str(test.get("stdin", test.get("input", "")))
+            expected = str(test.get("expected_stdout", test.get("output", "")))
+            script = code + "\n\n" + _functional_harness(fn_name or "", stdin_data, expected)
+            return _exec_script(script, stdin_data="", timeout_s=timeout_s)
+
     stdin_data: str | None = None
     expected_stdout: str | None = None
     assert_block: str | None = None
@@ -676,16 +1266,19 @@ def _stdout_matches(got: str, expected: str) -> bool:
     return got_lines == exp_lines
 
 
-def _sandbox_env() -> dict[str, str]:
+def _sandbox_env(*, home_dir: str) -> dict[str, str]:
     """Minimal environment for the child interpreter."""
     env = {
         "PATH": os.environ.get("PATH", ""),
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONIOENCODING": "utf-8",
+        "HOME": home_dir,
+        "TMPDIR": home_dir,
     }
-    # Preserve a HOME so libraries that need a writable dir do not crash.
-    if "HOME" in os.environ:
-        env["HOME"] = os.environ["HOME"]
+    if os.name == "nt":
+        env["USERPROFILE"] = home_dir
+        env["TEMP"] = home_dir
+        env["TMP"] = home_dir
     return env
 
 
@@ -712,26 +1305,31 @@ def _exec_script_capture(
     """
     tmp_path: str | None = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False, encoding="utf-8"
-        ) as fh:
-            fh.write(script)
-            tmp_path = fh.name
-        try:
-            proc = subprocess.run(
-                [sys.executable, tmp_path],
-                input=stdin_data,
-                capture_output=True,
-                text=True,
-                timeout=timeout_s,
-                env=_sandbox_env(),
-                cwd=tempfile.gettempdir(),
-            )
-        except subprocess.TimeoutExpired:
-            return False, ""
-        except (OSError, ValueError):
-            return False, ""
-        return (proc.returncode == 0), (proc.stdout or "")
+        with tempfile.TemporaryDirectory(prefix="trinity_sandbox_") as run_dir:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".py",
+                delete=False,
+                encoding="utf-8",
+                dir=run_dir,
+            ) as fh:
+                fh.write(script)
+                tmp_path = fh.name
+            try:
+                proc = subprocess.run(
+                    [sys.executable, "-I", tmp_path],
+                    input=stdin_data,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_s,
+                    env=_sandbox_env(home_dir=run_dir),
+                    cwd=run_dir,
+                )
+            except subprocess.TimeoutExpired:
+                return False, ""
+            except (OSError, ValueError):
+                return False, ""
+            return (proc.returncode == 0), (proc.stdout or "")
     finally:
         if tmp_path is not None:
             try:

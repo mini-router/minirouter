@@ -8,16 +8,20 @@ import trinity.orchestration.reward as R
 def test_livecodebench_facade_delegates(monkeypatch):
     seen = {}
 
-    def fake_load_tasks(split, *, max_items=None, seed=0, allow_toy_fallback=False):
-        seen["args"] = (split, max_items, seed, allow_toy_fallback)
+    # Patch the real delegation boundary: the dataset loader the facade imports as
+    # ``_load_tasks``. Patching ``LCB.load_tasks`` instead swaps the one-positional
+    # facade function for a four-positional stub, which silently accepts a miscall
+    # that the real signature rejects.
+    def fake_load_tasks(benchmark, split, max_items, seed=0, *, allow_toy_fallback=False):
+        seen["args"] = (benchmark, split, max_items, seed, allow_toy_fallback)
         return ["ok"]
 
-    monkeypatch.setattr(LCB, "load_tasks", fake_load_tasks)
+    monkeypatch.setattr(LCB, "_load_tasks", fake_load_tasks)
 
     out = LCB.load("test", max_items=3, seed=7)
 
     assert out == ["ok"]
-    assert seen["args"] == ("test", 3, 7, False)
+    assert seen["args"] == ("livecodebench", "test", 3, 7, False)
 
 
 def test_livecodebench_facade_forwards_allow_toy_fallback(monkeypatch):
@@ -34,6 +38,45 @@ def test_livecodebench_facade_forwards_allow_toy_fallback(monkeypatch):
 
     assert seen["benchmark"] == "livecodebench"
     assert seen["allow_toy_fallback"] is True
+
+
+def test_livecodebench_load_is_callable(monkeypatch):
+    """``load()`` must actually be callable — it used to raise TypeError.
+
+    It passed ``("livecodebench", split)`` positionally to the sibling
+    ``load_tasks(split, *, ...)``, which accepts one positional. Nothing caught it
+    because the old test replaced ``load_tasks`` with a four-positional stub.
+    """
+    monkeypatch.setattr(LCB, "_load_tasks", lambda *a, **k: ["ok"])
+
+    assert LCB.load("test", max_items=2) == ["ok"]
+    assert LCB.load_tasks("test", max_items=2) == ["ok"]
+
+
+def test_livecodebench_load_forwards_split_not_a_shifted_positional(monkeypatch):
+    """The split must arrive as the split, not be shifted by a stray positional."""
+    seen = {}
+
+    def fake_load_tasks(benchmark, split, max_items=None, seed=0, *, allow_toy_fallback=False):
+        seen.update(
+            benchmark=benchmark,
+            split=split,
+            max_items=max_items,
+            seed=seed,
+            allow_toy_fallback=allow_toy_fallback,
+        )
+        return []
+
+    monkeypatch.setattr(LCB, "_load_tasks", fake_load_tasks)
+    LCB.load("validation", max_items=5, seed=3)
+
+    assert seen == {
+        "benchmark": "livecodebench",
+        "split": "validation",
+        "max_items": 5,
+        "seed": 3,
+        "allow_toy_fallback": False,
+    }
 
 
 def test_livecodebench_hf_row_parses_to_task(monkeypatch):

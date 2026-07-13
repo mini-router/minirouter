@@ -1,14 +1,49 @@
 {
   "benchmark": "math500",
   "pool": [
-    "deepseek-v4-pro",
-    "glm-5p2",
-    "kimi-k2p6"
+    "qwen3-coder-30b",
+    "gpt-oss-120b",
+    "gemma-3-27b",
+    "nemotron-3-ultra"
   ],
-  "n_total": 13312,
-  "popsize": 2,
-  "m_cma": 1,
+  "n_total": 14336,
+  "popsize": 4,
+  "m_cma": 4,
   "generations": 1,
-  "best_fitness": 1.0,
-  "run_dir": "/home/ubuntu/codes/tmimmanuel/tiny-router-works/minirouter/experiments/math500/local-openrouter-mini"
+  "best_fitness": 0.5,
+  "cost": {
+    "cost_usd": 0.0144,
+    "cost_missing": false,
+    "cost_ledger": "/home/ubuntu/codes/tmimmanuel/tiny-router-works/minirouter/experiments/math500/test-02/cost_ledger.cost_ledger.jsonl",
+    "cost_calls": 27,
+    "cost_prompt_tokens": 14228,
+    "cost_completion_tokens": 10716,
+    "cost_per_model": {
+      "openrouter:google/gemma-3-27b-it": {
+        "prompt_tokens": 4394,
+        "completion_tokens": 1285,
+        "calls": 6,
+        "usd": 0.0006
+      },
+      "openrouter:nvidia/nemotron-3-ultra-550b-a55b": {
+        "prompt_tokens": 1239,
+        "completion_tokens": 5362,
+        "calls": 4,
+        "usd": 0.0124
+      },
+      "openrouter:openai/gpt-oss-120b": {
+        "prompt_tokens": 3729,
+        "completion_tokens": 1579,
+        "calls": 8,
+        "usd": 0.0004
+      },
+      "openrouter:qwen/qwen3-coder-30b-a3b-instruct": {
+        "prompt_tokens": 4866,
+        "completion_tokens": 2490,
+        "calls": 9,
+        "usd": 0.001
+      }
+    }
+  },
+  "run_dir": "/home/ubuntu/codes/tmimmanuel/tiny-router-works/minirouter/experiments/math500/test-02"
 }

@@ -91,7 +91,12 @@ async def evaluate(
                     "reps_correct": votes,
                     "parse_rate": sum(parsed) / len(parsed),
                 }
-                per_query_binary[task.task_id] = int(2 * sum(votes) >= len(votes))
+                # Strict majority: a tie (2*sum == len) resolves to 0, not 1.
+                # `>=` counted a 50/50 ballot as solved, which is partial credit
+                # this harness explicitly must not emit -- and it is reachable via
+                # even --reps or an odd --reps ballot truncated by the spend cap.
+                # Resolving ties against the router is the conservative choice.
+                per_query_binary[task.task_id] = int(2 * sum(votes) > len(votes))
 
     await asyncio.gather(*[_one(t) for t in tasks])
 
