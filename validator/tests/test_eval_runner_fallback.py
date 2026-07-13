@@ -28,19 +28,21 @@ def _add_submission(session, checkpoint_path: Path) -> Submission:
         sha256="abc123",
         size_bytes=checkpoint_path.stat().st_size,
         mime_type="application/octet-stream",
-        submission_id="sub-fallback",
         meta_json={"checkpoint_path": str(checkpoint_path)},
     )
+    session.add(artifact)
+    session.flush()
     submission = Submission(
         id="sub-fallback",
         source="upload",
         miner_id="miner-a",
         benchmark_names_json=["math500"],
         status="queued",
+        submission_artifact_id=artifact.id,
     )
-    session.add(artifact)
     session.add(submission)
-    submission.submission_artifact_id = artifact.id
+    session.flush()
+    artifact.submission_id = submission.id
     session.flush()
     return submission
 

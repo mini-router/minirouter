@@ -221,6 +221,10 @@ class OpenAICompatiblePool:
                 return route
         raise KeyError(f"Unknown model '{model}'. Known: {list(self.models)}")
 
+    def describe_model(self, model: str) -> tuple[str, str]:
+        route = self._resolve_route(model)
+        return route.provider, route.model_id
+
     _REASONING_MAP = {
         "minimal": "low",
         "low": "low",

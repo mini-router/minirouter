@@ -1,4 +1,4 @@
-"""Benchmark dataset loaders (LiveCodeBench, IFEval, RLPR, math, reasoning, domain knowledge).
+"""Benchmark dataset loaders (LiveCodeBench, IFEval, RLPR, BFCL simple slice, math, reasoning, domain knowledge).
 
 Each loader exposes load(split, **kw) -> list[Task], where a Task carries the
 prompt, the reference/answer or test harness, and a score(prediction) -> float.
@@ -9,4 +9,5 @@ The config-facing benchmark aliases currently map to canonical dataset names as 
 
 - ``ifeval`` -> Google IFEval prompts
 - ``rlpr`` -> OpenBMB RLPR-Evaluation suite
+- ``bfcl_simple`` -> BFCL v4 single-turn categories
 """
