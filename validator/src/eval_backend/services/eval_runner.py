@@ -102,10 +102,21 @@ _COST_PRICES: dict[str, tuple[float, float]] = {
     "fireworks:accounts/fireworks/models/deepseek-v4-pro": (1.74, 3.48),
     "fireworks:accounts/fireworks/models/glm-5p2": (1.40, 4.40),
     "fireworks:accounts/fireworks/models/kimi-k2p6": (0.95, 4.00),
+    "openrouter:qwen/qwen3-coder-30b-a3b-instruct": (0.07, 0.27),
+    "openrouter:openai/gpt-oss-120b": (0.036, 0.18),
+    "openrouter:google/gemma-3-4b-it": (0.05, 0.10),
+    "openrouter:google/gemma-3-27b-it": (0.08, 0.16),
+    "openrouter:nvidia/nemotron-3-ultra-550b-a55b": (0.50, 2.20),
+    "openrouter:deepseek-v4-pro": (0.435, 0.87),
+    "openrouter:kimi-k2p6": (0.66, 3.50),
+    "openrouter:glm-5p2": (1.40, 4.40),
     "openrouter:nvidia/nemotron-3-super-120b-a12b:free": (0.0, 0.0),
     "openrouter:google/gemma-4-31b-it:free": (0.0, 0.0),
     "openrouter:openai/gpt-oss-120b:free": (0.0, 0.0),
     "openrouter:qwen/qwen3-coder:free": (0.0, 0.0),
+    "openrouter:nvidia/nemotron-3-super-120b-a12b": (0.0, 0.0),
+    "openrouter:google/gemma-4-31b-it": (0.12, 0.35),
+    "openrouter:qwen/qwen3-32b": (0.08, 0.28),
     "chutes:deepseek-ai/DeepSeek-V3.2-TEE": (1.00, 1.00),
     "chutes:zai-org/GLM-5-TEE": (1.40, 4.40),
     "chutes:moonshotai/Kimi-K2.5-TEE": (0.66, 3.50),
@@ -752,7 +763,7 @@ def evaluate_submission(
             attempts.append(command)
             stdout = out
             stderr = err
-            if completed != 0:
+            if completed != 0 and not local_results_path.exists():
                 raise subprocess.CalledProcessError(
                     completed, command, output=out, stderr=err
                 )
@@ -864,7 +875,7 @@ def evaluate_submission(
             attempts.append(command)
             stdout = out
             stderr = err
-            if completed != 0:
+            if completed != 0 and not local_results_path.exists():
                 raise subprocess.CalledProcessError(
                     completed, command, output=out, stderr=err
                 )

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+import re
 from typing import Iterable
 
 
@@ -49,6 +50,21 @@ def _normalize_pipeline_mode(raw: str) -> str:
     if mode in {"train", "train_eval", "pr_train_eval", "code_train"}:
         return PIPELINE_TRAIN_EVAL
     return DEFAULT_PIPELINE_MODE
+
+
+def _ensure_submission_only(template: str) -> str:
+    """Force submission-eval templates to stay in submission-only mode.
+
+    Stale local secrets have historically overwritten the default command
+    templates without ``--submission-only``. That caused the worker to run the
+    full benchmark harness and fail later on baseline rate limits even though
+    the submitted router itself had already finished.
+    """
+    normalized = template.strip()
+    if not normalized or "--submission-only" in normalized:
+        return normalized
+    pattern = re.compile(r"(python(?:\s+-u)?\s+-m\s+trinity\.eval)(\s+)", re.IGNORECASE)
+    return pattern.sub(r"\1 --submission-only\2", normalized, count=1)
 
 
 DEFAULT_DATABASE_URL = "postgresql+psycopg://minirouter:minirouter@127.0.0.1:5432/minirouter"
@@ -184,7 +200,7 @@ class Settings:
             if origin.strip()
         ]
 
-        return cls(
+        settings = cls(
             database_url=get("DATABASE_URL", DEFAULT_DATABASE_URL),
             artifact_root=_resolve_repo_path(root, get("ARTIFACT_ROOT", str(DEFAULT_ARTIFACT_ROOT))),
             workspace_root=_resolve_repo_path(root, get("WORKSPACE_ROOT", str(DEFAULT_WORKSPACE_ROOT))),
@@ -251,6 +267,9 @@ class Settings:
             sync_eval_on_submit=get("SYNC_EVAL_ON_SUBMIT", "false").lower()
             in {"1", "true", "yes", "on"},
         )
+        settings.remote_eval_command_template = _ensure_submission_only(settings.remote_eval_command_template)
+        settings.local_eval_command_template = _ensure_submission_only(settings.local_eval_command_template)
+        return settings
 
     @property
     def trinity_gpu_host(self) -> str:
