@@ -40,7 +40,14 @@ def find_submission_checkpoint(root: Path) -> Path | None:
     preferred = root / "submissions" / "final_model" / "best_theta.npy"
     if preferred.exists():
         return preferred
-    for name in ("best_theta.npy", "head_params.pt", "theta.npy", "theta.pt", "checkpoint.pt"):
+    candidates = [
+        "best_theta.npy",
+        "head_params.pt",
+        "theta.npy",
+        "theta.pt",
+        "checkpoint.pt",
+    ]
+    for name in candidates:
         matches = list(root.rglob(name))
         if matches:
             return matches[0]

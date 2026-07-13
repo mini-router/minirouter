@@ -5,6 +5,7 @@ import logging
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Iterator
 
 from sqlalchemy import exists, or_, select
@@ -173,8 +174,6 @@ def process_once(session_factory, settings: Settings) -> int:
                 )
             checkpoint_override = None
             if payload.get("checkpoint_path"):
-                from pathlib import Path
-
                 checkpoint_override = Path(str(payload["checkpoint_path"]))
             elif source_root is not None:
                 checkpoint_override = find_submission_checkpoint(source_root)
