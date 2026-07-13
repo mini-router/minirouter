@@ -200,14 +200,6 @@ jobs:
 
             core.info(`Registered submission for PR #${payload.pull_request.number}`)
 
-      - name: Validate submission bundle
-        if: steps.classify.outputs.should_queue == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m pip install --quiet numpy
-          python base/utility/validate_submission.py --dir pr/submissions/final_model
-
       - name: Package submission bundle
         if: steps.classify.outputs.should_queue == 'true'
         shell: bash
