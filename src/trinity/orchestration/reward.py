@@ -815,8 +815,10 @@ def normalize_math_answer(ans: str | None) -> str:
     s = s.strip()
     if s.startswith("="):
         s = s[1:].strip()
-    # Strip a single outer pair of \{ \} or { }.
-    s = re.sub(r"^\\?\{(.*)\\?\}$", r"\1", s).strip()
+    # Strip a single outer pair of \{ \} or { }. The inner capture is non-greedy
+    # so the optional trailing `\\?` can claim the escaping backslash of `\{...\}`;
+    # a greedy `(.*)` swallows it and leaves a stray trailing backslash.
+    s = re.sub(r"^\\?\{(.*?)\\?\}$", r"\1", s).strip()
     # \frac{a}{b} -> a/b
     s = re.sub(r"\\d?frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}", r"(\1)/(\2)", s)
     s = re.sub(r"\\d?frac\s*(\d)\s*(\d)", r"\1/\2", s)

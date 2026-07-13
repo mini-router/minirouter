@@ -18,6 +18,19 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-13 — math grader dropped escaped set braces, leaving a trailing backslash  #mistake #fix #repro
+**Context:** grading math answers via `normalize_math_answer` in `orchestration/reward.py`.
+**Expected:** `\{1,2,3\}` and `1,2,3` normalize to the same string, so `math_equal` calls them equal.
+**Actual:** `normalize_math_answer(r'\{1,2,3\}')` returned `'1,2,3\\'` (stray trailing backslash), so
+`math_equal(r'\{1,2,3\}', '1,2,3')` returned `False` — a false-negative on set-valued answers.
+**Root cause:** the "strip one outer pair of `\{ \}`/`{ }`" step used a greedy `(.*)`; the capture
+swallowed the closing backslash and the optional `\\?` matched nothing, leaving the backslash behind.
+The unescaped `{...}` case was unaffected, which is why it slipped through.
+**Fix / decision:** make the inner capture non-greedy — `^\\?\{(.*?)\\?\}$` — so the trailing `\\?`
+claims the escaping backslash. Added `tests/test_reward_escaped_braces.py` (offline) covering the
+escaped/plain cases and a no-trailing-backslash invariant; 41 existing reward tests still pass.
+**Follow-up:** none; scoped to the outer-brace strip, unrelated to the scientific-notation work in #108.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.
