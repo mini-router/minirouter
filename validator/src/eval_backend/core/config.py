@@ -93,6 +93,9 @@ DEFAULT_EVAL_BATCH_SIZE = 1
 DEFAULT_EVAL_BENCHMARK = "math500"
 DEFAULT_GIT_AUTHOR_NAME = "Minirouter Evaluator"
 DEFAULT_GIT_AUTHOR_EMAIL = "eval-bot@example.com"
+DEFAULT_ADMIN_USERNAME = "minirouteryama"
+DEFAULT_ADMIN_PASSWORD = "minirouterstrongpass@333"
+DEFAULT_ADMIN_SESSION_TTL_HOURS = 168
 DEFAULT_TRINITY_SECRETS_FILE = "./secrets.env"
 DEFAULT_EVAL_TIMEOUT_SECONDS = 1800
 DEFAULT_EVAL_EXECUTION_MODE = "remote_gpu"
@@ -140,6 +143,9 @@ class Settings:
     eval_benchmark: str = DEFAULT_EVAL_BENCHMARK
     git_author_name: str = DEFAULT_GIT_AUTHOR_NAME
     git_author_email: str = DEFAULT_GIT_AUTHOR_EMAIL
+    admin_username: str = DEFAULT_ADMIN_USERNAME
+    admin_password: str = DEFAULT_ADMIN_PASSWORD
+    admin_session_ttl_hours: int = DEFAULT_ADMIN_SESSION_TTL_HOURS
     trinity_secrets_file: str = DEFAULT_TRINITY_SECRETS_FILE
     eval_timeout_seconds: int = DEFAULT_EVAL_TIMEOUT_SECONDS
     eval_execution_mode: str = DEFAULT_EVAL_EXECUTION_MODE
@@ -215,6 +221,11 @@ class Settings:
             eval_benchmark=get("EVAL_BENCHMARK", DEFAULT_EVAL_BENCHMARK),
             git_author_name=get("GIT_AUTHOR_NAME", DEFAULT_GIT_AUTHOR_NAME),
             git_author_email=get("GIT_AUTHOR_EMAIL", DEFAULT_GIT_AUTHOR_EMAIL),
+            admin_username=get("ADMIN_USERNAME", DEFAULT_ADMIN_USERNAME),
+            admin_password=get("ADMIN_PASSWORD", DEFAULT_ADMIN_PASSWORD),
+            admin_session_ttl_hours=int(
+                get("ADMIN_SESSION_TTL_HOURS", str(DEFAULT_ADMIN_SESSION_TTL_HOURS))
+            ),
             trinity_secrets_file=get("TRINITY_SECRETS_FILE", DEFAULT_TRINITY_SECRETS_FILE),
             eval_timeout_seconds=int(get("EVAL_TIMEOUT_SECONDS", str(DEFAULT_EVAL_TIMEOUT_SECONDS))),
             eval_execution_mode=get("EVAL_EXECUTION_MODE", DEFAULT_EVAL_EXECUTION_MODE),

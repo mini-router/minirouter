@@ -169,3 +169,23 @@ class JobQueueResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str = "ok"
+
+
+class AdminLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AdminLoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    username: str
+    expires_at: datetime
+
+
+class AdminLogoutResponse(BaseModel):
+    ok: bool = True
+
+
+class AdminMeResponse(BaseModel):
+    username: str

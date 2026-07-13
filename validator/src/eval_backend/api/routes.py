@@ -7,13 +7,17 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..core.config import Settings
-from ..models import EvaluationRun, JobQueue, Submission, TrainRun
+from ..models import AdminUser, EvaluationRun, JobQueue, Submission, TrainRun
 from ..schemas import (
+    AdminLoginRequest,
+    AdminLoginResponse,
+    AdminLogoutResponse,
+    AdminMeResponse,
     EvaluationOut,
     HealthResponse,
     JobQueueOut,
@@ -26,6 +30,12 @@ from ..schemas import (
     SubmissionCreateResponse,
     SubmissionOut,
 )
+from ..services.admin_auth import (
+    authenticate_admin_token,
+    create_admin_session,
+    revoke_admin_token,
+    verify_password,
+)
 from ..services.eval_runner import evaluate_submission
 from ..services.github import create_pr_submission
 from ..services.github import set_commit_status
@@ -35,6 +45,7 @@ from ..services.queue import enqueue_train_job
 from ..services.storage import store_upload
 
 router = APIRouter()
+admin_router = APIRouter(prefix="/api/admin")
 
 
 def _latest_run(submission: Submission) -> tuple[datetime | None, str | None, str | None, int | None, int | None]:
@@ -248,6 +259,32 @@ def _job_to_schema(job: JobQueue) -> JobQueueOut:
         created_at=job.created_at,
         updated_at=job.updated_at,
     )
+
+
+def _extract_bearer_token(authorization: str | None) -> str:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="missing admin token")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=401, detail="missing admin token")
+    return token.strip()
+
+
+def _require_admin_user(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> AdminUser:
+    session = get_session(request)
+    try:
+        token = _extract_bearer_token(authorization)
+        user = authenticate_admin_token(session, token)
+        session.commit()
+        return user
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
 def _safe_team_name(request: Request, explicit: str | None = None) -> str | None:
@@ -649,6 +686,129 @@ def list_jobs(
         return JobQueueResponse(items=[_job_to_schema(job) for job in items])
     finally:
         session.close()
+
+
+@admin_router.post("/login", response_model=AdminLoginResponse)
+def admin_login(
+    request: Request,
+    payload: AdminLoginRequest,
+    settings: Settings = Depends(get_settings),
+) -> AdminLoginResponse:
+    session = get_session(request)
+    try:
+        username = payload.username.strip()
+        user = session.execute(select(AdminUser).where(AdminUser.username == username)).scalar_one_or_none()
+        if user is None or not user.is_active or not verify_password(payload.password, user.password_hash):
+            raise HTTPException(status_code=401, detail="invalid username or password")
+        admin_session, token = create_admin_session(session, user, settings)
+        session.commit()
+        return AdminLoginResponse(
+            access_token=token,
+            token_type="bearer",
+            username=user.username,
+            expires_at=admin_session.expires_at,
+        )
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@admin_router.post("/logout", response_model=AdminLogoutResponse)
+def admin_logout(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> AdminLogoutResponse:
+    session = get_session(request)
+    try:
+        token = _extract_bearer_token(authorization)
+        revoke_admin_token(session, token)
+        session.commit()
+        return AdminLogoutResponse(ok=True)
+    except HTTPException:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@admin_router.get("/me", response_model=AdminMeResponse)
+def admin_me(
+    request: Request,
+    user: AdminUser = Depends(_require_admin_user),
+) -> AdminMeResponse:
+    return AdminMeResponse(username=user.username)
+
+
+@admin_router.get("/leaderboard", response_model=LeaderboardResponse)
+def admin_leaderboard(
+    request: Request,
+    limit: int = 100,
+    user: AdminUser = Depends(_require_admin_user),
+) -> LeaderboardResponse:
+    return leaderboard(request, limit=limit)
+
+
+@admin_router.get("/jobs", response_model=JobQueueResponse)
+def admin_list_jobs(
+    request: Request,
+    status: str | None = None,
+    job_type: str | None = None,
+    limit: int = 100,
+    user: AdminUser = Depends(_require_admin_user),
+) -> JobQueueResponse:
+    return list_jobs(request, status=status, job_type=job_type, limit=limit)
+
+
+@admin_router.get("/submissions/{submission_id}", response_model=SubmissionOut)
+def admin_get_submission(
+    request: Request,
+    submission_id: str,
+    user: AdminUser = Depends(_require_admin_user),
+) -> SubmissionOut:
+    return get_submission(request, submission_id)
+
+
+@admin_router.get("/evaluations/{evaluation_id}", response_model=EvaluationOut)
+def admin_get_evaluation(
+    request: Request,
+    evaluation_id: int,
+    user: AdminUser = Depends(_require_admin_user),
+) -> EvaluationOut:
+    return get_evaluation(request, evaluation_id)
+
+
+@admin_router.post("/trains", response_model=TrainCreateResponse)
+def admin_create_train_job(
+    request: Request,
+    payload: TrainCreateRequest,
+    settings: Settings = Depends(get_settings),
+    user: AdminUser = Depends(_require_admin_user),
+) -> TrainCreateResponse:
+    return create_train_job(request, payload, settings)
+
+
+@admin_router.post("/submit", response_model=SubmissionCreateResponse)
+async def admin_submit(
+    request: Request,
+    file: UploadFile = File(...),
+    team_name: str | None = None,
+    repo_full_name: str | None = Form(None),
+    pr_number: int | None = Form(None),
+    head_sha: str | None = Form(None),
+    settings: Settings = Depends(get_settings),
+    user: AdminUser = Depends(_require_admin_user),
+) -> SubmissionCreateResponse:
+    return await submit(
+        request,
+        file=file,
+        team_name=team_name,
+        repo_full_name=repo_full_name,
+        pr_number=pr_number,
+        head_sha=head_sha,
+        settings=settings,
+    )
 
 
 def _metric_value(metrics: dict[str, Any], key: str) -> float | None:
