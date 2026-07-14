@@ -115,12 +115,12 @@ def test_github_webhook_enqueues_submission_job(validator_engine) -> None:
     assert job.status == "queued"
     assert job.job_type == "evaluation"
 
+
 def test_should_promote_submission_requires_threshold_and_king_score() -> None:
     assert should_promote_submission(0.81, 0.8, 0.8) is True
     assert should_promote_submission(0.8, 0.8, 0.8) is False
     assert should_promote_submission(0.95, 0.8, 0.96) is False
     assert should_promote_submission(None, 0.8, 0.8) is False
-
 
 def test_github_webhook_ignores_non_submission_pr(validator_engine) -> None:
     settings = Settings(
@@ -164,7 +164,7 @@ def test_github_webhook_ignores_non_submission_pr(validator_engine) -> None:
 
     with Session() as session:
         submission = session.query(Submission).filter_by(pr_number=6).first()
-        job = session.query(JobQueue).filter_by(pr_number=6).first()
+        job_count = session.query(JobQueue).count()
 
     assert submission is None
-    assert job is None
+    assert job_count == 0
