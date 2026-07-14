@@ -89,8 +89,14 @@ async def _score_policy(
         trajs = await gather_in_batches(
             [one(task, i) for i, task in enumerate(tasks, start=1)],
             batch_size=batch_size,
+            return_exceptions=True,
         )
-    scores = [0.0 if traj is None else float(R.score(traj)) for traj in trajs]
+    scores = []
+    for traj in trajs:
+        if isinstance(traj, BaseException):
+            scores.append(0.0)
+            continue
+        scores.append(0.0 if traj is None else float(R.score(traj)))
     return float(mean(scores))
 
 
@@ -142,8 +148,14 @@ async def _score_submission_policy(
         trajs = await gather_in_batches(
             [one(task, i) for i, task in enumerate(tasks, start=1)],
             batch_size=batch_size,
+            return_exceptions=True,
         )
-    scores = [0.0 if traj is None else float(R.score(traj)) for traj in trajs]
+    scores = []
+    for traj in trajs:
+        if isinstance(traj, BaseException):
+            scores.append(0.0)
+            continue
+        scores.append(0.0 if traj is None else float(R.score(traj)))
     score = float(mean(scores)) if scores else 0.0
     print(f"[submission] completed score={score:.4f}", flush=True)
     return score
@@ -192,7 +204,9 @@ async def _score_single_model(
         scores = await gather_in_batches(
             [run_one(task, i) for i, task in enumerate(tasks, start=1)],
             batch_size=batch_size,
+            return_exceptions=True,
         )
+        scores = [0.0 if isinstance(score, BaseException) else float(score) for score in scores]
     return float(mean(scores))
 
 
@@ -212,7 +226,20 @@ async def evaluate(args) -> dict:
         f"[eval] benchmark={args.benchmark}  {len(tasks)} test tasks  "
         f"batch_size={batch_size} pool={pool_models}"
     )
-    run_kwargs = dict(max_turns=args.max_turns, max_tokens=args.max_tokens, reasoning=args.reasoning)
+    run_kwargs = dict(
+        max_turns=args.max_turns,
+        max_tokens=args.max_tokens,
+        reasoning=args.reasoning,
+        request_timeout_s=args.request_timeout_s,
+        trajectory_timeout_s=args.trajectory_timeout_s,
+    )
+    if args.request_timeout_s or args.trajectory_timeout_s:
+        print(
+            "[eval] timeouts "
+            f"request={args.request_timeout_s or 'default'}s "
+            f"trajectory={args.trajectory_timeout_s or 'default'}s",
+            flush=True,
+        )
 
     if args.submission_only:
         cfg = yaml.safe_load(Path(args.config).read_text())["coordinator"]
@@ -358,6 +385,20 @@ def main() -> None:
     ap.add_argument("--max-turns", type=int, default=5, dest="max_turns")
     ap.add_argument("--max-tokens", type=int, default=4096, dest="max_tokens")
     ap.add_argument("--reasoning", default="minimal")
+    ap.add_argument(
+        "--request-timeout-s",
+        type=float,
+        default=0.0,
+        dest="request_timeout_s",
+        help="per-provider request timeout for each LLM call inside a trajectory",
+    )
+    ap.add_argument(
+        "--trajectory-timeout-s",
+        type=float,
+        default=0.0,
+        dest="trajectory_timeout_s",
+        help="wall-clock timeout for one evaluation trajectory",
+    )
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument(
         "--batch-size",
