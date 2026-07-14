@@ -67,9 +67,17 @@ async def _score_policy(
 
         async def one(task, i: int):
             print(f"[eval] TRINITY task {i}/{total} id={task.task_id}", flush=True)
-            traj = await run_trajectory(
-                task, policy, pool, pool_models, sample=sample, client=cli, **run_kwargs
-            )
+            try:
+                traj = await run_trajectory(
+                    task, policy, pool, pool_models, sample=sample, client=cli, **run_kwargs
+                )
+            except Exception as exc:
+                print(
+                    f"[eval] TRINITY task {i}/{total} failed score=0.000 "
+                    f"({type(exc).__name__}: {exc})",
+                    flush=True,
+                )
+                return None
             score = R.score(traj)
             print(
                 f"[eval] TRINITY task {i}/{total} done turns={len(traj.turns)} "
@@ -82,7 +90,8 @@ async def _score_policy(
             [one(task, i) for i, task in enumerate(tasks, start=1)],
             batch_size=batch_size,
         )
-    return float(mean(R.score(t) for t in trajs))
+    scores = [0.0 if traj is None else float(R.score(traj)) for traj in trajs]
+    return float(mean(scores))
 
 
 async def _score_submission_policy(
@@ -111,9 +120,17 @@ async def _score_submission_policy(
 
         async def one(task, i: int):
             print(f"[submission] item {i}/{total} start id={task.task_id}", flush=True)
-            traj = await run_trajectory(
-                task, policy, pool, pool_models, sample=sample, client=cli, **run_kwargs
-            )
+            try:
+                traj = await run_trajectory(
+                    task, policy, pool, pool_models, sample=sample, client=cli, **run_kwargs
+                )
+            except Exception as exc:
+                print(
+                    f"[submission] item {i}/{total} failed score=0.000 "
+                    f"({type(exc).__name__}: {exc})",
+                    flush=True,
+                )
+                return None
             score = R.score(traj)
             verdict = "pass" if score >= 0.5 else "fail"
             print(
@@ -126,7 +143,8 @@ async def _score_submission_policy(
             [one(task, i) for i, task in enumerate(tasks, start=1)],
             batch_size=batch_size,
         )
-    score = float(mean(R.score(t) for t in trajs)) if trajs else 0.0
+    scores = [0.0 if traj is None else float(R.score(traj)) for traj in trajs]
+    score = float(mean(scores)) if scores else 0.0
     print(f"[submission] completed score={score:.4f}", flush=True)
     return score
 
@@ -153,8 +171,16 @@ async def _score_single_model(
 
         async def one(task, idx: int):
             msgs = build_messages(Role.WORKER, task.prompt, [])
-            res = await pool.chat(model, msgs, max_tokens=max_tokens, temperature=0.0,
-                                  reasoning=reasoning, client=cli)
+            try:
+                res = await pool.chat(model, msgs, max_tokens=max_tokens, temperature=0.0,
+                                      reasoning=reasoning, client=cli)
+            except Exception as exc:
+                print(
+                    f"[eval] single::{model} task {idx}/{total} failed score=0.000 "
+                    f"({type(exc).__name__}: {exc})",
+                    flush=True,
+                )
+                return 0.0
             return R.score_text(benchmark, res.text, task.answer)
 
         async def run_one(task, i: int):
