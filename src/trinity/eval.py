@@ -68,9 +68,20 @@ async def _score_policy(
         async def one(task, i: int):
             print(f"[eval] TRINITY task {i}/{total} id={task.task_id}", flush=True)
             try:
-                traj = await run_trajectory(
-                    task, policy, pool, pool_models, sample=sample, client=cli, **run_kwargs
+                traj_coro = run_trajectory(
+                    task,
+                    policy,
+                    pool,
+                    pool_models,
+                    sample=sample,
+                    client=cli,
+                    **{k: v for k, v in run_kwargs.items() if k != "trajectory_timeout_s"},
                 )
+                traj_timeout_s = run_kwargs.get("trajectory_timeout_s")
+                if traj_timeout_s and traj_timeout_s > 0:
+                    traj = await asyncio.wait_for(traj_coro, timeout=float(traj_timeout_s))
+                else:
+                    traj = await traj_coro
             except Exception as exc:
                 print(
                     f"[eval] TRINITY task {i}/{total} failed score=0.000 "
@@ -127,9 +138,20 @@ async def _score_submission_policy(
         async def one(task, i: int):
             print(f"[submission] item {i}/{total} start id={task.task_id}", flush=True)
             try:
-                traj = await run_trajectory(
-                    task, policy, pool, pool_models, sample=sample, client=cli, **run_kwargs
+                traj_coro = run_trajectory(
+                    task,
+                    policy,
+                    pool,
+                    pool_models,
+                    sample=sample,
+                    client=cli,
+                    **{k: v for k, v in run_kwargs.items() if k != "trajectory_timeout_s"},
                 )
+                traj_timeout_s = run_kwargs.get("trajectory_timeout_s")
+                if traj_timeout_s and traj_timeout_s > 0:
+                    traj = await asyncio.wait_for(traj_coro, timeout=float(traj_timeout_s))
+                else:
+                    traj = await traj_coro
             except Exception as exc:
                 print(
                     f"[submission] item {i}/{total} failed score=0.000 "
