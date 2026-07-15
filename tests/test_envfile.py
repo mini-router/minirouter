@@ -6,6 +6,7 @@ import os
 
 import pytest
 
+import trinity.envfile as trinity_envfile
 from trinity.envfile import load_env_file, load_project_env
 
 
@@ -115,3 +116,24 @@ def test_load_project_env_prefers_repo_secrets(tmp_path, isolated_key, monkeypat
     loaded = load_project_env(repo_root=tmp_path)
     assert loaded == tmp_path / "secrets.env"
     assert os.environ[isolated_key] == "from_repo"
+
+
+def test_load_project_env_default_repo_root_matches_module_layout(
+    tmp_path, isolated_key, monkeypatch
+):
+    # Simulate the real src/trinity/envfile.py depth, where parents[2] is the
+    # repo root (regression test: a previous version used parents[3], which
+    # pointed one directory above the repo).
+    fake_repo_root = tmp_path / "repo"
+    fake_module_dir = fake_repo_root / "src" / "trinity"
+    fake_module_dir.mkdir(parents=True)
+    monkeypatch.setattr(trinity_envfile, "__file__", str(fake_module_dir / "envfile.py"))
+    monkeypatch.delenv("TRINITY_SECRETS_FILE", raising=False)
+    (fake_repo_root / "secrets.env").write_text(
+        f"{isolated_key}=from_default_root\n", encoding="utf-8"
+    )
+
+    loaded = load_project_env()
+
+    assert loaded == fake_repo_root / "secrets.env"
+    assert os.environ[isolated_key] == "from_default_root"

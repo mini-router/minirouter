@@ -82,7 +82,7 @@ def load_env_file(path: str | Path) -> Path | None:
 
 def load_project_env(*, repo_root: str | Path | None = None) -> Path | None:
     """Load the first matching secrets file for this project."""
-    root = Path(repo_root).expanduser() if repo_root is not None else Path(__file__).resolve().parents[3]
+    root = Path(repo_root).expanduser() if repo_root is not None else Path(__file__).resolve().parents[2]
     candidates = [
         os.environ.get("TRINITY_SECRETS_FILE"),
         root / "secrets.env",
