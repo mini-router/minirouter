@@ -12,6 +12,7 @@ from eval_backend.models import JobQueue, Submission
 from eval_backend.core.config import Settings
 from eval_backend.services.github import create_pr_submission
 from eval_backend.services.github import should_promote_submission
+from eval_backend.services.github import _repo_owner, _repo_name
 from eval_backend.services.runtime_config import seed_runtime_config
 
 
@@ -121,6 +122,24 @@ def test_should_promote_submission_requires_threshold_and_king_score() -> None:
     assert should_promote_submission(0.8, 0.8, 0.8) is False
     assert should_promote_submission(0.95, 0.8, 0.96) is False
     assert should_promote_submission(None, 0.8, 0.8) is False
+
+
+def test_repo_owner_and_repo_name_split_full_name() -> None:
+    assert _repo_owner("mini-router/minirouter") == "mini-router"
+    assert _repo_name("mini-router/minirouter") == "minirouter"
+
+
+def test_repo_owner_and_repo_name_handle_missing_input() -> None:
+    assert _repo_owner(None) is None
+    assert _repo_name(None) is None
+    assert _repo_owner("no-slash-here") is None
+    assert _repo_name("no-slash-here") is None
+
+
+def test_repo_owner_and_repo_name_split_on_first_slash_only() -> None:
+    # maxsplit=1: only the owner is split off, the rest (incl. any "/") is the name.
+    assert _repo_owner("a/b/c") == "a"
+    assert _repo_name("a/b/c") == "b/c"
 
 def test_github_webhook_ignores_non_submission_pr(validator_engine) -> None:
     settings = Settings(
