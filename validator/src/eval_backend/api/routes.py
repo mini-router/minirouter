@@ -327,6 +327,7 @@ def _runtime_config_to_schema(session: Session, settings: Settings) -> AdminRunt
     return AdminRuntimeConfigOut(
         benchmark_names=list(runtime.benchmark_names),
         eval_max_items=runtime.eval_max_items,
+        eval_batch_size=runtime.eval_batch_size,
         eval_provider=runtime.eval_provider,
         eval_models_config=runtime.eval_models_config,
         eval_execution_mode=runtime.eval_execution_mode,
@@ -917,6 +918,7 @@ def admin_update_config(
             settings,
             benchmark_names=payload.benchmark_names,
             eval_max_items=payload.eval_max_items,
+            eval_batch_size=payload.eval_batch_size,
             eval_provider=payload.eval_provider,
             eval_models_config=payload.eval_models_config,
             eval_execution_mode=payload.eval_execution_mode,
