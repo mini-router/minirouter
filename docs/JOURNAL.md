@@ -18,6 +18,14 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-16 — MC grading preferred the first echoed option letter  #mistake #gotcha
+**Context:** issue #124 — models that reprint the option list (`A) ...`, `B) ...`) then commit to a bare final letter.
+**Expected:** `extract_choice_letter` returns the committed final letter (e.g. `B`).
+**Actual:** the line-start pattern matched every option line and `re.search()` returned `A`, scoring correct answers 0.
+**Root cause:** `_CHOICE_PATTERNS` included `^\\s*\\(?\\s*([A-D])\\s*[\\).:]` which fires on echoed options before the reversed-last-line fallback can run.
+**Fix / decision:** drop that pattern; keep trigger-phrase patterns and the existing final-line fallback. Regression tests in `tests/test_reward_checkers.py`.
+**Follow-up:** letter-range A–J is tracked separately (#122 / #116).
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.

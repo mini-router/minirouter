@@ -945,11 +945,14 @@ def _ref_to_str(reference: object) -> str:
 _CHOICE_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Require the captured letter to be followed by a delimiter or end-of-word,
     # so "the answer Beats..." does NOT match "B" (P2 review fix).
+    # Intentionally NO line-start "A) ..." pattern: when a model echoes the
+    # option list, that form matches every option line and re.search() returns
+    # the FIRST (usually A), outranking the committed final answer. Standalone
+    # final-line letters are handled by the reversed-line fallback below.
     re.compile(r"answer\s*(?:is|:)?\s*\(?\s*([A-D])\s*(?:[\).:]|\b)(?![A-Za-z])", re.I),
     re.compile(r"\\boxed\s*\{\s*\(?\s*([A-D])\s*\)?\s*\}", re.I),
     re.compile(r"\bfinal\s+answer\s*[:=]?\s*\(?\s*([A-D])(?![A-Za-z])", re.I),
     re.compile(r"\boption\s*\(?\s*([A-D])(?![A-Za-z])", re.I),
-    re.compile(r"^\s*\(?\s*([A-D])\s*[\).:]", re.M),
 )
 
 
@@ -975,11 +978,15 @@ def extract_choice_letter(text: str) -> str | None:
         m = pat.search(text)
         if m:
             return m.group(1).upper()
-    # Fallback (P2 review fix): only trust the LAST non-empty line, and only when
-    # it is essentially just the letter (e.g. "B", "(C)", "D."). This avoids the
-    # English article "A" in prose like "A nice approach" being read as a choice.
+    # Fallback (P2 review fix + #124): only trust the LAST non-empty line.
+    # Prefer a bare letter line ("B", "(C)", "D."), else a trailing standalone
+    # letter at end of that line ("The capital is B"). Never scan earlier lines
+    # so echoed option lists ("A) ...") cannot win.
     for line in reversed([ln.strip() for ln in text.splitlines() if ln.strip()]):
         m = re.fullmatch(r"\(?\s*([A-D])\s*\)?[.:]?", line, re.I)
+        if m:
+            return m.group(1).upper()
+        m = re.search(r"(?<![A-Za-z])([A-D])(?![A-Za-z])\s*$", line, re.I)
         if m:
             return m.group(1).upper()
         break  # only inspect the final non-empty line

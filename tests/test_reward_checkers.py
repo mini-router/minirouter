@@ -74,3 +74,24 @@ def test_code_empty_tests_fail_closed():
 def test_extract_code_returns_last_fenced_block():
     text = "```python\nold = 1\n```\nSome text\n```python\nnew = 2\n```"
     assert "new = 2" in R.extract_code(text)
+
+
+def test_choice_echoed_options_prefer_final_letter():
+    # Issue #124: echoing "A) ...\\nB) ..." must not force letter A.
+    text = "A) Paris\nB) London\nC) Berlin\nD) Rome\n\nB"
+    assert R.extract_choice_letter(text) == "B"
+    assert R.score_text("mmlu", text, "B") == 1.0
+    assert R.score_text("mmlu", text, "A") == 0.0
+
+
+def test_choice_echoed_options_with_prose_answer():
+    text = "A) Paris\nB) London\nC) Berlin\nD) Rome\nThe capital is B"
+    # Trigger-phrase patterns still win; echoed options must not preempt them.
+    assert R.extract_choice_letter(text) == "B"
+
+
+def test_choice_trigger_phrases_unchanged_with_option_list():
+    text = "A) Paris\nB) London\nC) Berlin\nD) Rome\nThe answer is C"
+    assert R.extract_choice_letter(text) == "C"
+    text_boxed = "A) Paris\nB) London\n\\boxed{D}"
+    assert R.extract_choice_letter(text_boxed) == "D"
