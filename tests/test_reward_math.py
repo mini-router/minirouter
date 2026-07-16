@@ -57,3 +57,22 @@ def test_existing_math_cases_unaffected():
     assert R.score_text("math500", r"\boxed{41}", "42") == 0.0
     assert R.score_text("math500", "answer: 1/2", "0.5") == 1.0
     assert R.math_equal("18.90", r"\$18.90") is True
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (r"\{5\}", "5"),
+        (r"\{1,2,3\}", "1,2,3"),
+        ("{5}", "5"),
+        ("{1,2,3}", "1,2,3"),
+    ],
+)
+def test_normalize_strips_escaped_set_braces_cleanly(raw, expected):
+    # Issue #162: greedy outer-brace strip left a trailing backslash on \{...\}.
+    assert R.normalize_math_answer(raw) == expected
+
+
+def test_escaped_set_braces_grade_equal():
+    assert R.math_equal(r"\{1,2,3\}", "1,2,3") is True
+    assert R.score_text("math500", r"\boxed{\{1,2,3\}}", "1,2,3") == 1.0
