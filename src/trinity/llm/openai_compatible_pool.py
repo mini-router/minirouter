@@ -140,6 +140,27 @@ class OpenAICompatiblePool:
             name: self._build_headers(spec) for name, spec in self.providers.items()
         }
 
+    def decoding_for(self, role: str, *, temperature: float = 0.0, top_p: float = 1.0, max_tokens: int = 4096) -> dict[str, float | int]:
+        """Resolve per-role decoding params with backward-compatible defaults.
+
+        Config shape:
+            decoding:
+              thinker: { temperature: 0.7, top_p: 0.95, max_tokens: 4096 }
+              worker:  { ... }
+              verifier:{ ... }
+
+        Missing role/fields fall back to the provided defaults (current session
+        behavior when no decoding block is present).
+        """
+        block = self.decoding.get(role) if isinstance(self.decoding, dict) else None
+        if not isinstance(block, dict):
+            return {"temperature": temperature, "top_p": top_p, "max_tokens": max_tokens}
+        return {
+            "temperature": float(block.get("temperature", temperature)),
+            "top_p": float(block.get("top_p", top_p)),
+            "max_tokens": int(block.get("max_tokens", max_tokens)),
+        }
+
     def _load_providers(self, cfg: dict) -> dict[str, ProviderSpec]:
         providers_cfg = cfg.get("providers")
         if providers_cfg is None and "fireworks" in cfg:

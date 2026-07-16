@@ -91,7 +91,23 @@ async def run_trajectory(
         )
 
         messages = _prompts.build_messages(role, task.prompt, traj.turns)
-        kwargs = dict(temperature=temperature, top_p=top_p, max_tokens=max_tokens)
+        # Prefer per-role decoding from the model pool config when available.
+        # Explicit run_trajectory kwargs remain the fallback/default and still
+        # win for fields missing from the config block.
+        if hasattr(pool, "decoding_for"):
+            decoded = pool.decoding_for(
+                role.value,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+            )
+            kwargs = dict(
+                temperature=decoded["temperature"],
+                top_p=decoded["top_p"],
+                max_tokens=decoded["max_tokens"],
+            )
+        else:
+            kwargs = dict(temperature=temperature, top_p=top_p, max_tokens=max_tokens)
         if client is not None:
             kwargs["client"] = client
         if reasoning is not None:
