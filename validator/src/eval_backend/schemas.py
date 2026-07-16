@@ -196,6 +196,7 @@ class AdminRuntimeConfigOut(BaseModel):
 
     benchmark_names: list[str] = Field(default_factory=list)
     eval_max_items: int
+    eval_batch_size: int
     eval_provider: str
     eval_models_config: str
     eval_execution_mode: str
@@ -206,6 +207,7 @@ class AdminRuntimeConfigOut(BaseModel):
 class AdminRuntimeConfigUpdate(BaseModel):
     benchmark_names: list[str] = Field(default_factory=list)
     eval_max_items: int = 20
+    eval_batch_size: int = 1
     eval_provider: str = "chutes"
     eval_models_config: str = "configs/models.chutes.yaml"
     eval_execution_mode: str = "remote_gpu"
