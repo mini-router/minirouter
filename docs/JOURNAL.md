@@ -1219,3 +1219,10 @@ Addressed PR 102 review feedback for `bfcl_simple`:
 - pinned the Gorilla raw-source snapshot instead of reading from `main`
 - blocked `train` splits so the benchmark stays evaluation-only in this repo
 - kept the simplified single-turn scope explicit in the loader/docs
+## 2026-07-16 — Cost ledger JSON escaping #bug #finding
+
+Expected the token-cost ledger writer to produce valid JSONL for every configured model id.
+Issue #165 showed the writer hand-built JSON with an f-string, so quotes or backslashes in a
+model id corrupted the line and made `ledger_cost_report` silently skip the call. The fix is to
+serialize ledger rows with `json.dumps`, with a regression test covering a model id containing
+both a quote and a backslash.
