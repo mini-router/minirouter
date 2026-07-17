@@ -18,6 +18,20 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-13 — workflow parser rejected a bare-int access index  #mistake #fix #repro
+**Context:** parsing a Conductor workflow proposal in `fugu/workflow.py::_normalize_access`.
+**Expected:** an `access_list` entry of `0` parses the same as `"0"` or `[0]` (read step 0).
+**Actual:** `parse_workflow('... access_list=[[], 0]', 3)` returned `(None, False)` — the whole
+workflow was dropped (`parsed_ok=False`, reward 0) — while the identical `access_list=[[], "0"]`
+parsed fine.
+**Root cause:** `_normalize_access` handled scalar `str` digits and `None`, and lists, but a bare
+scalar `int` fell through every branch to `return None`, rejecting the proposal.
+**Fix / decision:** add a bare-`int` branch (rejecting `bool`, which subclasses `int`) that returns
+`[acc]` when `0 <= acc < step_index`, matching the accepted `"0"`/`[0]` forms. This aligns with the
+parser's stated goal of not losing recoverable valid outputs. Added `tests/test_fugu_access_int.py`
+(offline); 8 existing workflow tests still pass.
+**Follow-up:** none.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.
