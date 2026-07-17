@@ -81,6 +81,21 @@ class TrainCreateResponse(BaseModel):
     job_id: str
 
 
+class ProviderEvaluationCreateRequest(BaseModel):
+    benchmark_names: list[str] = Field(default_factory=list)
+    pool_models: list[str] = Field(default_factory=list)
+    provider: str = "compatible"
+    models_config: str = "configs/models.openrouter-chutes.yaml"
+    max_items: int = 20
+    batch_size: int = 1
+    repeat: int = 1
+
+
+class ProviderEvaluationCreateResponse(BaseModel):
+    evaluations: list[EvaluationOut]
+    job_ids: list[str]
+
+
 class SubmissionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -147,6 +162,7 @@ class JobQueueOut(BaseModel):
     job_id: str
     submission_id: str | None = None
     train_id: int | None = None
+    evaluation_id: int | None = None
     queue_name: str
     status: str
     priority: int

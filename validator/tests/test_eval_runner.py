@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from eval_backend.core.config import Settings
-from eval_backend.models import Artifact, Submission
+from eval_backend.models import Artifact, EvaluationRun, Submission
 from eval_backend.services import eval_runner
 
 
@@ -158,3 +158,55 @@ def test_ledger_cost_report_prices_current_openrouter_models(tmp_path):
     assert metrics["cost_calls"] == 4
     assert metrics["cost_usd"] > 0
     assert metrics["cost_per_model"]["openrouter:google/gemma-3-4b-it"]["usd"] > 0
+
+
+def test_provider_route_evaluation_saves_standalone_result(validator_session, tmp_path, monkeypatch):
+    session = validator_session
+    settings = _build_settings(tmp_path)
+    run = EvaluationRun(
+        submission_id=None,
+        benchmark_names_json=["math500"],
+        provider="compatible",
+        models_config="configs/models.openrouter-chutes.yaml",
+        execution_mode="local_cpu",
+        device="cpu",
+        dtype="float32",
+        batch_size=2,
+        max_items=3,
+        status="queued",
+        metrics_json=json.dumps({"pool_model": "openrouter-glm-5", "repeat": 2}),
+    )
+    session.add(run)
+    session.flush()
+
+    def _fake_run_bash_stream(command, cwd, timeout, env=None, on_line=None):
+        results_path = tmp_path / "workspaces" / "provider_evaluations" / str(run.id) / "results.json"
+        ledger_path = tmp_path / "workspaces" / "provider_evaluations" / str(run.id) / "cost_ledger.jsonl"
+        results_path.parent.mkdir(parents=True, exist_ok=True)
+        results_path.write_text(
+            json.dumps(
+                {
+                    "benchmark": "math500",
+                    "results": {
+                        "single::openrouter-glm-5": 0.75,
+                        "single::openrouter-glm-5::repeats": [0.5, 1.0],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        ledger_path.write_text(
+            json.dumps({"provider": "openrouter", "m": "z-ai/glm-5.2", "p": 100, "c": 50}) + "\n",
+            encoding="utf-8",
+        )
+        return command, "stdout", ""
+
+    monkeypatch.setattr(eval_runner, "_run_bash_stream", _fake_run_bash_stream)
+
+    result = eval_runner.evaluate_provider_route(session, run, settings)
+
+    assert result.run.status == "completed"
+    assert result.run.submission_id is None
+    assert result.score == 0.75
+    assert result.metrics["provider_route"] == "openrouter-glm-5"
+    assert result.metrics["repeat"] == 2

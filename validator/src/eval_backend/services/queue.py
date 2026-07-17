@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.config import PIPELINE_TRAIN_EVAL, Settings
-from ..models import JobQueue, Submission, TrainRun
+from ..models import EvaluationRun, JobQueue, Submission, TrainRun
 
 
 def _utcnow() -> datetime:
@@ -140,6 +140,61 @@ def enqueue_train_job(
         job_type="train",
         job_id=str(train.id),
         submission_id=train.submission_id,
+        queue_name=queue_name,
+        status="queued",
+        priority=priority,
+        dedupe_key=dedupe_key,
+        attempts=0,
+        max_attempts=3,
+        next_run_at=_utcnow(),
+        payload_json=payload,
+    )
+    session.add(queue)
+    session.flush()
+    return queue
+
+
+def enqueue_provider_eval_job(
+    session: Session,
+    evaluation: EvaluationRun,
+    *,
+    queue_name: str = "default",
+    priority: int = 0,
+    payload_json: dict[str, Any] | None = None,
+) -> JobQueue:
+    dedupe_key = f"provider_eval:{evaluation.id}"
+    existing = session.execute(
+        select(JobQueue).where(JobQueue.dedupe_key == dedupe_key)
+    ).scalar_one_or_none()
+    payload = payload_json or {
+        "evaluation_id": evaluation.id,
+        "job_type": "provider_eval",
+        "benchmarks": list(evaluation.benchmark_names_json or []),
+        "pool_model": (evaluation.metrics_json or ""),
+    }
+    if existing is not None:
+        existing.job_id = str(evaluation.id)
+        existing.submission_id = None
+        existing.queue_name = queue_name
+        existing.status = "queued"
+        existing.priority = priority
+        existing.claimed_by = None
+        existing.claimed_at = None
+        existing.heartbeat_at = None
+        existing.attempts = 0
+        existing.max_attempts = max(existing.max_attempts, 3)
+        existing.next_run_at = _utcnow()
+        existing.last_error = None
+        existing.payload_json = payload
+        existing.updated_at = _utcnow()
+        session.flush()
+        return existing
+
+    queue = JobQueue(
+        id=str(uuid4()),
+        job_type="provider_eval",
+        job_id=str(evaluation.id),
+        submission_id=None,
         queue_name=queue_name,
         status="queued",
         priority=priority,

@@ -13,8 +13,8 @@ from sqlalchemy.orm import Session
 
 from .core.config import Settings
 from .db import Base, build_engine, build_session_factory, ensure_schema
-from .models import JobQueue, Submission, TrainRun
-from .services.eval_runner import evaluate_submission
+from .models import EvaluationRun, JobQueue, Submission, TrainRun
+from .services.eval_runner import evaluate_provider_route, evaluate_submission
 from .services.github import close_pull_request
 from .services.github import merge_pull_request
 from .services.github import publish_submission_result
@@ -45,6 +45,7 @@ def process_once(session_factory, settings: Settings) -> int:
     submission = None
     result = None
     train = None
+    evaluation = None
     job = None
     try:
         runtime = get_runtime_config(session, settings)
@@ -86,7 +87,35 @@ def process_once(session_factory, settings: Settings) -> int:
         job_id = job.id
         submission_id = job.submission_id
         train_id = None
+        evaluation_id = None
         try:
+            if job.job_type == "provider_eval":
+                evaluation = session.get(EvaluationRun, int(job.job_id))
+                if evaluation is None:
+                    raise ValueError(f"evaluation {job.job_id} not found")
+                evaluation_id = evaluation.id
+                logger.info(
+                    "processing provider evaluation job id=%s evaluation id=%s benchmark=%s route=%s",
+                    job.id,
+                    evaluation.id,
+                    ", ".join(evaluation.benchmark_names_json or []) or "unknown",
+                    (evaluation.metrics_json or ""),
+                )
+                result = evaluate_provider_route(session, evaluation, runtime_settings)
+                job.status = "completed" if result.run.status == "completed" else "failed"
+                job.last_error = result.run.error
+                job.heartbeat_at = result.run.finished_at
+                job.updated_at = result.run.finished_at or now
+                session.commit()
+                logger.info(
+                    "finished provider evaluation job id=%s evaluation id=%s status=%s score=%s",
+                    job.id,
+                    evaluation.id,
+                    result.run.status,
+                    result.score,
+                )
+                return 1
+
             if job.job_type == "train":
                 train = session.get(TrainRun, int(job.job_id))
                 if train is None:
@@ -250,6 +279,7 @@ def process_once(session_factory, settings: Settings) -> int:
             session.rollback()
             job = session.get(JobQueue, job_id)
             train = session.get(TrainRun, train_id) if train_id is not None else None
+            evaluation = session.get(EvaluationRun, evaluation_id) if evaluation_id is not None else None
             submission = session.get(Submission, submission_id) if submission_id is not None else None
             if job is not None:
                 now = datetime.now(timezone.utc)
@@ -263,6 +293,12 @@ def process_once(session_factory, settings: Settings) -> int:
                 train.message = error_message
                 train.error = error_message
                 train.finished_at = datetime.now(timezone.utc)
+            if evaluation is not None:
+                evaluation.status = "failed"
+                evaluation.phase = "failed"
+                evaluation.message = error_message
+                evaluation.error = error_message
+                evaluation.finished_at = datetime.now(timezone.utc)
             if submission is not None:
                 submission.status = "failed"
                 submission.updated_at = datetime.now(timezone.utc)
