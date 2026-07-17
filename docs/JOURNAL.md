@@ -18,6 +18,14 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-16 — escaped set braces left a trailing backslash in normalize_math_answer  #mistake #gotcha
+**Context:** issue #162 — grading set-valued MATH answers written as `\\{a,b,c\\}`.
+**Expected:** `normalize_math_answer(r'\\{1,2,3\\}')` → `1,2,3` and `math_equal` returns True vs the bare set.
+**Actual:** greedy `(.*)` in the outer-brace strip swallowed the closing escape, leaving `1,2,3\\`; equal answers scored 0.
+**Root cause:** `re.sub(r"^\\\\?\\{(.*)\\\\?\\}$", ...)` — the greedy capture ate the trailing backslash before the optional `\\\\?` could claim it.
+**Fix / decision:** make the inner capture non-greedy (`(.*?)`) so escaped braces strip cleanly. Offline tests in `tests/test_reward_math.py`.
+**Follow-up:** none.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.
