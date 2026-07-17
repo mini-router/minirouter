@@ -120,8 +120,11 @@ _COST_PRICES: dict[str, tuple[float, float]] = {
     "openrouter:google/gemma-3-27b-it": (0.08, 0.16),
     "openrouter:nvidia/nemotron-3-ultra-550b-a55b": (0.50, 2.20),
     "openrouter:deepseek-v4-pro": (0.435, 0.87),
+    "openrouter:deepseek/deepseek-v4-pro": (0.435, 0.87),
     "openrouter:kimi-k2p6": (0.66, 3.50),
+    "openrouter:moonshotai/kimi-k2.6": (0.66, 3.50),
     "openrouter:glm-5p2": (1.40, 4.40),
+    "openrouter:z-ai/glm-5.2": (1.40, 4.40),
     "openrouter:nvidia/nemotron-3-super-120b-a12b:free": (0.0, 0.0),
     "openrouter:google/gemma-4-31b-it:free": (0.0, 0.0),
     "openrouter:openai/gpt-oss-120b:free": (0.0, 0.0),
@@ -453,6 +456,10 @@ def _local_workspace(settings: Settings, submission_id: str) -> Path:
     return settings.workspace_root.expanduser() / "submissions" / submission_id
 
 
+def _provider_eval_workspace(settings: Settings, evaluation_id: int) -> Path:
+    return settings.workspace_root.expanduser() / "provider_evaluations" / str(evaluation_id)
+
+
 def _prepare_results(
     results_path: Path,
     *,
@@ -486,6 +493,79 @@ def _is_missing_results_payload(metrics: dict[str, Any]) -> bool:
     """Return True when parsed metrics indicate missing result artifacts."""
     value = metrics.get("results_missing")
     return bool(value) if isinstance(value, bool) else False
+
+
+def _single_provider_score(payload: dict[str, Any], pool_model: str) -> tuple[dict[str, Any], float | None]:
+    results = payload.get("results")
+    if not isinstance(results, dict):
+        by_benchmark = payload.get("results_by_benchmark")
+        if isinstance(by_benchmark, dict) and by_benchmark:
+            first = next(iter(by_benchmark.values()))
+            results = first if isinstance(first, dict) else {}
+        else:
+            results = {}
+
+    preferred_keys = [
+        f"single::{pool_model}",
+        f"single::{pool_model.strip()}",
+    ]
+    score: float | None = None
+    for key in preferred_keys:
+        value = results.get(key)
+        if isinstance(value, (int, float)):
+            score = float(value)
+            break
+    if score is None:
+        for key, value in results.items():
+            if key.startswith("single::") and not key.endswith("::std") and isinstance(value, (int, float)):
+                score = float(value)
+                break
+
+    metrics = _flatten_metrics(payload)
+    metrics.update({k: v for k, v in results.items() if isinstance(k, str)})
+    summary = payload.get("summary")
+    if isinstance(summary, dict):
+        metrics.update({f"summary_{k}": v for k, v in summary.items()})
+    return metrics or {"raw": payload}, score
+
+
+def _build_provider_eval_command(
+    settings: Settings,
+    run: EvaluationRun,
+    *,
+    pool_model: str,
+    repeat: int,
+    results_path: Path,
+    ledger_path: Path,
+) -> str:
+    repo_dir = Path(settings.local_repo_dir).expanduser().resolve()
+    benchmark = (run.benchmark_names_json or [settings.eval_benchmark])[0]
+    parts = [
+        "PYTHONPATH=src",
+        "PYTHONUNBUFFERED=1",
+        "python -u -m trinity.eval",
+        "--single-only",
+        f"--benchmark {shlex.quote(benchmark)}",
+        f"--provider {shlex.quote(run.provider)}",
+        f"--models {shlex.quote(run.models_config)}",
+        f"--pool-models {shlex.quote(pool_model)}",
+        f"--max-items {int(run.max_items)}",
+        f"--batch-size {int(run.batch_size)}",
+        f"--repeat {max(1, int(repeat))}",
+        f"--out {shlex.quote(str(results_path))}",
+    ]
+    if run.max_tokens:
+        parts.append(f"--max-tokens {int(run.max_tokens)}")
+    if run.reasoning:
+        parts.append(f"--reasoning {shlex.quote(run.reasoning)}")
+    if run.seed is not None:
+        parts.append(f"--seed {int(run.seed)}")
+    eval_command = " ".join(parts)
+    return (
+        f"mkdir -p {shlex.quote(str(ledger_path.parent))} && : > {shlex.quote(str(ledger_path))} && "
+        f"export TRINITY_COST_LEDGER={shlex.quote(str(ledger_path))}; "
+        f"cd {shlex.quote(str(repo_dir))} && source .venv/bin/activate && {eval_command}"
+    )
 
 
 def _build_remote_command(
@@ -674,6 +754,111 @@ class EvaluationResult:
     metrics: dict[str, Any]
     stdout: str
     stderr: str
+
+
+def evaluate_provider_route(
+    session: Session,
+    run: EvaluationRun,
+    settings: Settings,
+) -> EvaluationResult:
+    base_metrics = json.loads(run.metrics_json) if run.metrics_json else {}
+    pool_model = str(base_metrics.get("pool_model") or "").strip()
+    if not pool_model:
+        raise ValueError(f"evaluation {run.id} missing pool_model metadata")
+    repeat = max(1, int(base_metrics.get("repeat") or 1))
+
+    workspace = _provider_eval_workspace(settings, run.id)
+    workspace.mkdir(parents=True, exist_ok=True)
+    results_path = workspace / "results.json"
+    ledger_path = workspace / "cost_ledger.jsonl"
+
+    run.status = "running"
+    run.phase = "provider_eval_running"
+    run.message = f"testing {pool_model}"
+    run.progress_current = 0
+    run.progress_total = max(1, int(run.max_items))
+    run.started_at = _utcnow()
+    run.results_path = str(results_path)
+    run.execution_mode = "local_cpu"
+    run.device = "cpu"
+    run.dtype = "float32"
+    session.flush()
+
+    env = os.environ.copy()
+    env["TRINITY_SECRETS_FILE"] = settings.trinity_secrets_file
+    env["TRINITY_COST_LEDGER"] = str(ledger_path.resolve())
+    env["EVAL_BATCH_SIZE"] = str(run.batch_size)
+    command = _build_provider_eval_command(
+        settings,
+        run,
+        pool_model=pool_model,
+        repeat=repeat,
+        results_path=results_path,
+        ledger_path=ledger_path,
+    )
+    run.command = command
+    session.flush()
+
+    stdout = ""
+    stderr = ""
+    try:
+        rc, stdout, stderr = _run_bash_stream(
+            command,
+            cwd=Path(settings.local_repo_dir).expanduser().resolve(),
+            timeout=settings.eval_timeout_seconds,
+            env=env,
+        )
+        if rc != 0 and not results_path.exists():
+            raise subprocess.CalledProcessError(rc, command, output=stdout, stderr=stderr)
+        if not results_path.exists():
+            raise FileNotFoundError(f"provider evaluation did not produce {results_path}")
+        with results_path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        parsed_metrics, score = _single_provider_score(payload, pool_model)
+        metrics = {
+            **base_metrics,
+            **parsed_metrics,
+            "provider_route": pool_model,
+            "benchmark": (run.benchmark_names_json or ["unknown"])[0],
+            "repeat": repeat,
+            "execution_mode": "local_cpu",
+        }
+        run.status = "completed"
+        run.phase = "completed"
+        run.message = f"completed score={score:.4f}" if score is not None else "completed"
+        run.score = score
+    except Exception as exc:
+        metrics = {
+            **base_metrics,
+            "provider_route": pool_model,
+            "benchmark": (run.benchmark_names_json or ["unknown"])[0],
+            "repeat": repeat,
+            "results_missing": not results_path.exists(),
+            "execution_mode": "local_cpu",
+            "error": str(exc),
+        }
+        run.status = "failed"
+        run.phase = "failed"
+        run.message = str(exc)
+        run.error = str(exc)
+        run.score = None
+    finally:
+        run.finished_at = _utcnow()
+        run.stdout = stdout
+        run.stderr = stderr
+
+    metrics = _attach_runtime_metrics(metrics, run=run, ledger_path=ledger_path)
+    run.cost_usd = metrics.get("cost_usd") if isinstance(metrics.get("cost_usd"), (int, float)) else None
+    run.duration_seconds = metrics.get("duration_seconds") if isinstance(metrics.get("duration_seconds"), (int, float)) else None
+    run.metrics_json = json.dumps(metrics, ensure_ascii=False, sort_keys=True)
+    session.flush()
+    return EvaluationResult(
+        run=run,
+        score=run.score,
+        metrics=json.loads(run.metrics_json),
+        stdout=stdout,
+        stderr=stderr,
+    )
 
 
 def evaluate_submission(
