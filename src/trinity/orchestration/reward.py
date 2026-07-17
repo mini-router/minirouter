@@ -681,17 +681,35 @@ def _check_bfcl(candidate: str, reference: object) -> bool:
     if len(cand_calls) != len(gold_calls):
         return False
 
-    key = lambda call: json.dumps(
-        {"name": call[0], "arguments": call[1]},
-        sort_keys=True,
-        ensure_ascii=False,
-    )
-    cand_calls_sorted = sorted(cand_calls, key=key)
-    gold_calls_sorted = sorted(gold_calls, key=key)
-    return all(
-        _bfcl_call_matches(candidate_call, gold_call)
-        for candidate_call, gold_call in zip(cand_calls_sorted, gold_calls_sorted)
-    )
+    # Candidate args are concrete values while gold args are allowed-value
+    # *lists*, so sorting both sides on json.dumps(..., sort_keys=True) does
+    # not produce a shared order — zip then mis-pairs correct multi-call
+    # answers (#180). Require a bipartite perfect matching instead.
+    return _bfcl_match_all_calls(cand_calls, gold_calls)
+
+
+def _bfcl_match_all_calls(
+    cand_calls: list[tuple[str, dict[str, object]]],
+    gold_calls: list[tuple[str, dict[str, list[object]]]],
+) -> bool:
+    """True iff every gold call can be paired with a distinct matching candidate."""
+    used = [False] * len(cand_calls)
+
+    def _search(gi: int) -> bool:
+        if gi >= len(gold_calls):
+            return True
+        for ci, cand in enumerate(cand_calls):
+            if used[ci]:
+                continue
+            if not _bfcl_call_matches(cand, gold_calls[gi]):
+                continue
+            used[ci] = True
+            if _search(gi + 1):
+                return True
+            used[ci] = False
+        return False
+
+    return _search(0)
 
 
 # ---------------------------------------------------------------------------

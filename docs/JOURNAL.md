@@ -18,6 +18,14 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-16 — BFCL multi-call grading misaligned candidate/gold via sort-and-zip  #mistake #gotcha
+**Context:** issue #180 — multi-call BFCL answers where gold args are allowed-value lists.
+**Expected:** a correct multi-call set scores 1.0 whenever a perfect bipartite matching exists.
+**Actual:** sorting both sides on `json.dumps(..., sort_keys=True)` ordered scalar candidate args differently from list gold args, then `zip` paired mismatched calls and scored correct answers 0.
+**Root cause:** shared sort key assumes identical `arguments` shapes; candidate vs gold shapes differ by design.
+**Fix / decision:** replace sort-and-zip with backtracking bipartite match (`_bfcl_match_all_calls`). Offline tests in `tests/test_reward_bfcl.py`.
+**Follow-up:** shipped `bfcl_simple` is single-call today; this hardens the multi-call path the scorer already implements.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.
