@@ -8,6 +8,10 @@ Design constraints (see docs/SPEC.md §6, §8):
 - HuggingFace ``datasets`` is imported lazily and guarded. The LOCAL dev box has
   no network/GPU, so every loader has an OFFLINE fallback: a tiny hand-written
   toy set (2-3 Tasks per benchmark) so smoke tests (S4/S5) run with zero network.
+  The toy set is **smoke-test-only**: ``load_tasks`` RAISES rather than silently
+  scoring a real train/eval run on 2-3 fake items when the real load yields
+  nothing. Opt in explicitly with ``allow_toy_fallback=True`` or
+  ``TRINITY_ALLOW_TOY_FALLBACK=1``, which warns loudly on stderr.
 - ``load_tasks`` is deterministic given ``seed``: shuffling/truncation use a seeded
   ``random.Random`` so two calls with the same arguments return identical lists.
 - The ``answer`` field is whatever ``reward.score`` needs for that benchmark:
@@ -36,7 +40,9 @@ The HuggingFace dataset ids used (when ``datasets`` + network are available):
 from __future__ import annotations
 
 import json
+import os
 import random
+import sys
 import urllib.request
 from functools import lru_cache
 from typing import Any
@@ -44,6 +50,26 @@ from typing import Any
 from trinity.types import Task
 
 __all__ = ["load_tasks", "sample_minibatch", "SUPPORTED_BENCHMARKS"]
+
+# The offline toy set (2-3 hand-written Tasks per benchmark) exists ONLY for smoke
+# tests. A real eval/train run must never score on it silently -- 3 toy items would
+# report a headline number computed on fake data -- so ``load_tasks`` raises when the
+# real load yields nothing unless the caller opts in via ``allow_toy_fallback=True``
+# or this env var.
+_TOY_FALLBACK_ENV = "TRINITY_ALLOW_TOY_FALLBACK"
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def _toy_fallback_allowed(explicit: bool) -> bool:
+    """Whether the toy-set fallback is permitted for this call.
+
+    Opt-in is either the explicit ``allow_toy_fallback=True`` argument or a truthy
+    :data:`_TOY_FALLBACK_ENV` env var (``1``/``true``/``yes``/``on``, case-insensitive)
+    for callers that cannot pass the flag through (e.g. a shell-driven smoke run).
+    """
+    if explicit:
+        return True
+    return os.environ.get(_TOY_FALLBACK_ENV, "").strip().lower() in _TRUTHY
 
 SUPPORTED_BENCHMARKS: tuple[str, ...] = (
     "ifeval",
@@ -917,13 +943,19 @@ def load_tasks(
     split: str,
     max_items: int | None,
     seed: int = 0,
+    *,
+    allow_toy_fallback: bool = False,
 ) -> list[Task]:
     """Load a benchmark as a deterministic list of :class:`Task`.
 
     Tries the HuggingFace ``datasets`` loader first (lazy/guarded import). If
     ``datasets`` or the network is unavailable -- or the dataset id is gated /
-    missing -- it transparently falls back to a tiny built-in toy set so smoke
-    tests run offline.
+    missing -- the real load yields 0 tasks. In that case this function **raises**
+    by default rather than silently substituting the 2-3 item offline toy set: a
+    real ``train`` / ``eval`` run must never report a headline score computed on
+    fake data. Smoke tests that legitimately want the toy set opt in explicitly
+    (``allow_toy_fallback=True`` or ``TRINITY_ALLOW_TOY_FALLBACK=1``), which emits
+    a loud stderr warning.
 
     The returned list is deterministically shuffled by ``seed`` and then
     truncated to ``max_items`` (if not ``None``), so repeated calls with the same
@@ -940,6 +972,9 @@ def load_tasks(
         Cap on the number of tasks returned; ``None`` means all.
     seed:
         Seed controlling the deterministic shuffle (and toy/HF parity).
+    allow_toy_fallback:
+        Opt in to the offline toy set when the real load returns nothing. Keep
+        this ``False`` (the default) for anything that reports a score.
 
     Returns
     -------
@@ -950,6 +985,8 @@ def load_tasks(
     ------
     ValueError
         If ``benchmark`` is not supported.
+    RuntimeError
+        If the real load returned 0 tasks and the toy fallback was not opted in.
     """
     if benchmark not in _HF_LOADERS:
         raise ValueError(
@@ -958,7 +995,26 @@ def load_tasks(
 
     tasks = _HF_LOADERS[benchmark](split)
     if not tasks:
-        # Offline / failed load -> built-in toy set.
+        # Offline / failed load. `_try_load_hf` swallows the underlying error by
+        # design ("the caller decides whether the fallback is loud") -- this is that
+        # caller, and the default decision is to fail loudly.
+        if not _toy_fallback_allowed(allow_toy_fallback):
+            raise RuntimeError(
+                f"Loading benchmark {benchmark!r} split {split!r} returned 0 tasks "
+                "(missing `datasets`, no network, gated repo, or an unknown split). "
+                "Refusing to fall back to the offline toy set: it holds only 2-3 "
+                "hand-written items, so a real train/eval run would silently report a "
+                "score on fake data. Fix the dataset load, or -- for smoke tests only "
+                "-- opt in with allow_toy_fallback=True or "
+                f"{_TOY_FALLBACK_ENV}=1."
+            )
+        print(
+            f"[dataset] WARNING: {benchmark!r} split {split!r} returned 0 tasks; "
+            f"falling back to the {len(_toy_tasks(benchmark))}-item OFFLINE TOY SET "
+            "because the fallback was explicitly opted in. Any score from this run is "
+            "computed on fake data and must not be reported as a benchmark result.",
+            file=sys.stderr,
+        )
         tasks = _toy_tasks(benchmark)
 
     # Deterministic shuffle for reproducible minibatch composition across runs.

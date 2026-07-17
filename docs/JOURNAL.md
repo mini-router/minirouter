@@ -18,6 +18,29 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-17 — Toy-set fallback is now opt-in; load_tasks fails loudly  #mistake #decision
+**Context:** issue #65 (follow-up to #7 / closed PR #8) — the offline toy set exists so smoke rungs
+run with zero network, but `load_tasks` substituted it *silently* whenever the real HF load returned
+0 tasks.
+**Expected:** a failed dataset load (missing `datasets`, no network, gated repo, wrong split) should
+stop a real run.
+**Actual:** `load_tasks("math500", "test", max_items=120)` returned **3 toy items** and `train`/`eval`
+carried on, reporting a headline `J(theta)` / accuracy computed on hand-written fake data with no
+warning. A silent 3-item benchmark is worse than a crash: the number looks real.
+**Root cause:** `_try_load_hf` swallows every load error by design and documents that "the caller
+decides whether the fallback is loud" — but the caller (`load_tasks`) never decided; it just fell
+back to `_toy_tasks(benchmark)`.
+**Fix / decision:** `load_tasks` is now **strict by default** and raises `RuntimeError` when the real
+load yields 0 tasks. The toy set is opt-in per call (`allow_toy_fallback=True`) or per process
+(`TRINITY_ALLOW_TOY_FALLBACK=1`, truthy = `1/true/yes/on`), and the opt-in path prints a loud stderr
+warning saying the score is computed on fake data. Callers audited: `train.py`, `eval.py`,
+`scripts/oracle_ceiling.py`, `scripts/warmstart_head.py`, `scripts/fugu_*` all report scores, so they
+keep the strict default and needed no change; smoke rung **S8** is the one legitimate toy consumer and
+now opts in explicitly. `benchmarks/livecodebench.py` accepted `allow_toy_fallback` and **silently
+dropped it** (flagged as a follow-up in the 2026-07-09 entry) — the facade now forwards it.
+**Follow-up:** `benchmarks/{rlpr,ifeval,bfcl_simple}.py` still drop `allow_toy_fallback`. Left alone
+deliberately: their `load()` is currently dead (#152) and open PR #179 is rewriting those exact call
+sites, so wiring them here would collide. One-line passthrough each once #179 lands.
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.

@@ -266,7 +266,10 @@ def s8() -> tuple[bool, str]:
     from trinity.coordinator.params import initial_theta
 
     theta = initial_theta(spec)
-    tasks = load_tasks("math500", "test", max_items=2, seed=0)
+    # S8 is an offline-capable smoke rung: the 2-item toy set is exactly what it
+    # wants when the real math500 load is unavailable, so it opts in explicitly.
+    # Real train/eval callers must NOT (load_tasks raises for them instead).
+    tasks = load_tasks("math500", "test", max_items=2, seed=0, allow_toy_fallback=True)
     fit, trajs = asyncio.run(
         evaluate_candidate(
             theta, spec, policy, pool, pool_models, tasks,
