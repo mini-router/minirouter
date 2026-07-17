@@ -18,7 +18,27 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
-## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
+## 2026-07-15 — Per-question agreement diagnostic + contested-subset export  #decision #finding
+**Context:** issue #60 — `scripts/oracle_ceiling.py` reports the *statistical* routing headroom
+(winner's-curse-debiased point estimates + bootstrap CIs) but gives no *per-question* view, so
+there was no way to enumerate the contested queries the 2026-06-25 entry recommends training on.
+**Expected:** a tool that, from the same `oracle_matrix_<bench>.json`, names which queries are
+contested, which each model uniquely solves, how often models agree, and exports the disagreement
+subset for targeted training/eval.
+**Actual:** none existed; the disagreement-subset recommendation was un-actionable.
+**Fix / decision:** added `scripts/agreement_diagnostic.py` (pure/offline, numpy only) +
+`tests/test_agreement_diagnostic.py`. It **reuses** `oracle_ceiling.matrix_to_tensor` / `p_hat`
+rather than re-implementing them, so the two diagnostics share one schema and one per-(q,m) solve
+definition (a model's per-query verdict is the K-sample majority `p_hat >= 0.5`, identical to
+`disagreement_rate`). It **complements, not duplicates** oracle_ceiling.py: that module owns the
+debiased CI and the pool-vs-router verdict; this one owns `contested_mask` / `contested_task_ids`,
+`per_model_unique_solves`, `pairwise_agreement`, the optimistic `perfect_router_stats`, and a
+`--write-contested` subset export (matrix schema, round-trips through `matrix_to_tensor`).
+**Finding:** on the disjoint-specialist fixture the two tools cross-check — the agreement
+contested-rate equals `oracle_ceiling.disagreement_rate` (1.0) and the perfect-router headroom is
+2/3, matching the oracle's routing headroom on the same fixture.
+**Follow-up:** `perfect_router_stats` is deliberately the raw (non-debiased) per-question upper
+view for sizing the contested subset; the honest CI-gated ceiling stays in oracle_ceiling.py.
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.
 **Expected:** CI should exercise the production Postgres path and fail loudly when the test database
