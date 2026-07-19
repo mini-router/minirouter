@@ -225,7 +225,7 @@ def main() -> None:
     ap.add_argument("--config", default=str(_REPO / "configs" / "trinity.yaml"))
     ap.add_argument("--models", default=str(_REPO / "configs" / "models.yaml"))
     ap.add_argument("--provider", default="fireworks",
-                    choices=["fireworks", "openrouter", "chutes"])
+                    choices=["fireworks", "openrouter", "chutes", "minibridge"])
     ap.add_argument("--device", default="", help="override coordinator device (for example cpu or cuda:0)")
     ap.add_argument("--dtype", default="", help="override coordinator dtype (for example float32 or bfloat16)")
     ap.add_argument("--max-items", type=int, default=256, dest="max_items")
