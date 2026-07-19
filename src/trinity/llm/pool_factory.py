@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .chutes_client import ChutesPool
 from .fireworks_client import FireworksPool
+from .minibridge_client import MiniBridgePool
 from .openai_compatible_pool import OpenAICompatiblePool
 from .openrouter_client import OpenRouterPool
 
@@ -26,6 +27,8 @@ def build_pool(provider: PoolName, config_path: str | Path | None = None):
         if path is None or path.name == "models.yaml":
             return ChutesPool()
         return ChutesPool(path)
+    if provider == "minibridge":
+        return MiniBridgePool(path) if path is not None else MiniBridgePool()
     raise ValueError(
-        f"unknown provider {provider!r}; expected fireworks|openrouter|chutes|compatible"
+        f"unknown provider {provider!r}; expected fireworks|openrouter|chutes|minibridge|compatible"
     )
