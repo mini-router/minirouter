@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 import time
@@ -58,11 +59,16 @@ def _ledger_append(provider: str, model: str, prompt_tokens: int, completion_tok
     if not path:
         return
     try:
+        record = json.dumps(
+            {
+                "provider": provider,
+                "m": model,
+                "p": int(prompt_tokens),
+                "c": int(completion_tokens),
+            }
+        )
         with open(path, "a", encoding="utf-8") as handle:
-            handle.write(
-                f'{{"provider":"{provider}","m":"{model}","p":{int(prompt_tokens)},'
-                f'"c":{int(completion_tokens)}}}\n'
-            )
+            handle.write(record + "\n")
     except Exception:
         pass
 

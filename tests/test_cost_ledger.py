@@ -8,6 +8,7 @@ and not silently dropped from the cost total.
 from __future__ import annotations
 
 from trinity.costing import ledger_cost_report
+from trinity.llm.minibridge_client import _ledger_append as _minibridge_ledger_append
 from trinity.llm.openai_compatible_pool import _ledger_append
 
 
@@ -38,5 +39,19 @@ def test_ledger_append_escapes_json_metacharacters(tmp_path, monkeypatch):
     assert report["cost_prompt_tokens"] == 1000
     assert report["cost_completion_tokens"] == 2000
     key = f"openrouter:{model}"
+    assert key in report["cost_per_model"]
+    assert report["cost_per_model"][key]["calls"] == 1
+
+
+def test_minibridge_ledger_append_escapes_json_metacharacters(tmp_path, monkeypatch):
+    ledger = tmp_path / "cost_ledger.jsonl"
+    monkeypatch.setenv("TRINITY_COST_LEDGER", str(ledger))
+    model = 'weird"model\\name'
+
+    _minibridge_ledger_append("minibridge", model, 500, 750)
+
+    report = ledger_cost_report(ledger)
+    assert report["cost_calls"] == 1
+    key = f"minibridge:{model}"
     assert key in report["cost_per_model"]
     assert report["cost_per_model"][key]["calls"] == 1
