@@ -66,22 +66,23 @@ def test_ensure_schema_relaxes_and_backfills_legacy_columns(validator_engine) ->
                 """
             )
         )
+        # Make the back-fill path fire: NULL benchmark_names_json + non-null benchmark.
+        conn.execute(text("ALTER TABLE submissions ALTER COLUMN benchmark_names_json DROP NOT NULL"))
+        conn.execute(text("UPDATE submissions SET benchmark_names_json = NULL WHERE id = 'legacy-1'"))
+        conn.execute(text("UPDATE submissions SET miner_id = NULL WHERE id = 'legacy-1'"))
 
     ensure_schema(validator_engine)
 
     with validator_engine.connect() as conn:
         row = conn.execute(
             text(
-                "SELECT miner_id, benchmark_names_json::text "
+                "SELECT miner_id, benchmark_names_json::text, "
+                "(SELECT is_nullable FROM information_schema.columns "
+                " WHERE table_name = 'submissions' AND column_name = 'artifact_name' "
+                "   AND table_schema = current_schema()) "
                 "FROM submissions WHERE id = 'legacy-1'"
             )
         ).one()
-        # Nullable after DROP NOT NULL — insert NULL succeeds.
-        conn.execute(
-            text(
-                "UPDATE submissions SET artifact_name = NULL, benchmark = NULL "
-                "WHERE id = 'legacy-1'"
-            )
-        )
     assert row[0] == "old-team"
     assert "math500" in (row[1] or "")
+    assert row[2] == "YES"
