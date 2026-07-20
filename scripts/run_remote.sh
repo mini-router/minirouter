@@ -6,7 +6,7 @@ set -euo pipefail
 
 HOST="${TRINITY_GPU_HOST:-trinity-gpu}"
 REMOTE_DIR="${TRINITY_REMOTE_DIR:-trinity}"
-GPU_INDEX="${TRINITY_GPU_INDEX:-0}"
+GPU_INDEX="${TRINITY_GPU_INDEX:-5}"
 LOCAL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SYNC_DIR="${TRINITY_SYNC_DIR:-$LOCAL_DIR}"
 SYNC_ENABLED="${TRINITY_SYNC_ENABLED:-1}"

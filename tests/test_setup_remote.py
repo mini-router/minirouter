@@ -96,6 +96,39 @@ def test_setup_remote_copies_secrets_file(tmp_path):
     assert "bash -s" in ssh_log.read_text(encoding="utf-8")
 
 
+def test_setup_remote_defaults_to_gpu_five_when_unset(tmp_path):
+    bin_dir, ssh_log, rsync_log = _make_fake_tools(tmp_path)
+    remote_root = tmp_path / "remote_root"
+    remote_root.mkdir()
+    local_secrets = tmp_path / "secrets.env"
+    local_secrets.write_text("API_KEY=local-secret\n", encoding="utf-8")
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
+            "FAKE_REMOTE_ROOT": str(remote_root),
+            "TRINITY_GPU_HOST": "fake-host",
+            "TRINITY_REMOTE_DIR": "trinity",
+            "TRINITY_SECRETS_FILE": str(local_secrets),
+        }
+    )
+    env.pop("TRINITY_GPU_INDEX", None)
+
+    result = subprocess.run(
+        ["bash", str(REPO / "scripts" / "setup_remote.sh")],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "GPU 5" in result.stdout
+    assert "TRINITY_GPU_INDEX=5" in ssh_log.read_text(encoding="utf-8")
+
+
 def test_setup_remote_missing_secrets_file_fails(tmp_path):
     bin_dir, ssh_log, rsync_log = _make_fake_tools(tmp_path)
     remote_root = tmp_path / "remote_root"
