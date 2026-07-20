@@ -18,6 +18,16 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-20 — Remote helper scripts defaulted to GPU 0 instead of allocated GPU 5  #mistake #decision
+**Context:** issue #33 — running `scripts/setup_remote.sh` / `scripts/run_remote.sh` without
+`TRINITY_GPU_INDEX` set.
+**Expected:** remote workflows use GPU 5, matching `DEFAULT_TRINITY_GPU_INDEX` and `secrets.env.example`.
+**Actual:** shell fallbacks used `${TRINITY_GPU_INDEX:-0}`, pinning jobs to GPU 0 on shared boxes.
+**Root cause:** scripts were written before the project standardized on GPU 5 as the allocated device.
+**Fix / decision:** change the shell fallbacks to `:-5` in `setup_remote.sh`, `run_remote.sh`, and
+`remote_env.sh`; add a regression test that `setup_remote.sh` logs GPU 5 when unset.
+**Follow-up:** none.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.

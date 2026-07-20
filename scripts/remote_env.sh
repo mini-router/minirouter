@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Shared environment for all remote-GPU commands.
-# Default to GPU 0 on a normal single-GPU VPS, but allow overrides.
+# Default to the allocated GPU index (5) unless overridden.
 set -euo pipefail
 
 # We are allocated exactly one physical GPU on the remote box.
-export CUDA_VISIBLE_DEVICES="${TRINITY_GPU_INDEX:-0}"
+export CUDA_VISIBLE_DEVICES="${TRINITY_GPU_INDEX:-5}"
 
 # Project location on the remote box (overridable).
 export TRINITY_REMOTE_DIR="${TRINITY_REMOTE_DIR:-$HOME/trinity}"
