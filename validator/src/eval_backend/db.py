@@ -66,19 +66,32 @@ def ensure_schema(engine) -> None:
         conn.exec_driver_sql(
             "ALTER TABLE competition_runtime_config ADD COLUMN IF NOT EXISTS king_score DOUBLE PRECISION"
         )
-        conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN artifact_name DROP NOT NULL")
-        conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN artifact_path DROP NOT NULL")
-        conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN artifact_sha256 DROP NOT NULL")
-        conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN checkpoint_path DROP NOT NULL")
-        conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN benchmark DROP NOT NULL")
-        conn.exec_driver_sql(
-            "UPDATE submissions SET miner_id = COALESCE(miner_id, team_name) "
-            "WHERE miner_id IS NULL AND team_name IS NOT NULL"
-        )
-        conn.exec_driver_sql(
-            "UPDATE submissions SET benchmark_names_json = COALESCE(benchmark_names_json, json_build_array(benchmark)) "
-            "WHERE benchmark_names_json IS NULL AND benchmark IS NOT NULL"
-        )
+
+        # Legacy columns below only exist on DBs created before those fields became
+        # ORM @property accessors. Postgres has no IF EXISTS for ALTER COLUMN, so
+        # gate each statement on information_schema — otherwise fresh-DB startup
+        # crashes with UndefinedColumn (issue #120).
+        legacy_columns = {
+            row[0]
+            for row in conn.exec_driver_sql(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'submissions' AND table_schema = current_schema()"
+            )
+        }
+        for column in ("artifact_name", "artifact_path", "artifact_sha256", "checkpoint_path", "benchmark"):
+            if column in legacy_columns:
+                conn.exec_driver_sql(f"ALTER TABLE submissions ALTER COLUMN {column} DROP NOT NULL")
+
+        if "team_name" in legacy_columns:
+            conn.exec_driver_sql(
+                "UPDATE submissions SET miner_id = COALESCE(miner_id, team_name) "
+                "WHERE miner_id IS NULL AND team_name IS NOT NULL"
+            )
+        if "benchmark" in legacy_columns:
+            conn.exec_driver_sql(
+                "UPDATE submissions SET benchmark_names_json = COALESCE(benchmark_names_json, json_build_array(benchmark)) "
+                "WHERE benchmark_names_json IS NULL AND benchmark IS NOT NULL"
+            )
         conn.exec_driver_sql(
             "UPDATE competition_runtime_config "
             "SET default_eval_execution_mode = COALESCE(NULLIF(default_eval_execution_mode, ''), 'remote_gpu')"

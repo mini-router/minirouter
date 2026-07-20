@@ -18,6 +18,17 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-20 — Validator crashed on first startup: ensure_schema altered missing columns  #mistake #repro #decision
+**Context:** issue #120 — deploying the validator against an empty Postgres.
+**Expected:** first-run `create_all` then `ensure_schema` brings up a fresh schema cleanly.
+**Actual:** startup aborted with `UndefinedColumn: column "artifact_name" does not exist`.
+**Root cause:** legacy columns became `@property` accessors, so `create_all` never creates them;
+Postgres has no `IF EXISTS` for `ALTER COLUMN`, and unguarded `DROP NOT NULL` / back-fill
+`UPDATE`s crashed on every fresh DB.
+**Fix / decision:** gate legacy relaxations/back-fills on `information_schema.columns`; leave
+additive `ADD COLUMN IF NOT EXISTS` untouched. Added `validator/tests/test_ensure_schema.py`.
+**Follow-up:** none.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.
