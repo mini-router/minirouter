@@ -18,6 +18,23 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-21 — PR automation register_submission red on fork PRs  #mistake #gotcha
+**Context:** PR #232 CI showed `register_submission` failed
+(https://github.com/mini-router/minirouter/actions/runs/29856598889/job/88722358634)
+while `test-router` / `test-validator` / `web` were green.
+**Expected:** labeling job succeeds for miner fork PRs (sn74-*).
+**Actual:** `actions/checkout@v4` refused the PR-head checkout under
+`pull_request_target`: "Refusing to check out fork pull request code".
+**Root cause:** GitHub's pwn-request guard; the step checked out
+`claytonlin1110/minirouter` with the base repo's token. The classify/register
+steps never read that checkout — they only call the Pulls API.
+**Fix / decision:** drop the unused checkout from `register_submission` in
+`.github/workflows/pr-automation.yml`. `start_submission` (workflow_dispatch)
+still checks out when a maintainer manually starts eval; leave that path alone.
+**Follow-up:** if `start_submission`'s PR-head checkout is also unused, remove it
+the same way; do not set `allow-unsafe-pr-checkout: true` unless a step truly
+needs fork code in a trusted context.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.
