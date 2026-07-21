@@ -523,7 +523,7 @@ fitness repeatability under greedy+cache matches expectation (surfaces the §0.3
 2. **M1 — Orchestration (no GPU):** `roles/*`, `orchestration/run.py` + `reward.py` (S4, S5).
 3. **M2 — Pool integration:** finalize `llm/client.py` reasoning-effort mapping + cache (S6).
 4. **M3 — Optimizer:** `optim/cmaes.py` + `fitness.py` (S7), then S8 integration.
-5. **M4 — Baselines:** `optim/baselines.py` (RS, SFT, REINFORCE) for R8.
+5. **M4 — Baselines:** `optim/baselines.py` (RS, SFT, REINFORCE) for R8 — **landed** (`trinity.train --optimizer {rs,sft,reinforce}`; see JOURNAL 2026-07-21 / issue #231). Live equal-budget bake-off still outstanding.
 6. **M5 — Train + eval at scale** on GPU 5; collect R1–R13; write results to `experiments/`.
 
 Every milestone appends a dated entry to `docs/JOURNAL.md` (findings, mistakes, decisions) per

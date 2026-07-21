@@ -70,8 +70,20 @@ fitness:
   turn_penalty: 0.05       # penalty proportional to (num_turns-1)/(max_turns-1)
   hero_dense: false        # reserved: per-turn dense reward (currently unused)
 
-baselines:                              # for the optimizer comparison (R8)
+baselines:                              # for the optimizer comparison (R8) — wired by --optimizer
   enabled: [random_routing, static_best, rl_reinforce, imitation_sft]
-  random_search: { sample_range: [-0.5, 0.5], trials_per_candidate: 32 }
-  reinforce:     { batch_size: 528, iterations: 60 }   # batch = m_cma * lambda
-  sft:           { optimizer: adam, lr: 1.0e-6, batch_size: 64, freeze_slm: true }
+  random_search:
+    sample_range: [-0.5, 0.5]
+    trials_per_candidate: 32            # m_rs; candidates = B_env / m_rs
+  reinforce:
+    batch_size: 528                     # = m_cma * lambda = 16 * 33
+    iterations: 60
+    lr: 1.0e-3                          # [OUR CHOICE] paper unspecified (SPEC_REVIEW)
+    entropy_coef: 0.01                  # [OUR CHOICE] small bonus toward non-collapse
+  sft:
+    optimizer: adam
+    lr: 1.0e-6                          # paper Adam LR (torch path / doc anchor)
+    batch_size: 64
+    freeze_slm: true
+    steps: 400                          # [OUR CHOICE] numpy full-batch GD steps
+    numpy_lr: 0.5                       # [OUR CHOICE] warm-start-scale LR for numpy path

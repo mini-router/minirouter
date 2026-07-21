@@ -78,9 +78,28 @@ class CoordinatorPolicy:
         self.svf.set_scales(svf_scales)
 
     def decide(self, transcript_text: str, *, sample: bool = False, rng=None) -> tuple[int, Role]:
+        agent_idx, role, _info = self.decide_with_info(transcript_text, sample=sample, rng=rng)
+        return int(agent_idx), role
+
+    def decide_with_info(
+        self, transcript_text: str, *, sample: bool = False, rng=None
+    ) -> tuple[int, Role, dict]:
+        """Like :meth:`decide`, but also return the feature + softmax debug dict.
+
+        Used by the REINFORCE baseline (R8) to build an analytical
+        ``∇_W log π`` from ``h``, ``agent_idx``, and ``role_pos`` without
+        autograd. ``info`` keys: ``h``, ``agent_idx``, ``role_pos``, plus the
+        raw logit/prob arrays from :meth:`LinearHead.select`.
+        """
         import torch
 
         h = self.encoder.encode(transcript_text)  # np.float32 [d_h]
-        h_t = torch.as_tensor(np.asarray(h, dtype=np.float32), device=self.head.weight.device)
-        agent_idx, role, _dbg = self.head.select(h_t, sample=sample, rng=rng)
-        return int(agent_idx), role
+        h_np = np.asarray(h, dtype=np.float32).reshape(-1)
+        h_t = torch.as_tensor(h_np, device=self.head.weight.device)
+        agent_idx, role, dbg = self.head.select(h_t, sample=sample, rng=rng)
+        info = dict(dbg)
+        info["h"] = h_np.astype(np.float64, copy=False)
+        info["agent_idx"] = int(agent_idx)
+        info["role_pos"] = int(info.get("role_pos", 0))
+        info["n_models"] = int(self.n_models)
+        return int(agent_idx), role, info

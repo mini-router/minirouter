@@ -18,6 +18,27 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-21 — R8 optimizer baselines land (RS / SFT / REINFORCE)  #decision #repro
+**Context:** claim R8 needs sep-CMA-ES vs SFT vs RS vs REINFORCE under a matched `B_env`, but
+`configs/trinity.yaml` had a dead `baselines:` block and SPEC §8 / M4's `optim/baselines.py` was
+missing — `trinity.train` hard-coded CMA only (issue #231).
+**Expected:** one entrypoint can run any R8 arm and write a comparable `best_theta.npy` /
+`summary.json`.
+**Actual:** implemented `src/trinity/optim/baselines.py` + `--optimizer {cma,rs,sft,reinforce}`.
+**Root cause:** baselines were scoped as M4 and never built; paper also left REINFORCE LR /
+entropy unspecified (SPEC_REVIEW), which blocked a faithful port.
+**Fix / decision:**
+- **RS:** `θ` head ~ U[-0.5,0.5], SVF = 1+U[-0.5,0.5]; `m_rs=32`; candidates = `B_env/m_rs`.
+- **SFT:** head-only numpy CE via `warmstart.fit_agent_head` (role rows 0, SVF identity); live
+  path needs `--sft-labels` (+ optional `--sft-encodings`). Paper Adam 1e-6 kept as config
+  anchor; numpy path uses `numpy_lr=0.5` [OUR CHOICE] so short fits move.
+- **REINFORCE:** analytical `∇_W log π` on the two-softmax head (no autograd); advantage =
+  reward − batch mean; **head-only** (SVF frozen at 1.0) [OUR CHOICE]; `lr=1e-3`,
+  `entropy_coef=0.01` [OUR CHOICE]. `CoordinatorPolicy.decide_with_info` exposes `(h, actions)`
+  for the score-function.
+**Follow-up:** live GPU5 bake-off under equal `B_env` to actually score R8; optional torch Adam
+SFT path at paper lr; multi-turn credit-assignment ablations for REINFORCE.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.
