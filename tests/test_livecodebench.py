@@ -12,7 +12,7 @@ def test_livecodebench_facade_delegates(monkeypatch):
     # ``_load_tasks``. Patching ``LCB.load_tasks`` instead swaps the one-positional
     # facade function for a four-positional stub, which silently accepts a miscall
     # that the real signature rejects.
-    def fake_load_tasks(benchmark, split, max_items, seed):
+    def fake_load_tasks(benchmark, split, max_items, seed, allow_toy_fallback=False):
         seen["args"] = (benchmark, split, max_items, seed)
         return ["ok"]
 
@@ -41,14 +41,26 @@ def test_livecodebench_load_forwards_split_not_a_shifted_positional(monkeypatch)
     """The split must arrive as the split, not be shifted by a stray positional."""
     seen = {}
 
-    def fake_load_tasks(benchmark, split, max_items=None, seed=0):
-        seen.update(benchmark=benchmark, split=split, max_items=max_items, seed=seed)
+    def fake_load_tasks(benchmark, split, max_items=None, seed=0, allow_toy_fallback=False):
+        seen.update(
+            benchmark=benchmark,
+            split=split,
+            max_items=max_items,
+            seed=seed,
+            allow_toy_fallback=allow_toy_fallback,
+        )
         return []
 
     monkeypatch.setattr(LCB, "_load_tasks", fake_load_tasks)
     LCB.load("validation", max_items=5, seed=3)
 
-    assert seen == {"benchmark": "livecodebench", "split": "validation", "max_items": 5, "seed": 3}
+    assert seen == {
+        "benchmark": "livecodebench",
+        "split": "validation",
+        "max_items": 5,
+        "seed": 3,
+        "allow_toy_fallback": False,  # strict by default; the facade must not invent an opt-in
+    }
 
 
 def test_livecodebench_hf_row_parses_to_task(monkeypatch):
