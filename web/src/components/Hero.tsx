@@ -1,6 +1,7 @@
 import { motion, type Variants } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import { useLeaderboard } from '../hooks/useLeaderboard'
+import brandVisual from '../assets/minirouter-brand.png'
 
 const metrics = [
   { value: '~10K', label: 'Trainable params' },
@@ -125,6 +126,19 @@ export default function Hero() {
             </div>
           </motion.aside>
         </div>
+
+        <motion.figure
+          className="mt-10 overflow-hidden rounded-2xl border border-white/10 bg-surface-800/70 shadow-[0_24px_80px_rgba(2,8,23,0.32)]"
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, ease: 'easeOut', delay: 0.25 }}
+        >
+          <img
+            src={brandVisual}
+            alt="MiniRouter routing performance overview"
+            className="w-full object-contain"
+          />
+        </motion.figure>
       </div>
     </section>
   )
