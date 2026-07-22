@@ -170,17 +170,23 @@ async def train(args) -> dict:
         )
         es.tell(thetas, fits)
 
+        # Ship distribution mean (xfavorite), not noisy xbest — see issue #234.
         best_x, best_f = es.best()
+        xbest, fbest = es.incumbent()
         rec = {
             "generation": gen,
             "gen_mean_fitness": float(np.mean(fits)),
             "gen_max_fitness": float(np.max(fits)),
             "best_fitness": float(best_f),
+            "xbest_fitness": float(fbest),
+            "ship_l2_vs_xbest": float(np.linalg.norm(best_x - xbest)),
             "seconds": round(time.time() - t0, 1),
         }
         history.append(rec)
         print(f"[gen {gen:3d}] mean={rec['gen_mean_fitness']:.3f} "
-              f"max={rec['gen_max_fitness']:.3f} best={rec['best_fitness']:.3f} "
+              f"max={rec['gen_max_fitness']:.3f} ship={rec['best_fitness']:.3f} "
+              f"xbest={rec['xbest_fitness']:.3f} "
+              f"(|ship-xbest|={rec['ship_l2_vs_xbest']:.3g}) "
               f"({rec['seconds']}s)")
         cost = ledger_cost_report(cost_ledger_path)
         print(

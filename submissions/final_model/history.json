@@ -1,9 +1,12 @@
 [
   {
     "generation": 0,
-    "gen_mean_fitness": 0.06640625000000001,
-    "gen_max_fitness": 0.25625000000000003,
-    "best_fitness": 0.25625000000000003,
-    "seconds": 175.8
+    "gen_mean_fitness": null,
+    "gen_max_fitness": null,
+    "best_fitness": null,
+    "xbest_fitness": null,
+    "ship_l2_vs_xbest": 0.0,
+    "seconds": 0.0,
+    "note": "identity init shipped via xfavorite path (pre-train placeholder)"
   }
 ]

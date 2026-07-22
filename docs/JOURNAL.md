@@ -18,6 +18,24 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-21 — King submissions ship noisy xbest; switch to xfavorite  #decision #mistake
+**Context:** Reviewer note: normal PRs score 0; only king/submission PRs (with
+`submissions/final_model/best_theta.npy`) enter the scored eval queue. Issue #234
+(diagnosis also in #69): `SepCMAES.best()` returned pycma `xbest`, so
+`train.py` saved the luckiest noisy minibatch eval as the competition vector.
+**Expected:** shipped θ ≈ argmax E[R(τ)] (distribution mean under noise).
+**Actual:** shipped θ = argmax of a single noisy eval → selection-on-noise;
+placeholder bundle on main was also wrong length (14336 vs canonical 13312).
+**Root cause:** `best()` preferred `result.xbest`/`fbest`; docs incorrectly called
+that "more robust" for our *noisy* objective.
+**Fix / decision:** `best()` prefers `result.xfavorite`; new `incumbent()` exposes
+`xbest` for logging only; `train.py` records `|ship−xbest|`; regression tests under
+additive Gaussian noise; replace submission bundle with identity init (W=0, SVF=1,
+n=13312) as a valid king-queue artifact until a GPU retrain with the fixed ship path.
+**Follow-up:** remote GPU retrain (`--enable-reweight`, shaped fitness) and push an
+updated `best_theta.npy` on the same miner branch; optional LRA-CMA-ES (#4 in
+IMPROVEMENTS.md) next.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.

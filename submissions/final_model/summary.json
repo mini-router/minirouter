@@ -1,15 +1,20 @@
 {
   "benchmark": "math500",
   "pool": [
-    "nemotron-3-super",
-    "gemma-4-31b",
-    "gpt-oss-120b",
-    "qwen3-coder-480b-a35b"
+    "deepseek-v4-pro",
+    "glm-5p2",
+    "kimi-k2p6"
   ],
-  "n_total": 14336,
-  "popsize": 4,
-  "m_cma": 4,
-  "generations": 1,
-  "best_fitness": 0.25625000000000003,
-  "run_dir": "/home/ubuntu/codes/tmimmanuel/tiny-router-works/minirouter/experiments/math500/test-01"
+  "n_total": 13312,
+  "n_head": 6144,
+  "n_svf": 7168,
+  "popsize": 33,
+  "m_cma": 16,
+  "generations": 0,
+  "best_fitness": null,
+  "ship_policy": "xfavorite_distribution_mean",
+  "init_mean": "head_zero_svf_one",
+  "notes": "King submission for claytonlin1110. Trainer now ships CMA-ES xfavorite (distribution mean) instead of noisy xbest (#234). Bundle is the canonical identity init (W=0, SVF=1) \u2014 retrain on GPU with the fixed SepCMAES.best() to replace this vector.",
+  "issue": 234,
+  "miner": "claytonlin1110"
 }

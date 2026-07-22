@@ -1,15 +1,10 @@
 {
   "benchmark": "math500",
   "results": {
-    "single::deepseek-v4-pro": 0.0,
-    "single::glm-5p2": 0.0,
-    "single::kimi-k2p6": 0.0,
-    "TRINITY": 0.0,
-    "random_routing": 0.0
+    "TRINITY": null,
+    "note": "awaiting validator king eval"
   },
   "invariants": {
-    "R1/R2 TRINITY > best single model": false,
-    "R4 TRINITY > random routing": false,
-    "best_single": 0.0
+    "ship_policy": "xfavorite"
   }
 }

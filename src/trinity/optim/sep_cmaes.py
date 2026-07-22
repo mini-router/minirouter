@@ -187,15 +187,52 @@ class SepCMAES:
     # Introspection
     # ------------------------------------------------------------------ #
     def best(self) -> tuple[np.ndarray, float]:
-        """Return the best solution found so far and its (maximized) fitness.
+        """Return the θ estimate to **ship** and a fitness proxy (maximization).
 
-        Prefers the library's own incumbent (``xbest``) when available, which is
-        more robust than tracking the raw population best; falls back to the
-        locally tracked best, then to the current distribution mean.
+        TRINITY fitness is a *noisy* minibatch mean with a sampled policy, so the
+        luckiest single evaluation (``xbest``) overfits sampling noise. For a
+        noisy CMA-ES objective the distribution mean (``xfavorite``) is the
+        recommended estimate of the optimum and is what ``train.py`` writes to
+        ``best_theta.npy`` for king / submission PRs (issue #234 / #69).
+
+        Preference order:
+          1. ``result.xfavorite`` (distribution mean) — shipped estimate
+          2. locally tracked population best (``_best_x``)
+          3. ``result.xbest`` — last resort only
+
+        The returned fitness is the best *observed* generation fitness
+        (``_best_f``) when shipping ``xfavorite``; that value is a logging proxy
+        and is **not** claimed to be ``J(xfavorite)``. Use :meth:`incumbent` when
+        you need the raw luckiest evaluation for diagnostics.
 
         Returns:
             A tuple ``(best_x, best_f)`` where ``best_x`` has shape ``(n,)`` and
-            ``best_f`` is the objective value in maximization space.
+            ``best_f`` is in maximization space.
+
+        Raises:
+            RuntimeError: If called before any :meth:`tell`.
+        """
+        favorite = getattr(self._es.result, "xfavorite", None)
+        if favorite is not None:
+            proxy_f = self._best_f if self._best_x is not None else 0.0
+            return np.asarray(favorite, dtype=float).copy(), float(proxy_f)
+        if self._best_x is not None:
+            return self._best_x.copy(), self._best_f
+        lib_best = getattr(self._es.result, "xbest", None)
+        lib_fval = getattr(self._es.result, "fbest", None)
+        if lib_best is not None and lib_fval is not None:
+            # `fbest` is in the minimized (negated) space -> flip back.
+            return np.asarray(lib_best, dtype=float), -float(lib_fval)
+        raise RuntimeError("best() called before any tell(); no evaluation yet.")
+
+    def incumbent(self) -> tuple[np.ndarray, float]:
+        """Return the luckiest single evaluation (``xbest``) for logging only.
+
+        Do **not** ship this vector as ``best_theta.npy`` under a noisy objective;
+        use :meth:`best` (distribution mean) instead.
+
+        Returns:
+            A tuple ``(xbest, fbest)`` in maximization space.
 
         Raises:
             RuntimeError: If called before any :meth:`tell`.
@@ -203,11 +240,10 @@ class SepCMAES:
         lib_best = getattr(self._es.result, "xbest", None)
         lib_fval = getattr(self._es.result, "fbest", None)
         if lib_best is not None and lib_fval is not None:
-            # `fbest` is in the minimized (negated) space -> flip back.
             return np.asarray(lib_best, dtype=float), -float(lib_fval)
         if self._best_x is not None:
             return self._best_x.copy(), self._best_f
-        raise RuntimeError("best() called before any tell(); no evaluation yet.")
+        raise RuntimeError("incumbent() called before any tell(); no evaluation yet.")
 
     def stop(self) -> bool:
         """Whether any CMA-ES termination criterion (e.g. ``maxiter``) is met.
