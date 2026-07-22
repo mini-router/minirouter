@@ -30,6 +30,19 @@ export default function Hero() {
   return (
     <section className="section-band pt-28 md:pt-32">
       <div className="section-shell">
+        <motion.figure
+          className="mb-10 overflow-hidden rounded-2xl border border-white/10 bg-surface-800/70 shadow-[0_24px_80px_rgba(2,8,23,0.32)]"
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, ease: 'easeOut', delay: 0.1 }}
+        >
+          <img
+            src={brandVisual}
+            alt="MiniRouter routing performance overview"
+            className="w-full object-contain"
+          />
+        </motion.figure>
+
         <div className="grid gap-10 lg:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)] lg:items-start">
           <motion.div
             className="space-y-7"
@@ -126,19 +139,6 @@ export default function Hero() {
             </div>
           </motion.aside>
         </div>
-
-        <motion.figure
-          className="mt-10 overflow-hidden rounded-2xl border border-white/10 bg-surface-800/70 shadow-[0_24px_80px_rgba(2,8,23,0.32)]"
-          initial={{ opacity: 0, y: 24 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, ease: 'easeOut', delay: 0.25 }}
-        >
-          <img
-            src={brandVisual}
-            alt="MiniRouter routing performance overview"
-            className="w-full object-contain"
-          />
-        </motion.figure>
       </div>
     </section>
   )
