@@ -3,23 +3,23 @@ import { motion } from 'framer-motion'
 const steps = [
   {
     num: '01',
-    title: 'Prepare the baseline',
-    desc: 'Clone the repository, install dependencies, and reproduce the reference score before making changes.',
+    title: 'Encode the task',
+    desc: 'The fixed encoder converts the incoming benchmark task into a hidden-state representation for the router head.',
   },
   {
     num: '02',
-    title: 'Change the head',
-    desc: 'Tune width, depth, activation, normalization, or derived features to improve routing quality.',
+    title: 'Select the route',
+    desc: 'The compact head chooses the model slot and role sequence that should solve or verify the task.',
   },
   {
     num: '03',
-    title: 'Validate locally',
-    desc: 'Run the evaluation harness with a fixed seed so you can compare runs consistently.',
+    title: 'Call through MiniBridge',
+    desc: 'Provider calls can be routed through MiniBridge so validator workflows do not need direct miner API keys.',
   },
   {
     num: '04',
-    title: 'Submit the package',
-    desc: 'Package weights, config, results, and report for organizer review and leaderboard refresh.',
+    title: 'Measure outcomes',
+    desc: 'The evaluator records accuracy, runtime, token usage, and cost so router quality is visible in the leaderboard.',
   },
 ]
 
@@ -35,11 +35,11 @@ export default function HowItWorks() {
           transition={{ duration: 0.5 }}
         >
           <p className="section-kicker">Process</p>
-          <h2 className="section-title mt-3">How it works</h2>
+          <h2 className="section-title mt-3">Performance pipeline</h2>
           <p className="section-copy mt-4">
-            The competition is a closed-loop optimization problem. You change the head,
-            test it against the fixed benchmark, and keep only the changes that move the
-            score.
+            MiniRouter is evaluated as a routing system, not as a standalone LLM. A
+            router head chooses which external model should act at each turn, then the
+            validator scores the final answer and records the operational cost.
           </p>
         </motion.div>
 

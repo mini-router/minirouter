@@ -3,10 +3,10 @@ import { Link } from 'react-router-dom'
 import { useLeaderboard } from '../hooks/useLeaderboard'
 
 const metrics = [
-  { value: '10K', label: 'Head parameters' },
-  { value: '3', label: 'LLM slots' },
-  { value: '2', label: 'Benchmarks' },
-  { value: '120', label: 'Eval questions' },
+  { value: '~10K', label: 'Trainable params' },
+  { value: 'Multi', label: 'Model routing' },
+  { value: 'Live', label: 'Benchmark validation' },
+  { value: 'TEE', label: 'MiniBridge calls' },
 ]
 
 const containerVariants: Variants = {
@@ -37,28 +37,28 @@ export default function Hero() {
             animate="visible"
           >
             <motion.div className="flex flex-wrap items-center gap-3" variants={itemVariants}>
-              <span className="ui-chip">2026 competition</span>
-              <span className="meta-label">Frozen encoder, 3-model pool, 120-question evaluation</span>
+              <span className="ui-chip">Benchmark-verified routing</span>
+              <span className="meta-label">Frozen encoder, compact head, MiniBridge provider layer</span>
             </motion.div>
 
             <motion.div className="space-y-4" variants={itemVariants}>
               <h1 className="max-w-4xl text-5xl font-semibold leading-[1.02] tracking-tight md:text-6xl lg:text-7xl">
                 MiniRouter
-                <span className="gradient-text block">Optimization Challenge</span>
+                <span className="gradient-text block">Efficient LLM Routing</span>
               </h1>
               <p className="section-copy max-w-2xl">
-                Improve the routing head that selects the right model and role for each
-                query. The benchmark is fixed; the only variable is the quality of the
-                head you design and train.
+                MiniRouter selects the right model and role for each task with a small
+                trainable head. The validator measures accuracy, runtime, and cost so
+                routing improvements are judged by real benchmark performance.
               </p>
             </motion.div>
 
             <motion.div className="flex flex-wrap gap-3" variants={itemVariants}>
-              <Link to="/rules" className="button-primary">
-                Read the rules
-              </Link>
               <Link to="/leaderboard" className="button-secondary">
-                View leaderboard
+                View performance
+              </Link>
+              <Link to="/submit" className="button-primary">
+                Submit router
               </Link>
             </motion.div>
 
@@ -83,10 +83,10 @@ export default function Hero() {
           >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="meta-label">Competition snapshot</p>
-                <h2 className="mt-2 text-xl font-semibold text-text">Current leaderboard</h2>
+                <p className="meta-label">Performance snapshot</p>
+                <h2 className="mt-2 text-xl font-semibold text-text">Measured router results</h2>
               </div>
-              <span className="ui-chip">Updated June 2026</span>
+              <span className="ui-chip">Live evals</span>
             </div>
 
             <div className="mt-6 divide-y divide-white/8">
@@ -99,7 +99,7 @@ export default function Hero() {
                       </span>
                       <span className="font-medium text-text">{entry.team}</span>
                     </div>
-                    <div className="mt-1 text-sm text-text-dim">Macro-average score</div>
+                    <div className="mt-1 text-sm text-text-dim">Validated accuracy</div>
                   </div>
                   <div className="text-right">
                     <div className="text-lg font-semibold text-text font-mono">
@@ -115,12 +115,12 @@ export default function Hero() {
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-xl border border-white/8 bg-white/4 p-4">
-                <div className="meta-label">Submission package</div>
-                <div className="mt-2 text-sm text-text">best_theta.npy, config, results, report</div>
+                <div className="meta-label">Router artifact</div>
+                <div className="mt-2 text-sm text-text">best_theta.npy plus summary metadata</div>
               </div>
               <div className="rounded-xl border border-white/8 bg-white/4 p-4">
-                <div className="meta-label">Evaluation</div>
-                <div className="mt-2 text-sm text-text">math, mmlu</div>
+                <div className="meta-label">Provider layer</div>
+                <div className="mt-2 text-sm text-text">MiniBridge-backed model calls</div>
               </div>
             </div>
           </motion.aside>
