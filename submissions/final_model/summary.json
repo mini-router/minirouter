@@ -1,49 +1,49 @@
 {
-  "benchmark": "math500",
+  "benchmark": "mmlu",
   "pool": [
     "qwen3-coder-30b",
     "gpt-oss-120b",
-    "gemma-3-27b",
+    "gemma-3-4b",
     "nemotron-3-ultra"
   ],
   "n_total": 14336,
   "popsize": 4,
   "m_cma": 4,
   "generations": 12,
-  "best_fitness": 1.0,
+  "best_fitness": 1.015625,
   "cost": {
-    "cost_usd": 0.2939,
+    "cost_usd": 0.2372,
     "cost_missing": false,
-    "cost_ledger": "/root/trinity/experiments/math500/test-03/cost_ledger.jsonl",
-    "cost_calls": 565,
-    "cost_prompt_tokens": 375740,
-    "cost_completion_tokens": 211819,
+    "cost_ledger": "experiments/mmlu/2026-07-23/cost_ledger.jsonl",
+    "cost_calls": 803,
+    "cost_prompt_tokens": 508581,
+    "cost_completion_tokens": 137280,
     "cost_per_model": {
-      "openrouter:google/gemma-3-27b-it": {
-        "prompt_tokens": 72622,
-        "completion_tokens": 19825,
-        "calls": 114,
-        "usd": 0.009
+      "openrouter:google/gemma-3-4b-it": {
+        "prompt_tokens": 120751,
+        "completion_tokens": 10268,
+        "calls": 187,
+        "usd": 0.0071
       },
       "openrouter:nvidia/nemotron-3-ultra-550b-a55b": {
-        "prompt_tokens": 102713,
-        "completion_tokens": 90847,
-        "calls": 155,
-        "usd": 0.2512
+        "prompt_tokens": 121487,
+        "completion_tokens": 63611,
+        "calls": 200,
+        "usd": 0.2007
       },
       "openrouter:openai/gpt-oss-120b": {
-        "prompt_tokens": 94579,
-        "completion_tokens": 49314,
-        "calls": 135,
-        "usd": 0.0123
+        "prompt_tokens": 140434,
+        "completion_tokens": 17147,
+        "calls": 210,
+        "usd": 0.0081
       },
       "openrouter:qwen/qwen3-coder-30b-a3b-instruct": {
-        "prompt_tokens": 105826,
-        "completion_tokens": 51833,
-        "calls": 161,
-        "usd": 0.0214
+        "prompt_tokens": 125909,
+        "completion_tokens": 46254,
+        "calls": 206,
+        "usd": 0.0213
       }
     }
   },
-  "run_dir": "/root/trinity/experiments/math500/test-03"
+  "run_dir": "experiments/mmlu/2026-07-23"
 }
