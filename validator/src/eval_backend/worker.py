@@ -67,7 +67,9 @@ def process_once(session_factory, settings: Settings) -> int:
                     JobQueue.priority.desc(),
                     JobQueue.created_at.asc(),
                     JobQueue.id.asc(),
-                ).with_for_update(skip_locked=True)
+                )
+                .with_for_update(skip_locked=True)
+                .limit(1)
             )
             .scalars()
             .first()
