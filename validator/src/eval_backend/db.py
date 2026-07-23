@@ -87,6 +87,8 @@ def ensure_schema(engine) -> None:
         _add_column_if_missing(conn, "submissions", "finished_at", "TIMESTAMPTZ")
         _add_column_if_missing(conn, "submissions", "duration_seconds", "DOUBLE PRECISION")
         _add_column_if_missing(conn, "submissions", "cost_usd", "DOUBLE PRECISION")
+        _add_column_if_missing(conn, "submissions", "deleted_at", "TIMESTAMPTZ")
+        _add_column_if_missing(conn, "evaluations", "deleted_at", "TIMESTAMPTZ")
         _add_column_if_missing(
             conn, "competition_runtime_config", "default_eval_execution_mode", "VARCHAR(32)"
         )
