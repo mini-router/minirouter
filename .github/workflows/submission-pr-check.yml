@@ -1,0 +1,100 @@
+name: Submission PR body check
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
+
+permissions:
+  pull-requests: write
+
+jobs:
+  check_submission_body:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate submission PR body
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+            const pr = context.payload.pull_request
+            const marker = '<!-- submission-pr-check -->'
+
+            const labels = (pr.labels || []).map((item) => String(item.name || '').toLowerCase())
+            if (!labels.includes('submission')) {
+              core.info('PR is not labeled "submission"; skipping body check.')
+              return
+            }
+
+            const body = pr.body || ''
+
+            const requiredFields = [
+              { name: 'Miner name', pattern: /^-\s*miner name\s*:\s*(.*)$/im },
+              { name: 'owner_id', pattern: /^-\s*`?owner_id`?\s*:\s*(.*)$/im },
+              { name: 'key_id', pattern: /^-\s*`?key_id`?\s*:\s*(.*)$/im },
+              { name: 'Benchmark', pattern: /^-\s*benchmark\s*:\s*(.*)$/im },
+              { name: 'Local eval score', pattern: /^-\s*local eval score\s*:\s*(.*)$/im },
+            ]
+
+            const requiredChecks = [
+              { name: '`submissions/final_model/best_theta.npy` included', pattern: /^-\s*\[( |x|X)\]\s*.*best_theta\.npy.*$/im },
+              { name: '`submissions/final_model/summary.json` included', pattern: /^-\s*\[( |x|X)\]\s*.*summary\.json.*$/im },
+              { name: '`validate_submission.py` passes locally', pattern: /^-\s*\[( |x|X)\]\s*.*validate_submission\.py.*$/im },
+            ]
+
+            const problems = []
+
+            for (const field of requiredFields) {
+              const match = body.match(field.pattern)
+              const value = match ? match[1].trim() : ''
+              if (!value) {
+                problems.push(`Missing value for **${field.name}**`)
+              }
+            }
+
+            for (const check of requiredChecks) {
+              const match = body.match(check.pattern)
+              const checked = match && /x/i.test(match[1])
+              if (!checked) {
+                problems.push(`Checklist item not checked: **${check.name}**`)
+              }
+            }
+
+            const existingComments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: pr.number,
+              per_page: 100,
+            })
+            const existingComment = existingComments.find((comment) => comment.body?.includes(marker))
+
+            if (problems.length > 0) {
+              const list = problems.map((item) => `- ${item}`).join('\n')
+              const commentBody = `${marker}\n### Submission PR body check failed\n\nThis PR is labeled \`submission\`, but the PR body is missing required information from the submission template:\n\n${list}\n\nPlease use the **submission** PR template (\`?template=submission.md\` or the template picker) and fill in every required field, including the MiniBridge \`owner_id\`/\`key_id\` used for evaluation.`
+
+              if (existingComment) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: existingComment.id, body: commentBody })
+              } else {
+                await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body: commentBody })
+              }
+
+              core.setFailed(`Submission PR body is missing required fields: ${problems.join('; ')}`)
+              return
+            }
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existingComment.id,
+                body: `${marker}\n### Submission PR body check passed\n\nAll required submission fields are present.`,
+              })
+            }
+
+            core.info('Submission PR body check passed.')
