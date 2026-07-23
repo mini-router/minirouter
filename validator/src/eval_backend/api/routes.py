@@ -26,6 +26,8 @@ from ..schemas import (
     JobQueueResponse,
     LeaderboardEntry,
     LeaderboardResponse,
+    ProviderEvaluationCreateRequest,
+    ProviderEvaluationCreateResponse,
     ReviewControlOut,
     TrainCreateRequest,
     TrainCreateResponse,
@@ -50,6 +52,7 @@ from ..services.github import create_pr_submission
 from ..services.github import set_commit_status
 from ..services.artifacts import persist_stored_artifact
 from ..services.queue import cancel_submission_jobs
+from ..services.queue import enqueue_provider_eval_job
 from ..services.queue import enqueue_submission_job
 from ..services.queue import enqueue_submission_pipeline_job
 from ..services.queue import enqueue_train_job
@@ -189,17 +192,34 @@ def _evaluation_to_schema(run: EvaluationRun) -> EvaluationOut:
     return EvaluationOut(
         id=run.id,
         submission_id=run.submission_id,
+        train_id=run.train_id,
+        input_artifact_id=run.input_artifact_id,
         status=run.status,
         score=run.score,
         phase=run.phase,
         message=run.message,
         progress_current=run.progress_current,
         progress_total=run.progress_total,
+        benchmark_names=list(run.benchmark_names_json or []),
+        provider=run.provider,
+        models_config=run.models_config,
+        execution_mode=run.execution_mode,
+        device=run.device,
+        dtype=run.dtype,
+        batch_size=run.batch_size,
+        max_items=run.max_items,
+        max_turns=run.max_turns,
+        max_tokens=run.max_tokens,
+        reasoning=run.reasoning,
+        seed=run.seed,
+        cost_usd=run.cost_usd,
+        duration_seconds=run.duration_seconds,
         metrics=json.loads(run.metrics_json) if run.metrics_json else {},
         command=run.command,
         stdout=run.stdout,
         stderr=run.stderr,
         results_path=run.results_path,
+        results_artifact_id=run.results_artifact_id,
         error=run.error,
         started_at=run.started_at,
         finished_at=run.finished_at,
@@ -234,6 +254,8 @@ def _train_to_schema(run: TrainRun) -> TrainOut:
 
 def _job_kind(job: JobQueue) -> str:
     payload = job.payload_json or {}
+    if job.job_type == "provider_eval":
+        return "evaluation"
     if job.job_type == "train":
         return "train"
     if payload.get("train_id") is not None:
@@ -248,6 +270,11 @@ def _job_to_schema(job: JobQueue) -> JobQueueOut:
         train_id = int(train_id)
     elif not isinstance(train_id, int):
         train_id = None
+    evaluation_id = payload.get("evaluation_id")
+    if isinstance(evaluation_id, str) and evaluation_id.isdigit():
+        evaluation_id = int(evaluation_id)
+    elif not isinstance(evaluation_id, int):
+        evaluation_id = None
     return JobQueueOut(
         id=job.id,
         job_type=job.job_type,
@@ -255,6 +282,7 @@ def _job_to_schema(job: JobQueue) -> JobQueueOut:
         job_id=job.job_id,
         submission_id=job.submission_id,
         train_id=train_id,
+        evaluation_id=evaluation_id,
         queue_name=job.queue_name,
         status=job.status,
         priority=job.priority,
@@ -327,6 +355,7 @@ def _runtime_config_to_schema(session: Session, settings: Settings) -> AdminRunt
     return AdminRuntimeConfigOut(
         benchmark_names=list(runtime.benchmark_names),
         eval_max_items=runtime.eval_max_items,
+        eval_batch_size=runtime.eval_batch_size,
         eval_provider=runtime.eval_provider,
         eval_models_config=runtime.eval_models_config,
         eval_execution_mode=runtime.eval_execution_mode,
@@ -917,6 +946,7 @@ def admin_update_config(
             settings,
             benchmark_names=payload.benchmark_names,
             eval_max_items=payload.eval_max_items,
+            eval_batch_size=payload.eval_batch_size,
             eval_provider=payload.eval_provider,
             eval_models_config=payload.eval_models_config,
             eval_execution_mode=payload.eval_execution_mode,
@@ -1012,6 +1042,103 @@ def admin_get_evaluation(
     user: AdminUser = Depends(_require_admin_user),
 ) -> EvaluationOut:
     return get_evaluation(request, evaluation_id)
+
+
+@admin_router.get("/evaluations", response_model=list[EvaluationOut])
+def admin_list_evaluations(
+    request: Request,
+    standalone_only: bool = True,
+    limit: int = 100,
+    user: AdminUser = Depends(_require_admin_user),
+) -> list[EvaluationOut]:
+    session = get_session(request)
+    try:
+        stmt = select(EvaluationRun).order_by(EvaluationRun.created_at.desc(), EvaluationRun.id.desc())
+        if standalone_only:
+            stmt = stmt.where(EvaluationRun.submission_id.is_(None))
+        stmt = stmt.limit(max(1, min(limit, 500)))
+        return [_evaluation_to_schema(run) for run in session.execute(stmt).scalars().all()]
+    finally:
+        session.close()
+
+
+@admin_router.post("/provider-evaluations", response_model=ProviderEvaluationCreateResponse)
+def admin_create_provider_evaluations(
+    request: Request,
+    payload: ProviderEvaluationCreateRequest,
+    settings: Settings = Depends(get_settings),
+    user: AdminUser = Depends(_require_admin_user),
+) -> ProviderEvaluationCreateResponse:
+    session = get_session(request)
+    try:
+        runtime = get_runtime_config(session, settings)
+        benchmarks = [item.strip() for item in payload.benchmark_names if item.strip()]
+        if not benchmarks:
+            benchmarks = list(runtime.benchmark_names)
+        pool_models = [item.strip() for item in payload.pool_models if item.strip()]
+        if not benchmarks:
+            raise HTTPException(status_code=400, detail="at least one benchmark is required")
+        if not pool_models:
+            raise HTTPException(status_code=400, detail="at least one provider route is required")
+
+        runs: list[EvaluationRun] = []
+        jobs: list[JobQueue] = []
+        for benchmark in benchmarks:
+            for pool_model in pool_models:
+                run = EvaluationRun(
+                    submission_id=None,
+                    benchmark_names_json=[benchmark],
+                    provider=payload.provider.strip() or "compatible",
+                    models_config=payload.models_config.strip() or "configs/models.openrouter-chutes.yaml",
+                    execution_mode="local_cpu",
+                    device="cpu",
+                    dtype="float32",
+                    batch_size=max(1, int(payload.batch_size)),
+                    max_items=max(1, int(payload.max_items)),
+                    status="queued",
+                    phase="queued",
+                    message=f"queued provider route {pool_model}",
+                    progress_current=0,
+                    progress_total=max(1, int(payload.max_items)),
+                    metrics_json=json.dumps(
+                        {
+                            "pool_model": pool_model,
+                            "provider_route": pool_model,
+                            "repeat": max(1, int(payload.repeat)),
+                            "benchmark": benchmark,
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                )
+                session.add(run)
+                session.flush()
+                job = enqueue_provider_eval_job(
+                    session,
+                    run,
+                    payload_json={
+                        "evaluation_id": run.id,
+                        "job_type": "provider_eval",
+                        "benchmark": benchmark,
+                        "pool_model": pool_model,
+                        "repeat": max(1, int(payload.repeat)),
+                    },
+                )
+                runs.append(run)
+                jobs.append(job)
+        session.commit()
+        return ProviderEvaluationCreateResponse(
+            evaluations=[_evaluation_to_schema(run) for run in runs],
+            job_ids=[job.id for job in jobs],
+        )
+    except HTTPException:
+        session.rollback()
+        raise
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        session.close()
 
 
 @admin_router.post("/trains", response_model=TrainCreateResponse)

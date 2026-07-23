@@ -124,6 +124,10 @@ jobs:
               labels.add('miner')
             }
 
+            if (names.includes('submissions/final_model/best_theta.npy')) {
+              labels.add('submission')
+            }
+
             if (labels.size > 0) {
               await github.rest.issues.addLabels({
                 owner,
@@ -321,6 +325,10 @@ jobs:
 
             if (pr.head.ref.startsWith('sn74-')) {
               labels.add('miner')
+            }
+
+            if (names.includes('submissions/final_model/best_theta.npy')) {
+              labels.add('submission')
             }
 
             if (labels.size > 0) {

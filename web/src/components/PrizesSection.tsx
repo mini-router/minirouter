@@ -4,7 +4,7 @@ const prizes = [
   {
     place: 'King',
     amount: 'All emissions',
-    desc: 'Daily evaluation chooses the king. The king receives all SN74 MiniRouter emissions.',
+    desc: 'Daily evaluation rewards the strongest measured router. Emissions incentivize practical improvements to accuracy, cost, and runtime.',
     color: 'text-gold',
     border: 'border-gold/30',
   },
@@ -21,11 +21,12 @@ export default function PrizesSection() {
           viewport={{ once: true, margin: '-100px' }}
           transition={{ duration: 0.5 }}
         >
-          <p className="section-kicker">Awards</p>
-          <h2 className="section-title mt-3">Prizes</h2>
+          <p className="section-kicker">Incentive layer</p>
+          <h2 className="section-title mt-3">SN74 rewards useful routing</h2>
           <p className="section-copy mt-4">
-            The leaderboard is ranked by macro-average accuracy. Daily evaluation chooses
-            the king, and the king receives all SN74 MiniRouter emissions.
+            The competition layer exists to keep the router improving. Submissions are
+            reviewed by the validator, ranked by measured performance, and rewarded when
+            they become the best available routing policy.
           </p>
         </motion.div>
 
@@ -41,7 +42,7 @@ export default function PrizesSection() {
             >
               <div className="flex items-center justify-between">
                 <span className={`section-kicker ${p.color}`}>{p.place}</span>
-                <span className="meta-label">Cash prize</span>
+                <span className="meta-label">SN74 emissions</span>
               </div>
               <div className={`mt-5 text-4xl font-semibold ${p.color}`}>{p.amount}</div>
               <p className="mt-4 text-sm leading-6 text-text-dim">{p.desc}</p>

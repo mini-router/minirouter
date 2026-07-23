@@ -13,14 +13,15 @@ export default function AboutSection() {
           <p className="section-kicker">Overview</p>
           <h2 className="section-title mt-3">What is MiniRouter?</h2>
           <p className="section-copy mt-5">
-            MiniRouter is a compact routing system built around a frozen encoder and a
-            small trainable head. The head decides which model to call and which role to
-            assign to that model, then the benchmark suite scores the result.
+            MiniRouter is a compact routing system for choosing which LLM should handle
+            a task. It uses a frozen encoder and a small trainable head, then evaluates
+            each routing policy against fixed benchmarks with measured score, runtime,
+            and provider cost.
           </p>
           <p className="section-copy mt-4">
-            The challenge is narrow by design: the encoder, model pool, evaluation set,
-            and reward function stay fixed. Your leverage is the head architecture,
-            training setup, and the features you derive from the encoder output.
+            The SN74 challenge is the improvement mechanism. Miners submit better router
+            heads, but the product goal is broader: make model selection more effective
+            without turning every request into a call to the largest available model.
           </p>
         </motion.div>
 
@@ -34,8 +35,8 @@ export default function AboutSection() {
           {[
             { label: 'Head budget', value: '~10K parameters' },
             { label: 'Router inputs', value: '1024-dim hidden state' },
-            { label: 'Model pool', value: '3 open-source LLMs' },
-            { label: 'Training loop', value: 'Separable CMA-ES' },
+            { label: 'Model pool', value: 'Configurable provider models' },
+            { label: 'Validation', value: 'Accuracy, cost, runtime' },
           ].map((item) => (
             <div key={item.label} className="stat-card">
               <div className="meta-label">{item.label}</div>
@@ -45,8 +46,9 @@ export default function AboutSection() {
           <div className="sm:col-span-2 rounded-2xl border border-white/8 bg-white/4 p-5">
             <div className="meta-label">Success criterion</div>
             <div className="mt-3 text-base leading-7 text-text-dim">
-              Higher macro-average accuracy across the benchmark suite. If two submissions
-              tie, the smaller head wins.
+              Better benchmark accuracy with transparent execution metrics. If two routers
+              perform similarly, the smaller and cheaper route is easier to justify in
+              production.
             </div>
           </div>
         </motion.div>

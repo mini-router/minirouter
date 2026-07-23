@@ -61,6 +61,9 @@ def ensure_schema(engine) -> None:
             "ALTER TABLE competition_runtime_config ADD COLUMN IF NOT EXISTS default_eval_execution_mode VARCHAR(32)"
         )
         conn.exec_driver_sql(
+            "ALTER TABLE competition_runtime_config ADD COLUMN IF NOT EXISTS default_eval_batch_size INTEGER"
+        )
+        conn.exec_driver_sql(
             "ALTER TABLE competition_runtime_config ADD COLUMN IF NOT EXISTS king_score DOUBLE PRECISION"
         )
         conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN artifact_name DROP NOT NULL")
@@ -79,6 +82,10 @@ def ensure_schema(engine) -> None:
         conn.exec_driver_sql(
             "UPDATE competition_runtime_config "
             "SET default_eval_execution_mode = COALESCE(NULLIF(default_eval_execution_mode, ''), 'remote_gpu')"
+        )
+        conn.exec_driver_sql(
+            "UPDATE competition_runtime_config "
+            "SET default_eval_batch_size = COALESCE(NULLIF(default_eval_batch_size, 0), 1)"
         )
         conn.exec_driver_sql(
             "UPDATE competition_runtime_config "
