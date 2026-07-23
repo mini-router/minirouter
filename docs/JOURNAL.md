@@ -18,6 +18,27 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+<<<<<<< sn74-philluiz2323-lcb-functional
+## 2026-07-09 — Every LiveCodeBench `functional` problem scored 0  #mistake #repro
+**Context:** auditing the code-benchmark reward path right after `feat: implement livecodebench` landed.
+**Expected:** a correct `Solution.twoSum` scores 1.0 on a LiveCodeBench functional problem.
+**Actual:** it scored **0.0**. Every functional problem was unsolvable regardless of the answer.
+**Root cause:** three linked gaps. (1) LiveCodeBench stores the function name inside a JSON
+`metadata` blob (`metadata["func_name"]`), but `_load_livecodebench_hf` read it as a top-level
+column via `_row_get(row, "fn_name", "func_name")`, so `fn_name` was always `None`.
+(2) `_parse_lcb_tests` discarded each case's `testtype` (`stdin` vs `functional`).
+(3) `reward.py` never referenced `fn_name` at all and had no call-based execution path, so a
+functional test (`{"input": "[2,7,11,15]\n9", "output": "[0,1]"}`) was run as a *stdin program*:
+the candidate read nothing, printed nothing, and stdout `""` never matched `"[0,1]"`.
+**Fix / decision:** parse `func_name` out of the metadata JSON (`_lcb_func_name`), preserve
+`testtype` per test, thread `fn_name` through `_coerce_test_spec` -> `run_pass_at_1` ->
+`_run_one_test`, and add `_run_functional_test`: decode the newline-separated JSON args
+(LiveCodeBench's convention, one JSON value per positional arg), resolve `fn_name` as a
+`Solution` method or a module-level function, call it in the same sandboxed subprocess, and
+compare with tuples normalized to lists. `fn_name=None` keeps the historical stdin behavior, so
+stdin/assert tests and the S5 smoke assertions are untouched.
+**Follow-up:** private (hidden) LiveCodeBench tests are still not executed — only `public_test_cases`.
+=======
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.
@@ -64,6 +85,7 @@ trailing text on quoted values.
 values, and add regression tests in `tests/test_envfile.py`.
 **Follow-up:** none.
 
+>>>>>>> main
 ## 2026-07-09 — results_table summary crashed on a missing random_routing baseline  #mistake #gotcha
 **Context:** aggregating `experiments/**/eval*.json` into the multi-task R1/R2/R4 table.
 **Expected:** an eval JSON without `random_routing` renders that cell as `—`, like the
@@ -93,6 +115,8 @@ same comparison, not just the one in the reported repro.
 TRINITY, per-bench `mean` for random) are unchanged.
 
 ---
+
+
 ## 2026-07-11 — fugu/eval banked a tied vote as a solved query (partial credit)  #mistake #repro
 **Context:** `trinity.fugu.eval.evaluate()` emits `per_query_binary`, which feeds `scripts/oracle_ceiling.py` (McNemar test, router-vs-ceiling) — issue #83.
 **Expected:** a per-query "majority" over reps; a 50/50 ballot is not a majority.
