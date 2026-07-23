@@ -1282,6 +1282,36 @@ def _sandbox_env(*, home_dir: str) -> dict[str, str]:
     return env
 
 
+def _rlimit_preexec():
+    """Best-effort resource caps for the graded child (POSIX only; None else).
+
+    Defense in depth on top of the isolated HOME/cwd and scrubbed env: bounds
+    address space, CPU time, and process count so an untrusted candidate cannot
+    exhaust host memory or fork-bomb the eval box within its timeout. Returned as
+    a ``preexec_fn`` callable, or ``None`` where ``resource`` is unavailable
+    (e.g. Windows), in which case ``subprocess`` simply gets no hook.
+    """
+    try:
+        import resource
+    except ImportError:  # non-POSIX: no preexec hook.
+        return None
+
+    def _apply() -> None:  # pragma: no cover - runs only in the child process.
+        # 2 GiB address space, 30s CPU, 64 processes. Guard each limit so a
+        # platform that rejects one still applies the others.
+        for res, soft in (
+            (resource.RLIMIT_AS, 2 * 1024 * 1024 * 1024),
+            (resource.RLIMIT_CPU, 30),
+            (resource.RLIMIT_NPROC, 64),
+        ):
+            try:
+                resource.setrlimit(res, (soft, soft))
+            except (ValueError, OSError):
+                pass
+
+    return _apply
+
+
 def _exec_script(script: str, *, stdin_data: str, timeout_s: int) -> bool:
     """Run a script; pass iff it exits 0 within the timeout. No output check."""
     ok, _ = _exec_script_capture(script, stdin_data=stdin_data, timeout_s=timeout_s)
@@ -1324,6 +1354,7 @@ def _exec_script_capture(
                     timeout=timeout_s,
                     env=_sandbox_env(home_dir=run_dir),
                     cwd=run_dir,
+                    preexec_fn=_rlimit_preexec(),
                 )
             except subprocess.TimeoutExpired:
                 return False, ""
