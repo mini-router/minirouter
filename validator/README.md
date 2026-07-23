@@ -48,6 +48,7 @@ PYTHONPATH=src python -m trinity.eval --submission-only \
   --device cuda:0 \
   --dtype bfloat16 \
   --max-items {max_items} \
+  --batch-size {eval_batch_size} \
   --theta {checkpoint_path} \
   --out {results_path}
 ```
@@ -64,6 +65,25 @@ The runner does not duplicate evaluation logic. It shells out to the submission-
 `python -m trinity.eval` path from the copied `minirouter` repository, so the benchmark
 code stays in one place.
 
+## MiniBridge provider
+
+Set `EVAL_PROVIDER=minibridge` and
+`EVAL_MODELS_CONFIG=configs/models.minibridge.light.yaml` to send LLM calls through
+the MiniBridge TEE runner instead of calling OpenRouter directly. The upstream API
+key stays in MiniBridge. MiniRouter only sends the configured policy identities:
+
+```bash
+MINIBRIDGE_URL=https://4f4ea5780387d1611e5231be1efe7c883f3f5102-18081.dstack-pha-prod9.phala.network
+MINIBRIDGE_PROVIDER_ID=openrouter-prod
+MINIBRIDGE_CALLER_ID=minirouter-maintainer
+MINIBRIDGE_OWNER_ID=minirouter-miners
+MINIBRIDGE_KEY_ID=minirouter-miners-openrouter-key
+```
+
+For small local smoke checks, use `EVAL_EXECUTION_MODE=local_cpu` and
+`EVAL_MAX_ITEMS=1`. For production review, switch back to `remote_gpu` once the
+remote SSH host is reachable.
+
 ## Local run
 
 ```bash
@@ -77,6 +97,9 @@ Run the API and the worker as separate processes. The API only stores queued
 submissions; the worker claims them and advances the progress fields.
 The submission API exposes the current phase, message, and item counters so the
 GitHub workflow can show live status while it waits.
+Set `EVAL_BATCH_SIZE` to control how many benchmark items the evaluator runs
+concurrently. The worker passes it through to both remote GPU and local fallback
+commands.
 
 Example `DATABASE_URL`:
 
@@ -85,6 +108,13 @@ DATABASE_URL=postgresql+psycopg://minirouter:minirouter@127.0.0.1:5432/miniroute
 ```
 
 For workflow smoke checks, set `EVAL_MAX_ITEMS=1` in the repo-root `secrets.env`.
+Set `PIPELINE_MODE=submission_eval` to keep the current "submit a trained
+checkpoint and evaluate it" path, or `PIPELINE_MODE=train_eval` to switch the
+backend into the PR-code training path. In train mode, the uploaded archive is
+treated as source code, the worker trains a router on the server, and the
+resulting checkpoint is evaluated afterward. The automation should upload
+`submissions/final_model/` in submission mode and the PR source bundle in train
+mode.
 
 GitHub PR automation uses the repo-root `GITHUB_WEBHOOK_SECRET` plus the optional
 `GITHUB_ACCESS_TOKEN`. Set `PUBLIC_SITE_URL` if the public frontend moves to a different domain.
@@ -93,7 +123,9 @@ queued submission at a time.
 
 The PR workflow now uploads `submissions/final_model/` as a tarball to
 `POST /submit`, which stores the archive, extracts `best_theta.npy`, and queues the submission for
-evaluation.
+evaluation. When the upload includes `repo_full_name` and `pr_number` (as the workflow does), the
+request must also send `x-minirouter-webhook-secret` matching `GITHUB_WEBHOOK_SECRET`.
+Plain uploads from the public form omit PR metadata and do not require the header.
 
 To enable automatic merge after evaluation, set `GITHUB_AUTO_MERGE_SUBMISSIONS=true`.
 To keep only the PR comment and skip auto-merge, leave it `false`.

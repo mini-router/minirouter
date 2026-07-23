@@ -42,6 +42,186 @@ trusted as the mean's true score without a held-out re-eval.
 If a caller ever needs an honest score for the shipped mean, it has to re-evaluate it on held-out
 data rather than read `best()[1]`.
 
+## 2026-07-12 — code grader: add resource limits on top of the HOME/secrets fix  #security #decision
+**Context:** issue #71 — the code grader (`run_pass_at_1`) runs untrusted miner/LLM candidate code. The core secret-leak fix (isolated throwaway HOME/cwd, scrubbed env, `python -I`) already landed on main.
+**Finding:** main's sandbox closes the HOME/secrets exfiltration vector but has **no resource limits** — an untrusted candidate can still exhaust host memory or fork-bomb the eval box within its wall-clock timeout (verified: a 4 GiB `bytearray` allocation runs to completion and "passes" on main).
+**Fix / decision:** add `_rlimit_preexec()` and wire it as `preexec_fn` on the grading subprocess — best-effort POSIX `setrlimit` for address space (2 GiB), CPU (30s), and process count (64), each guarded so a platform rejecting one still applies the rest; returns `None` (no hook) off POSIX. Purely additive on top of main's version. Tests appended to `tests/test_reward_sandbox.py` (POSIX-gated): the memory-bomb candidate is now killed instead of passing, and ordinary grading is unaffected.
+**Follow-up:** OS-level isolation (network namespace, filesystem confinement, unprivileged user — issue items #2–4) still belongs at the validator host/deploy layer; flagged to maintainers.
+
+## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
+**Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
+was unreachable, including on CI where no database service was provisioned.
+**Expected:** CI should exercise the production Postgres path and fail loudly when the test database
+is misconfigured.
+**Actual:** the shared ``validator_engine`` fixture skipped on connection errors, so the validator job
+could go green without running regression tests that depend on Postgres semantics.
+**Root cause:** CI did not start Postgres and the fixture treated unreachable databases as skippable
+even in automation.
+**Fix / decision:** provision ``postgres:16`` in the ``test-validator`` CI job, set
+``VALIDATOR_TEST_DATABASE_URL``, fail (not skip) when ``CI``/``GITHUB_ACTIONS`` is set but Postgres is
+unavailable, and add ``test_conftest.py`` to assert the fixture runs under CI.
+**Follow-up:** none — SQLite usage under ``validator/tests/`` was already removed on ``main``.
+## 2026-07-09 — benchmarks.livecodebench.load() was dead, and its test hid it  #mistake #gotcha
+**Context:** `configs/benchmarks.yaml` registers `loader: "benchmarks.livecodebench"`, and
+`benchmarks/__init__.py` documents the contract as "each loader exposes `load(split, **kw)`".
+**Expected:** `benchmarks.livecodebench.load("test", max_items=1)` returns a `list[Task]`.
+**Actual:** `TypeError: load_tasks() takes 1 positional argument but 2 positional arguments
+(and 2 keyword-only arguments) were given`. The canonical entrypoint raised on **every** call.
+**Root cause:** `load()` passed `("livecodebench", split)` positionally, but the benchmark name
+belongs to the *imported* `_load_tasks(benchmark, split, ...)`, not to the sibling
+`load_tasks(split, *, ...)` it actually called — that one takes a single positional.
+**Fix / decision:** `load()` now delegates to `load_tasks(split, ...)`, so the benchmark name is
+named in exactly one place.
+**The real lesson — the test asserted the bug.** `test_livecodebench_facade_delegates`
+monkeypatched `LCB.load_tasks` with a *four*-positional stub, so the buggy two-positional call
+type-checked against the fake and the suite stayed green over a dead entrypoint. A stub whose
+signature does not match the function it replaces cannot catch a signature bug. Patched the real
+delegation boundary (`LCB._load_tasks`) instead, and added a test that calls `load()` without
+patching `load_tasks` at all.
+**Follow-up:** `allow_toy_fallback` is still accepted and silently dropped by both wrappers;
+left alone here since the toy-set fallback behaviour is tracked separately in #65.
+## 2026-07-11 — Inline `#` comments in secrets.env values are stripped safely  #mistake #fix
+**Context:** issue #67 / PR #68 — `_parse_env_line()` kept trailing inline comments as part of env values
+(`KEY=sk-abc  # note` and `KEY="sk-abc"  # note`).
+**Expected:** annotated secrets.env lines should load only the secret; `#` inside quoted values should be
+preserved; malformed lines like `KEY="abc"oops` must not silently truncate.
+**Actual:** full-line comments worked, but inline trailing comments were kept; an intermediate fix silently
+dropped any suffix after a closing quote even when it was not a `#` comment.
+**Root cause:** the parser never trimmed inline comment suffixes correctly and briefly ignored non-comment
+trailing text on quoted values.
+**Fix / decision:** parse quoted values by finding the closing quote, allow only optional whitespace plus
+`#` comments after the quote, raise `ValueError` on malformed trailing text, strip ` #...` from unquoted
+values, and add regression tests in `tests/test_envfile.py`.
+**Follow-up:** none.
+
+## 2026-07-09 — results_table summary crashed on a missing random_routing baseline  #mistake #gotcha
+**Context:** aggregating `experiments/**/eval*.json` into the multi-task R1/R2/R4 table.
+**Expected:** an eval JSON without `random_routing` renders that cell as `—`, like the
+per-coordinator table already does.
+**Actual:** `TypeError: unsupported operand type(s) for +: 'int' and 'NoneType'` at
+`results_table.py:87` — the whole report aborted, including the per-coordinator table that
+had already been built, and `--json` never wrote `experiments/results.json`.
+**Root cause:** `load_rows` reads both headline baselines with `.get()`, so `trinity` and
+`random` are legitimately nullable. `fmt()` and the per-row table guard for that (`or 0`,
+`—`), and `single_avg()` filters `None` per benchmark — but the `trin_avg`/`rand_avg`
+aggregates summed/maxed the raw values. Only the `len(benches) >= 2` summary branch is
+affected, so a single-benchmark run hides the bug entirely.
+**Fix / decision:** added `bench_avg(key, reduce)`, which drops `None` per benchmark before
+reducing, mirroring `single_avg()`. Deliberately did **not** coerce with `or 0` (the
+one-liner the per-row table uses): a random baseline that was never measured would become
+`0.000` and R4 would print `✅ HOLDS` against a comparison nobody ran. When a baseline has no
+usable score anywhere, the row renders `—` and its invariant is reported as not evaluable.
+**Follow-up (review, #82):** the reviewer caught that I fixed only two of the three
+baselines. `best_fixed = max((single_avg(m) or 0) for m in models)` still coerced a
+missing fixed-single baseline to `0`, so with every `single::*` null, R1/R2 printed
+`✅ HOLDS (x vs 0.000)` — the exact false comparison this PR removes for random routing,
+left on the fixed-single side. Fixed by filtering `None` out of the fixed-single averages
+and rendering R1/R2 as not evaluable ("no fixed single baseline recorded") when none has a
+usable score. Lesson: when removing a `None → 0` coercion, grep for **every** `or 0` in the
+same comparison, not just the one in the reported repro.
+**Follow-up:** none. The aggregation semantics for present values (per-bench `max` for
+TRINITY, per-bench `mean` for random) are unchanged.
+
+---
+## 2026-07-11 — fugu/eval banked a tied vote as a solved query (partial credit)  #mistake #repro
+**Context:** `trinity.fugu.eval.evaluate()` emits `per_query_binary`, which feeds `scripts/oracle_ceiling.py` (McNemar test, router-vs-ceiling) — issue #83.
+**Expected:** a per-query "majority" over reps; a 50/50 ballot is not a majority.
+**Actual:** `int(2 * sum(votes) >= len(votes))` scored an exact tie as `1`. `votes=[1,0]` and `[1,1,0,0]` both banked as solved.
+**Root cause:** non-strict `>=`. Reachable via even `--reps`, and also via an odd `--reps` ballot truncated mid-task by the `cap_usd` spend check (records fewer votes than `reps`). Directly contradicts the module's own contract ("a number here cannot be inflated by partial credit") — a coin-flip query banked as 1 *is* partial credit, inflating the router in exactly the comparison oracle_ceiling exists to make trustworthy.
+**Fix / decision:** strict majority `int(2 * sum(votes) > len(votes))`, so a tie resolves to 0 (conservative: ties against the router). Odd complete ballots unaffected. Regression tests in `tests/test_fugu_eval_majority.py` (stub `propose_and_run`/`is_correct`, script the votes).
+**Follow-up:** none.
+
+## 2026-07-09 — PR-tagged POST /submit now requires webhook secret  #mistake #decision #repro
+**Context:** follow-up to PR #20 webhook fail-closed auth; PR automation posts miner bundles to
+`POST /submit` with `repo_full_name` + `pr_number` form fields.
+**Expected:** PR-tagged uploads should use the same shared-secret gate as
+`POST /webhooks/github/submission`.
+**Actual:** only the dedicated webhook upload path called `_verify_shared_secret`; `/submit` accepted
+any multipart request with PR metadata and could queue unauthenticated eval work.
+**Root cause:** `/submit` was originally a dual-purpose endpoint (public form + CI upload) and auth
+was only added to the narrower webhook route.
+**Fix / decision:** when `repo_full_name` and `pr_number` are present, `/submit` now requires
+`x-minirouter-webhook-secret`. Plain uploads without PR metadata remain open for the public form.
+PR automation workflow sends the header from `MINIROUTER_WEBHOOK_SECRET`.
+**Follow-up:** none.
+
+## 2026-07-09 — reward checker unit tests (smoke S5)  #decision #repro
+**Context:** ``orchestration/reward.py`` is the single source of truth for the
+binary reward used by sep-CMA-ES training and eval. SPEC smoke test S5 exercises
+math / choice / code checkers in ``tests/smoke/run_smoke.py``, but there was no
+dedicated pytest module on the PR path.
+**Expected:** known-correct and known-wrong cases for each benchmark family should
+be locked offline so silent grading regressions are caught before they poison
+fitness.
+**Actual:** no ``tests/test_reward_checkers.py`` existed (only partial coverage in
+the smoke CLI and upcoming fix-specific modules).
+**Root cause:** S5 lived only inside the smoke ladder, not in pytest.
+**Fix / decision:** add ``tests/test_reward_checkers.py`` (stdlib only for math/
+choice; subprocess sandbox for code — no torch/GPU/network).
+**Follow-up:** comma-normalization (#35) and final-choice extraction (#29) have
+their own fix PRs; this module covers the baseline S5 contract.
+## 2026-07-10 — Code grader no longer forwards real HOME to untrusted subprocesses  #mistake #decision #repro
+**Context:** issue #71 reported that LiveCodeBench/BigCodeBench grading executed miner-generated code
+in a subprocess that inherited the operator's real ``HOME``, exposing
+``~/.config/trinity/secrets.env`` to untrusted submissions.
+**Expected:** graded candidate code should run with a private writable home directory and must not be
+able to read API keys from the evaluator's user profile via ``~`` expansion.
+**Actual:** ``_sandbox_env()`` copied ``HOME`` from the parent process, so a malicious solution could
+read and exfiltrate provider credentials.
+**Root cause:** the grader assumed ``subprocess.run`` plus a temp ``cwd`` was a sandbox, but forwarded
+the full user environment including ``HOME``.
+**Fix / decision:** run each graded script under ``python -I`` inside a fresh temp directory used as
+both ``cwd`` and private ``HOME``/``TMPDIR``; stop forwarding the parent ``HOME``. Added
+``tests/test_reward_sandbox.py`` with a leak PoC and a regression for normal stdin/stdout grading.
+**Follow-up:** absolute-path reads of world-readable repo files still need an OS-level sandbox
+(container/bwrap) on hostile validator hosts.
+## 2026-07-09 — MMLU training silently trained on the 2-item toy set  #mistake #repro
+**Context:** issue #44 — auditing the data path for `python -m trinity.train --benchmark mmlu`.
+**Expected:** training draws minibatches from the real MMLU dataset.
+**Actual:** every minibatch came from the 2-item MMLU *toy set*, with no error or warning.
+**Root cause:** `train.py` calls `load_tasks(benchmark, "train", ...)`, and `_load_mmlu_hf`
+passed `split="train"` straight to `load_dataset("cais/mmlu", "all", split="train")`. But
+`cais/mmlu` has no `train` split (only `auxiliary_train`, `dev`, `validation`, `test`), so the
+load raised, `_try_load_hf` swallowed it and returned `None`, and `load_tasks` silently fell
+back to `_toy_tasks("mmlu")`. The load failed even with `datasets`+network available. (Eval is
+fine — it requests `"test"`. GPQA/LCB/math500 use split names that exist or map correctly.)
+**Fix / decision:** add `_mmlu_split_for_split` (mirroring `_lcb_version_for_split`) mapping
+`train` -> `auxiliary_train` (MMLU's designated training pool, same row schema as `test`) and
+passing `test`/`validation`/`dev` through, then route `_load_mmlu_hf` through it. Added
+`tests/test_dataset_mmlu_split.py` (offline) asserting the mapping never yields a non-existent
+split name.
+**Follow-up:** complementary to #7 (fail-loud-on-toy-fallback); this fixes the *reason* the MMLU
+load failed rather than only surfacing it.
+## 2026-07-09 — Submission eval now batches benchmark items + host alias fixed  #fix #perf #validator
+**Context:** validator submission eval was still processing benchmark items one by one, and the remote
+GPU host field used by the worker did not match the config dataclass.
+**Expected:** operators should be able to tune concurrent benchmark-item evaluation with `--batch-size`
+or `EVAL_BATCH_SIZE`, and the worker should resolve the remote host from the configured settings.
+**Actual:** `trinity.eval` ran each item sequentially, which made Chutes/OpenRouter smoke tests slow; the
+worker also referenced `settings.trinity_gpu_host` even though the config exposed `trinity_remote_host`.
+**Root cause:** task-level concurrency had never been wired into the eval entrypoint, and the config field
+name drifted between the settings loader and the runner.
+**Fix / decision:** evaluate benchmark items in bounded async batches, expose the knob in the CLI and the
+worker env/template, add a compatibility alias for the host setting, and keep the default batch size
+conservative so operators can opt up explicitly.
+**Follow-up:** none.
+
+## 2026-07-09 — LiveCodeBench benchmark facade and regression tests added  #decision #repro
+**Context:** the core dataset loader and reward checker already handled LiveCodeBench, but the repo
+still only exposed a stub benchmark package and the high-level README did not describe the code
+benchmark path.
+**Expected:** the config-facing benchmark registry should have a concrete LiveCodeBench module, and
+the behavior should be covered by offline tests.
+**Actual:** `benchmarks/livecodebench.py` did not exist, so `configs/benchmarks.yaml` pointed at a
+module name with no implementation.
+**Root cause:** the internal loader/scorer landed before the public benchmark facade.
+**Fix / decision:** add `benchmarks/livecodebench.py` as a thin wrapper around
+`trinity.orchestration.dataset.load_tasks("livecodebench", ...)`, add tests for facade delegation,
+HF row parsing, and pass@1 scoring, and update the README to call out LiveCodeBench explicitly in the
+automatic grader description.
+**Follow-up:** if we later wire `configs/benchmarks.yaml` into a runtime loader, the module is now in
+place.
+
 ## 2026-07-09 — role prompt assembly unit tests  #decision #repro
 **Context:** ``roles/prompts.py`` implements SPEC §4.4 system contracts and the
 ``render_transcript`` / ``build_messages`` helpers used by the inner loop, but had
@@ -52,6 +232,7 @@ and role-specific system prompts cannot drift silently.
 **Root cause:** small pure-string module shipped without pytest coverage.
 **Fix / decision:** add offline tests for empty/single/multi-turn transcript rendering,
 verifier verdict surfacing, and OpenAI-style message layout per role.
+
 ## 2026-07-09 — async batch gather unit tests  #decision #repro
 **Context:** ``orchestration/async_utils.gather_in_batches`` bounds fan-out for large
 benchmark sweeps but had no dedicated offline tests.
@@ -162,6 +343,17 @@ made it fail-safe — a missing/empty choice (or missing `message`) yields an em
 handling. Added `tests/test_pool_parse.py` (7 cases). Scoped to the parsing path only (not the imports)
 so it stays independent of the separate `import sys` --selftest fix (#25).
 **Follow-up:** none — self-contained client-robustness fix.
+## 2026-07-08 — Remote eval used nonexistent settings.trinity_gpu_host  #mistake #fix
+**Context:** issue #46 reported that validator remote GPU evaluation failed before SSH with
+`AttributeError: 'Settings' object has no attribute 'trinity_gpu_host'`.
+**Expected:** `_remote_attempt()` should read the configured remote host from `Settings.trinity_remote_host`
+(`TRINITY_GPU_HOST` env).
+**Actual:** `eval_runner.py` referenced `settings.trinity_gpu_host`, which is not defined on `Settings`.
+**Root cause:** field rename/typo — config exposes `trinity_remote_host` but the runner still used the old name.
+**Fix / decision:** replaced both `trinity_gpu_host` references in `eval_runner.py` with
+`trinity_remote_host`; added `validator/tests/test_eval_runner_remote_host.py` to assert SSH host resolution
+uses the real Settings field.
+**Follow-up:** none.
 
 ## 2026-07-08 — Remote GPU fallback is now explicit and configurable  #mistake #decision #repro
 **Context:** issue #21 flagged that validator remote GPU failures could be hidden when execution silently
@@ -1023,3 +1215,37 @@ Per user request (document everything + structured output):
   nondeterminism), best math (full_pilot) + best MMLU (mmlu_s1) coordinators → definitive numbers.
 - Cost ~$22 (ledger-tracked). No GPU was empty (other tenants), but evals are light (~4 GB) so they
   coexist on a shared H200.
+
+## 2026-07-12 — IFEval review fixes: pinned source + fail-closed language scoring  #fix #repro
+
+The PR review caught two reproducibility/correctness issues:
+- `_IFEVAL_RAW_URL` now points at a pinned Google Research commit instead of `master`, so the benchmark
+  set is stable across runs.
+- `_ifeval_detect_language` now fails closed on detection errors and unsupported languages instead of
+  treating them as correct.
+
+## 2026-07-12 — RLPR review fixes  #decision #repro
+
+Addressed PR 104 review feedback for `rlpr`:
+
+- pinned the Hugging Face source snapshot for `openbmb/RLPR-Evaluation`
+- made `WebInstruct-verified-val_Avg2` score generically instead of forcing choice-only routing
+- blocked training-split loading so `rlpr` stays evaluation-only in this repo
+- made RLPR parquet load failures raise instead of silently falling back to toy data
+
+## 2026-07-10 — BFCL simple-slice benchmark wiring added  #decision #repro
+
+Implemented a new `bfcl_simple` benchmark loader/facade:
+- BFCL loads only the official v4 single-turn JSONL question/answer files directly from the Gorilla repo raw URLs.
+- Reward support is now routed through `trinity.orchestration.reward.score_text` for `bfcl_simple`.
+
+Scoring is exact JSON function-call matching against the official ground-truth schema. Multi-turn/live BFCL
+categories remain out of scope until the loader preserves full dialogue context.
+
+## 2026-07-12 — BFCL review fixes  #decision #repro
+
+Addressed PR 102 review feedback for `bfcl_simple`:
+
+- pinned the Gorilla raw-source snapshot instead of reading from `main`
+- blocked `train` splits so the benchmark stays evaluation-only in this repo
+- kept the simplified single-turn scope explicit in the loader/docs

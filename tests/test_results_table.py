@@ -84,3 +84,112 @@ def test_r1_r2_true_win_still_holds():
     md = rt.render(rows)
     r1_line = next(line for line in md.splitlines() if line.startswith("**R1/R2**"))
     assert "✅ HOLDS" in r1_line
+
+
+# ---------------------------------------------------------------------------
+# Missing baselines. ``load_rows`` reads TRINITY and random_routing with
+# ``.get()``, so either can be None (e.g. an eval JSON that omits the random
+# baseline). The per-coordinator table already renders those as "—"; the
+# multi-task summary must not crash on them, and must never coerce a missing
+# score to 0.0 and call that a won comparison.
+# ---------------------------------------------------------------------------
+
+
+def _r4_line(md):
+    return next(line for line in md.splitlines() if line.startswith("**R4**"))
+
+
+def _r1_line(md):
+    return next(line for line in md.splitlines() if line.startswith("**R1/R2**"))
+
+
+def test_summary_renders_when_random_routing_is_missing_everywhere():
+    """A missing random baseline must not abort the whole report."""
+    rows = [
+        _row("math500", "c1", trinity=0.85, random=None, single=0.70),
+        _row("mmlu", "c1", trinity=0.85, random=None, single=0.80),
+    ]
+    md = rt.render(rows)  # must not raise TypeError
+    assert "| random routing | — |" in md
+    # R1/R2 is still fully evaluable: TRINITY 0.850 vs best single 0.750.
+    assert "✅ HOLDS" in _r1_line(md)
+
+
+def test_missing_random_is_never_reported_as_an_r4_win():
+    """An unmeasured random baseline must not become 0.000 and hand R4 a win."""
+    rows = [
+        _row("math500", "c1", trinity=0.85, random=None, single=0.70),
+        _row("mmlu", "c1", trinity=0.85, random=None, single=0.80),
+    ]
+    r4 = _r4_line(rt.render(rows))
+    assert "HOLDS" not in r4
+    assert "0.000" not in r4
+    assert "no random_routing baseline recorded" in r4
+
+
+def test_random_average_uses_only_benchmarks_that_measured_it():
+    """Benches lacking a random score are skipped, matching single_avg()."""
+    rows = [
+        _row("math500", "c1", trinity=0.85, random=None, single=0.70),
+        _row("mmlu", "c1", trinity=0.85, random=0.50, single=0.80),
+    ]
+    md = rt.render(rows)
+    # Only mmlu contributes: rand_avg = 0.500, not mean(0, 0.5) = 0.250.
+    assert "| random routing | 0.500 |" in md
+    assert "0.850 vs 0.500" in _r4_line(md)
+
+
+def test_trinity_per_bench_max_ignores_null_coordinators():
+    """A null TRINITY on one coordinator must not crash or drag the max down."""
+    rows = [
+        _row("math500", "c1", trinity=None, random=0.50, single=0.70),
+        _row("math500", "c2", trinity=0.90, random=0.50, single=0.70),
+        _row("mmlu", "c1", trinity=0.80, random=0.50, single=0.60),
+    ]
+    md = rt.render(rows)  # must not raise TypeError
+    # per-bench max: mean(0.90, 0.80) = 0.850
+    assert "**TRINITY (per-task best coordinator)** | **0.850**" in md
+
+
+def test_all_trinity_null_reports_r1_r2_as_not_evaluable():
+    rows = [
+        _row("math500", "c1", trinity=None, random=0.50, single=0.70),
+        _row("mmlu", "c1", trinity=None, random=0.50, single=0.60),
+    ]
+    md = rt.render(rows)
+    assert "**TRINITY (per-task best coordinator)** | **—**" in md
+    assert "no TRINITY scores recorded" in _r1_line(md)
+    assert "HOLDS" not in _r4_line(md)
+
+
+def test_all_single_baselines_null_is_not_a_false_r1_r2_win():
+    """The reviewer's case: TRINITY and random present, every single::* is None.
+
+    best_fixed must not be coerced to 0.000 and handed a win — R1/R2 is not
+    evaluable when no fixed single baseline was measured.
+    """
+    rows = [
+        _row("math500", "c1", trinity=0.85, random=0.50, single=None),
+        _row("mmlu", "c1", trinity=0.85, random=0.50, single=None),
+    ]
+    md = rt.render(rows)  # must not raise
+    r1 = _r1_line(md)
+    assert "HOLDS" not in r1
+    assert "0.000" not in r1
+    assert "no fixed single baseline recorded" in r1
+    # R4 is still fully evaluable and should still hold (0.850 vs 0.500).
+    assert "✅ HOLDS" in _r4_line(md)
+
+
+def test_best_fixed_ignores_null_single_and_uses_the_measured_one():
+    """A model with no score is skipped; the best *measured* single sets R1/R2."""
+    rows = [
+        _row("math500", "c1", trinity=0.85, random=0.50, single=None),
+        _row("mmlu", "c1", trinity=0.85, random=0.50, single=0.90),
+    ]
+    md = rt.render(rows)
+    # Only mmlu measured the single (0.90); math contributes nothing to it.
+    # best fixed = 0.900 > TRINITY 0.850 -> ❌, not a false win.
+    r1 = _r1_line(md)
+    assert "❌" in r1
+    assert "0.850 vs 0.900" in r1

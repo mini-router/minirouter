@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..core.config import Settings
 from ..models import EvaluationRun, Submission
 from .eval_runner import EvaluationResult
+from .artifacts import persist_stored_artifact
 from .storage import StoredArtifact
 
 GITHUB_API_BASE = "https://api.github.com"
@@ -57,50 +58,86 @@ def create_pr_submission(
 ) -> Submission:
     existing = _submission_query(session, repo_full_name, pr_number)
     if existing is not None:
-        existing.team_name = team_name or existing.team_name
         changed = False
+        if team_name and team_name != existing.miner_id:
+            existing.miner_id = team_name
+            changed = True
         if head_sha and head_sha != existing.head_sha:
             existing.head_sha = head_sha
             changed = True
         if artifact is not None:
-            existing.artifact_name = artifact.name
-            existing.artifact_path = str(artifact.path)
-            existing.artifact_sha256 = artifact.sha256
-            existing.checkpoint_path = (
-                str(artifact.checkpoint_path) if artifact.checkpoint_path else None
+            artifact_row = persist_stored_artifact(
+                session,
+                artifact,
+                storage_backend=settings.artifact_storage_backend,
+                submission_id=existing.id,
+                meta_json={
+                    "checkpoint_path": str(artifact.checkpoint_path)
+                    if artifact.checkpoint_path
+                    else None,
+                    "extracted_root": str(artifact.extracted_root) if artifact.extracted_root else None,
+                },
             )
+            existing.submission_artifact_id = artifact_row.id
             changed = True
         if changed:
-            existing.status = "queued"
+            if artifact is not None:
+                existing.status = "queued"
             existing.latest_score = None
-            existing.best_run_id = None
+            existing.latest_eval_id = None
+            existing.best_eval_id = None
             existing.updated_at = _utcnow()
         return existing
 
     submission = Submission(
         id=str(uuid4()),
         source="github_pr",
-        team_name=team_name,
+        miner_id=team_name,
         repo_full_name=repo_full_name,
         pr_number=pr_number,
         head_sha=head_sha,
-        artifact_name=(artifact.name if artifact else "github-pr"),
-        artifact_path=(str(artifact.path) if artifact else ""),
-        artifact_sha256=(artifact.sha256 if artifact else ""),
-        checkpoint_path=(str(artifact.checkpoint_path) if artifact and artifact.checkpoint_path else None),
-        benchmark=settings.eval_benchmark,
-        status="queued",
+        benchmark_names_json=[settings.eval_benchmark],
+        status="queued" if artifact is not None else "awaiting_ci",
         created_at=_utcnow(),
         updated_at=_utcnow(),
     )
     session.add(submission)
     session.flush()
+    if artifact is not None:
+        artifact_row = persist_stored_artifact(
+            session,
+            artifact,
+            storage_backend=settings.artifact_storage_backend,
+            submission_id=submission.id,
+            meta_json={
+                "checkpoint_path": str(artifact.checkpoint_path) if artifact.checkpoint_path else None,
+                "extracted_root": str(artifact.extracted_root) if artifact.extracted_root else None,
+            },
+        )
+        submission.submission_artifact_id = artifact_row.id
     return submission
 
 
 def _format_metrics_table(metrics: dict[str, Any]) -> str:
     rows: list[str] = []
-    priority_keys = ["accuracy", "score", "overall", "macro_avg", "gsm8k", "mmlu", "math", "humaneval", "bbh", "params"]
+    priority_keys = [
+        "accuracy",
+        "score",
+        "overall",
+        "macro_avg",
+        "gsm8k",
+        "mmlu",
+        "math",
+        "humaneval",
+        "bbh",
+        "params",
+        "duration_seconds",
+        "cost_usd",
+        "cost_calls",
+        "cost_prompt_tokens",
+        "cost_completion_tokens",
+        "cost_missing",
+    ]
     seen: set[str] = set()
 
     def add_row(key: str, value: Any) -> None:
@@ -109,6 +146,10 @@ def _format_metrics_table(metrics: dict[str, Any]) -> str:
         if isinstance(value, (int, float)):
             if key in {"accuracy", "score", "overall", "macro_avg", "gsm8k", "mmlu", "math", "humaneval", "bbh"}:
                 display = f"{value:.4f} ({value * 100:.2f}%)"
+            elif key == "duration_seconds":
+                display = f"{value:.2f}s"
+            elif key == "cost_usd":
+                display = f"${value:.4f}"
             elif key == "params":
                 display = f"{int(value):,}"
             else:
@@ -143,12 +184,12 @@ def build_submission_summary_markdown(
         score_text = f"{evaluation.score:.4f} ({evaluation.score * 100:.2f}%)"
 
     summary_line = (
-        f"Submission for **{submission.team_name or submission.repo_full_name or submission.id}** "
+        f"Submission for **{submission.miner_id or submission.repo_full_name or submission.id}** "
         f"on **{submission.benchmark}** completed with status **{evaluation.status}**."
     )
     if evaluation.status == "failed" and evaluation.error:
         summary_line = (
-            f"Submission for **{submission.team_name or submission.repo_full_name or submission.id}** "
+            f"Submission for **{submission.miner_id or submission.repo_full_name or submission.id}** "
             f"on **{submission.benchmark}** failed during evaluation."
         )
 
@@ -184,6 +225,13 @@ def build_submission_summary_markdown(
         parts.extend(["", "### Error", "", f"`{evaluation.error}`"])
 
     return "\n".join(parts)
+
+
+def should_promote_submission(score: float | None, threshold: float, king_score: float | None) -> bool:
+    if score is None:
+        return False
+    current_king = threshold if king_score is None else king_score
+    return score >= threshold and score > current_king
 
 
 async def _github_request(
@@ -223,6 +271,34 @@ async def post_pr_comment(settings: Settings, submission: Submission, body: str)
     )
 
 
+async def set_commit_status(
+    settings: Settings,
+    submission: Submission,
+    *,
+    state: str,
+    description: str,
+    context: str = "MiniRouter / submission",
+    target_url: str | None = None,
+) -> None:
+    owner = _repo_owner(submission.repo_full_name)
+    repo = _repo_name(submission.repo_full_name)
+    if owner is None or repo is None or not submission.head_sha:
+        return
+    payload: dict[str, Any] = {
+        "state": state,
+        "description": description[:140],
+        "context": context,
+    }
+    if target_url:
+        payload["target_url"] = target_url
+    await _github_request(
+        settings,
+        "POST",
+        f"/repos/{owner}/{repo}/statuses/{submission.head_sha}",
+        json_body=payload,
+    )
+
+
 async def merge_pull_request(settings: Settings, submission: Submission) -> None:
     owner = _repo_owner(submission.repo_full_name)
     repo = _repo_name(submission.repo_full_name)
@@ -241,14 +317,27 @@ async def merge_pull_request(settings: Settings, submission: Submission) -> None
     )
 
 
+async def close_pull_request(settings: Settings, submission: Submission) -> None:
+    owner = _repo_owner(submission.repo_full_name)
+    repo = _repo_name(submission.repo_full_name)
+    if owner is None or repo is None or submission.pr_number is None:
+        return
+    await _github_request(
+        settings,
+        "PATCH",
+        f"/repos/{owner}/{repo}/pulls/{submission.pr_number}",
+        json_body={"state": "closed"},
+    )
+
+
 async def publish_submission_result(
     settings: Settings,
     submission: Submission,
     evaluation: EvaluationResult | EvaluationRun,
+    *,
+    accepted: bool | None = None,
 ) -> None:
     if submission.source != "github_pr" or not settings.github_access_token:
-        return
-    if not settings.github_post_comment_on_eval and not settings.github_auto_merge_submissions:
         return
 
     run = evaluation.run if isinstance(evaluation, EvaluationResult) else evaluation
@@ -266,6 +355,9 @@ async def publish_submission_result(
                 metrics = {}
 
     body = build_submission_summary_markdown(submission, run, metrics=metrics)
+    target_url = None
+    if settings.public_site_url:
+        target_url = f"{settings.public_site_url.rstrip('/')}/submission/{submission.id}"
 
     try:
         if settings.github_post_comment_on_eval:
@@ -274,8 +366,32 @@ async def publish_submission_result(
         # Comment failures should not break the evaluation pipeline.
         pass
 
-    if settings.github_auto_merge_submissions and run.status == "completed" and run.score is not None:
-        try:
-            await merge_pull_request(settings, submission)
-        except Exception:
-            pass
+    if accepted is None:
+        accepted = should_promote_submission(
+            run.score,
+            settings.github_review_score_threshold,
+            settings.github_review_score_threshold,
+        )
+    commit_state = "pending"
+    commit_description = "Evaluation queued"
+    if run.status == "completed":
+        if accepted:
+            commit_state = "success"
+            commit_description = "Evaluation passed"
+        else:
+            commit_state = "failure"
+            commit_description = "Evaluation below threshold"
+    elif run.status == "failed":
+        commit_state = "failure"
+        commit_description = "Evaluation failed"
+
+    try:
+        await set_commit_status(
+            settings,
+            submission,
+            state=commit_state,
+            description=commit_description,
+            target_url=target_url,
+        )
+    except Exception:
+        pass

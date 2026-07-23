@@ -53,6 +53,8 @@ Expected files:
 - `eval.json` if you want to include a local evaluation report
 
 Before opening a PR, make sure the model bundle is complete and the local eval command succeeds.
+The PR will open as `awaiting_ci`; a maintainer starts the GitHub Actions `PR automation`
+workflow manually when the submission is ready to queue on the validator backend.
 
 Validate the bundle offline first (no API keys required):
 
@@ -79,4 +81,3 @@ pushing.
 - The final `best_theta.npy`
 - The evaluation score and benchmark settings
 - Any caveats or known limits
-

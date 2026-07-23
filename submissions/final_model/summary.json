@@ -1,14 +1,15 @@
 {
   "benchmark": "math500",
   "pool": [
-    "deepseek-v4-pro",
-    "glm-5p2",
-    "kimi-k2p6"
+    "nemotron-3-super",
+    "gemma-4-31b",
+    "gpt-oss-120b",
+    "qwen3-coder-480b-a35b"
   ],
-  "n_total": 13312,
-  "popsize": 2,
-  "m_cma": 1,
+  "n_total": 14336,
+  "popsize": 4,
+  "m_cma": 4,
   "generations": 1,
-  "best_fitness": 1.0,
-  "run_dir": "/home/ubuntu/codes/tmimmanuel/tiny-router-works/minirouter/experiments/math500/local-openrouter-mini"
+  "best_fitness": 0.25625000000000003,
+  "run_dir": "/home/ubuntu/codes/tmimmanuel/tiny-router-works/minirouter/experiments/math500/test-01"
 }
