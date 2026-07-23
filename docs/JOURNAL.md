@@ -18,6 +18,20 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-13 — RLPR WebInstruct math grader ignored \boxed answers  #mistake #fix #repro
+**Context:** grading WebInstruct-verified RLPR items in `_check_rlpr_webinstruct` (orchestration/reward.py).
+**Expected:** a correct `\boxed{15}` answer scores 1.0, same as the math benchmark path.
+**Actual:** `score_text("rlpr", r"The area is \boxed{15}.", {"ground_truth":"15", "source":"WebInstruct-…"})`
+returned 0.0, while the same answer under `math500` returned 1.0.
+**Root cause:** the math branch fed the RAW candidate text into `math_equal`/`normalize_math_answer`
+without first extracting the answer — unlike `_check_math`, which calls `extract_boxed`/
+`extract_last_number`. `normalize_math_answer` doesn't strip `\boxed{...}` or pull an answer out of
+prose, so the boxed final answer (the format `format_hint` tells the worker to use) never matched.
+**Fix / decision:** extract `extract_boxed(cand) or extract_last_number(cand) or cand` (and
+`extract_boxed(gold) or gold`) before the math compare, mirroring `_check_math`. Added
+`tests/test_rlpr_webinstruct_math.py` (offline); 47 existing rlpr/reward tests still pass.
+**Follow-up:** distinct from the RLPR MMLU-Pro choice-grading issues (#116/#122), which are the letter path.
+
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.
