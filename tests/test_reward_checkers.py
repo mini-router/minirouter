@@ -74,3 +74,56 @@ def test_code_empty_tests_fail_closed():
 def test_extract_code_returns_last_fenced_block():
     text = "```python\nold = 1\n```\nSome text\n```python\nnew = 2\n```"
     assert "new = 2" in R.extract_code(text)
+
+
+# ---------------------------------------------------------------------------
+# Committed-answer selection across a multi-turn trajectory
+# ---------------------------------------------------------------------------
+from trinity.orchestration.session import _final_answer  # noqa: E402
+from trinity.types import Role, Task, Trajectory, TurnRecord  # noqa: E402
+
+
+def _turn(role: Role, out: str) -> TurnRecord:
+    return TurnRecord(turn=1, agent_name="m", role=role, raw_output=out, processed_output=out)
+
+
+def _traj(turns: list[TurnRecord], *, answer: str = "42", benchmark: str = "math500") -> Trajectory:
+    traj = Trajectory(task=Task("t", benchmark, "q", answer), turns=turns)
+    traj.final_answer = _final_answer(traj)  # mirror the real pipeline
+    return traj
+
+
+def test_committed_answer_skips_verifier_that_quotes_gold():
+    # The Worker produced no answer; the Verifier quoted the gold value while
+    # REVISE-ing. The trajectory was rejected and must not score as correct.
+    traj = _traj(
+        [
+            _turn(Role.WORKER, "I am not sure how to finish this."),
+            _turn(Role.VERIFIER, "The correct value is 42, but the worker never computed it.\nVERDICT: REVISE"),
+        ]
+    )
+    assert R._committed_answer("math500", traj) == "I am not sure how to finish this."
+    assert R.score(traj) == 0.0
+
+
+def test_committed_answer_still_recovers_earlier_nonverifier_answer():
+    # Legitimate recovery is preserved: when the final (last-Worker) output has no
+    # parseable answer, an earlier NON-verifier turn's answer is still credited.
+    traj = _traj(
+        [
+            _turn(Role.THINKER, r"Working it through, the result is \boxed{42}."),
+            _turn(Role.WORKER, "On reflection I am not certain, let me not commit a value."),
+        ]
+    )
+    assert R.score(traj) == 1.0
+
+
+def test_committed_answer_uses_worker_answer_with_verifier_accept():
+    # Control: a real Worker answer followed by an ACCEPT is scored from the Worker.
+    traj = _traj(
+        [
+            _turn(Role.WORKER, r"The answer is \boxed{42}."),
+            _turn(Role.VERIFIER, "Looks right.\nVERDICT: ACCEPT"),
+        ]
+    )
+    assert R.score(traj) == 1.0
