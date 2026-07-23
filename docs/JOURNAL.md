@@ -18,6 +18,39 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-23 — MC grading was hard-capped at A–D, silently zeroing MMLU-Pro E–J  #mistake #fix #repro
+**Context:** issues #116 / #122 (filed independently, same root bug). RLPR routes its MMLU-Pro
+subset (`MMLUPro-1000_Avg2`) through the `mmlu`/`gpqa` choice grader in `orchestration/reward.py`.
+**Expected:** a correct answer grades 1.0 regardless of which option letter is gold.
+**Actual:** every item whose gold answer is **E–J scored 0.0 even when the model answered
+correctly** — a silently-wrong number, not a crash:
+```python
+for gold in ["A", "D", "E", "F", "J"]:
+    ref = {"ground_truth": gold, "source": "MMLUPro-1000_Avg2"}
+    print(gold, R.score_text("rlpr", f"The answer is ({gold}).", ref))
+# A 1.0 / D 1.0 / E 0.0 / F 0.0 / J 0.0
+```
+**Root cause:** the grader was written for 4-option MMLU/GPQA and hard-capped at A–D in **four**
+independent places, so **both** sides of the comparison failed for a ten-option item — the answer
+could neither be extracted nor the reference normalized: the five `_CHOICE_PATTERNS` captured
+`([A-D])`, `extract_choice_letter`'s last-line fallback matched `([A-D])`, and
+`_normalize_reference_letter` accepted only `{A,B,C,D}` / integer index `<= 3`. MMLU-Pro has up to
+**ten** options (A–J) and its gold answers spread across all ten letters, so a large fraction of
+that subset was unconditionally graded 0 — deflating measured accuracy and distorting the
+per-benchmark routing signal the coordinator is trained and evaluated on.
+**Fix / decision:** introduce a single `_CHOICE_ALPHABET = "ABCDEFGHIJ"` (plus a derived character
+class) and drive **all four** sites from it, so the alphabet cannot drift out of sync again. This is
+safe for the 4-option benchmarks: MMLU/GPQA gold answers are always A–D, so extracting a stray
+higher letter still cannot match a 4-option gold — no existing score can flip; widening only *adds*
+the ability to grade E–J. Added `tests/test_reward_choice_alphabet.py` (offline, pure stdlib): every
+letter A–J end-to-end on RLPR MMLU-Pro, letter **and** integer-index normalization across A–J, plus
+guards that MMLU/GPQA are unchanged, that a stray high letter cannot match a 4-option gold, and that
+the prose article `"A"` is still not read as a choice.
+**Follow-up:** the ten-option range is orthogonal to *which* letter wins when a model echoes the
+option list — that ordering bug is tracked separately in #124 (PR #217). If #217 lands first, its
+new trailing-standalone-letter fallback also needs to use `_CHOICE_LETTER_CLASS` rather than a fresh
+`[A-D]` literal, or the cap is silently reintroduced on that path.
+
 ## 2026-07-12 — code grader: add resource limits on top of the HOME/secrets fix  #security #decision
 **Context:** issue #71 — the code grader (`run_pass_at_1`) runs untrusted miner/LLM candidate code. The core secret-leak fix (isolated throwaway HOME/cwd, scrubbed env, `python -I`) already landed on main.
 **Finding:** main's sandbox closes the HOME/secrets exfiltration vector but has **no resource limits** — an untrusted candidate can still exhaust host memory or fork-bomb the eval box within its wall-clock timeout (verified: a 4 GiB `bytearray` allocation runs to completion and "passes" on main).
