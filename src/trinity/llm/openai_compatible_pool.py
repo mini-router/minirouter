@@ -96,6 +96,15 @@ def _parse_completion(data: dict, model: str) -> ChatResult:
     completion (``text=""``, ``finish_reason="error"``), mirroring the existing
     null-``content`` handling so a single odd reply degrades one turn instead of
     crashing the run. See JOURNAL 2026-07-08.
+
+    Reasoning models (e.g. the DeepSeek / GLM / Kimi "thinking" variants served
+    over OpenAI-compatible APIs) can return the answer in a separate
+    ``reasoning_content`` channel with ``content`` null or empty — most commonly
+    when the visible channel is cut off by the token cap
+    (``finish_reason="length"``). When ``content`` carries no text we fall back to
+    ``reasoning_content`` so that answer stays scoreable instead of collapsing the
+    turn to ``text=""`` (which zeroes the reward). A non-empty ``content`` always
+    wins, so ordinary completions are unaffected.
     """
     usage = data.get("usage") or {}
     prompt_tokens = int(usage.get("prompt_tokens", 0) or 0)
@@ -113,6 +122,8 @@ def _parse_completion(data: dict, model: str) -> ChatResult:
     choice = choices[0] or {}
     message = choice.get("message") or {}
     content = message.get("content")
+    if content is None or content == "":
+        content = message.get("reasoning_content")
     return ChatResult(
         model=model,
         text="" if content is None else str(content),

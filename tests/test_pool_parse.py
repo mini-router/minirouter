@@ -64,3 +64,45 @@ def test_non_string_content_is_stringified():
     data = {"choices": [{"message": {"content": 42}, "finish_reason": "stop"}]}
     res = _parse_completion(data, "m")
     assert res.text == "42"
+
+
+def test_null_content_falls_back_to_reasoning_content():
+    # Reasoning models can put the answer in reasoning_content with content=null,
+    # commonly when the visible channel is truncated by the token cap.
+    data = {
+        "choices": [
+            {
+                "message": {"content": None, "reasoning_content": r"...so \boxed{42}"},
+                "finish_reason": "length",
+            }
+        ]
+    }
+    res = _parse_completion(data, "m")
+    assert res.text == r"...so \boxed{42}"
+    assert res.finish_reason == "length"
+
+
+def test_empty_content_falls_back_to_reasoning_content():
+    data = {
+        "choices": [
+            {"message": {"content": "", "reasoning_content": "the answer is B"}, "finish_reason": "stop"}
+        ]
+    }
+    res = _parse_completion(data, "m")
+    assert res.text == "the answer is B"
+
+
+def test_non_empty_content_wins_over_reasoning_content():
+    data = {
+        "choices": [
+            {"message": {"content": "final answer", "reasoning_content": "scratch work"}}
+        ]
+    }
+    res = _parse_completion(data, "m")
+    assert res.text == "final answer"
+
+
+def test_null_content_without_reasoning_content_stays_empty():
+    data = {"choices": [{"message": {"content": None}, "finish_reason": "stop"}]}
+    res = _parse_completion(data, "m")
+    assert res.text == ""
