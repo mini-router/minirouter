@@ -163,6 +163,36 @@ export interface BackendSubmissionOut {
   trains: BackendTrainOut[]
 }
 
+export interface ProviderBenchmarkEntry {
+  id: number
+  route: string
+  benchmark: string
+  score: number | null
+  repeat: number | null
+  cost_usd: number | null
+  duration_seconds: number | null
+  finished_at: string | null
+}
+
+interface BackendProviderBenchmarkResponse {
+  items: ProviderBenchmarkEntry[]
+}
+
+export async function fetchProviderBenchmarks(limit = 200): Promise<ProviderBenchmarkEntry[]> {
+  const response = await fetch(apiUrl(`/api/provider-benchmarks?limit=${limit}`), {
+    headers: {
+      Accept: 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Provider benchmark request failed with status ${response.status}`)
+  }
+
+  const payload = (await response.json()) as BackendProviderBenchmarkResponse
+  return payload.items
+}
+
 export async function fetchSubmission(submissionId: string): Promise<BackendSubmissionOut> {
   const response = await fetch(apiUrl(`/api/submissions/${submissionId}`), {
     headers: {
