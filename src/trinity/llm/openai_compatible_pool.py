@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 import time
@@ -69,16 +70,25 @@ def _ledger_append(
     prompt_tokens: int,
     completion_tokens: int,
 ) -> None:
-    """Append one token-usage record to the cost ledger, if TRINITY_COST_LEDGER is set."""
+    """Append one token-usage record to the cost ledger, if TRINITY_COST_LEDGER is set.
+
+    The record is serialized with :func:`json.dumps` rather than hand-built, so a
+    provider/model id containing a quote, a backslash, or a control character
+    still produces valid JSON. Hand-formatting silently emitted unparseable lines
+    that ``costing.ledger_cost_report`` then skipped, under-reporting API spend.
+    """
     path = os.environ.get("TRINITY_COST_LEDGER")
     if not path:
         return
     try:
+        record = {
+            "provider": provider,
+            "m": model,
+            "p": int(prompt_tokens),
+            "c": int(completion_tokens),
+        }
         with open(path, "a") as f:
-            f.write(
-                f'{{"provider":"{provider}","m":"{model}","p":{int(prompt_tokens)},'
-                f'"c":{int(completion_tokens)}}}\n'
-            )
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:
         pass
 
