@@ -8,11 +8,19 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from ..core.config import Settings
-from ..models import AdminUser, CompetitionRuntimeConfig, EvaluationRun, JobQueue, Submission, TrainRun
+from ..models import (
+    AdminUser,
+    Artifact,
+    CompetitionRuntimeConfig,
+    EvaluationRun,
+    JobQueue,
+    Submission,
+    TrainRun,
+)
 from ..schemas import (
     AdminLoginRequest,
     AdminLoginResponse,
@@ -1131,6 +1139,87 @@ def admin_create_provider_evaluations(
             evaluations=[_evaluation_to_schema(run) for run in runs],
             job_ids=[job.id for job in jobs],
         )
+    except HTTPException:
+        session.rollback()
+        raise
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        session.close()
+
+
+@admin_router.delete("/evaluations/{evaluation_id}", status_code=204)
+def admin_delete_evaluation(
+    request: Request,
+    evaluation_id: int,
+    user: AdminUser = Depends(_require_admin_user),
+) -> None:
+    session = get_session(request)
+    try:
+        run = session.get(EvaluationRun, evaluation_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="evaluation not found")
+        if run.submission_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="only standalone provider evaluations can be deleted here",
+            )
+        session.execute(
+            Artifact.__table__.delete().where(Artifact.evaluation_id == evaluation_id)
+        )
+        session.delete(run)
+        session.commit()
+    except HTTPException:
+        session.rollback()
+        raise
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        session.close()
+
+
+@admin_router.delete("/submissions/{submission_id}", status_code=204)
+def admin_delete_submission(
+    request: Request,
+    submission_id: str,
+    user: AdminUser = Depends(_require_admin_user),
+) -> None:
+    session = get_session(request)
+    try:
+        submission = session.get(Submission, submission_id)
+        if submission is None:
+            raise HTTPException(status_code=404, detail="submission not found")
+
+        train_ids = [
+            row[0]
+            for row in session.execute(
+                select(TrainRun.id).where(TrainRun.submission_id == submission_id)
+            )
+        ]
+        evaluation_ids = [
+            row[0]
+            for row in session.execute(
+                select(EvaluationRun.id).where(EvaluationRun.submission_id == submission_id)
+            )
+        ]
+
+        session.execute(JobQueue.__table__.delete().where(JobQueue.submission_id == submission_id))
+
+        artifact_filters = [Artifact.submission_id == submission_id]
+        if train_ids:
+            artifact_filters.append(Artifact.train_id.in_(train_ids))
+        if evaluation_ids:
+            artifact_filters.append(Artifact.evaluation_id.in_(evaluation_ids))
+        if submission.submission_artifact_id is not None:
+            artifact_filters.append(Artifact.id == submission.submission_artifact_id)
+        session.execute(Artifact.__table__.delete().where(or_(*artifact_filters)))
+
+        submission.submission_artifact_id = None
+        session.flush()
+        session.delete(submission)
+        session.commit()
     except HTTPException:
         session.rollback()
         raise

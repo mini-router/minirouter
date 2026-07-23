@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
@@ -29,48 +29,76 @@ def build_engine(settings: Settings):
     )
 
 
+def _column_exists(conn, table: str, column: str) -> bool:
+    row = conn.execute(
+        text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = :table AND column_name = :column"
+        ),
+        {"table": table, "column": column},
+    ).first()
+    return row is not None
+
+
+def _column_nullable(conn, table: str, column: str) -> bool:
+    row = conn.execute(
+        text(
+            "SELECT is_nullable FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = :table AND column_name = :column"
+        ),
+        {"table": table, "column": column},
+    ).first()
+    return bool(row) and row[0] == "YES"
+
+
+def _add_column_if_missing(conn, table: str, column: str, ddl_type: str) -> None:
+    # Only take the exclusive ALTER TABLE lock when the column is actually
+    # missing. In steady state (the common case, after the first migration)
+    # this is a plain catalog SELECT that only needs a non-blocking
+    # AccessShareLock, so starting a new process no longer has to fight a
+    # busy job transaction for an exclusive lock it doesn't really need.
+    if not _column_exists(conn, table, column):
+        conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {ddl_type}")
+
+
+def _drop_not_null_if_needed(conn, table: str, column: str) -> None:
+    if not _column_nullable(conn, table, column):
+        conn.exec_driver_sql(f"ALTER TABLE {table} ALTER COLUMN {column} DROP NOT NULL")
+
+
 def ensure_schema(engine) -> None:
     # Minimal, Postgres-only schema upgrades for the running validator.
+    # Every process (API and worker) runs this at startup. ALTER TABLE takes
+    # an exclusive lock and Postgres queues later requests (even plain
+    # SELECTs) behind a pending exclusive lock request, so a long-running job
+    # transaction here can otherwise block not just this migration but every
+    # already-running process's unrelated queries. The lock_timeout bounds
+    # the wait for the rare case a migration is genuinely needed while
+    # something's busy; the _if_missing/_if_needed checks avoid requesting
+    # the exclusive lock at all once the schema is already up to date.
     with engine.begin() as conn:
-        conn.exec_driver_sql(
-            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS miner_id VARCHAR(255)"
+        conn.exec_driver_sql("SET LOCAL lock_timeout = '5s'")
+        _add_column_if_missing(conn, "submissions", "miner_id", "VARCHAR(255)")
+        _add_column_if_missing(conn, "submissions", "benchmark_names_json", "JSON")
+        _add_column_if_missing(conn, "submissions", "submission_artifact_id", "VARCHAR(36)")
+        _add_column_if_missing(conn, "submissions", "latest_train_id", "INTEGER")
+        _add_column_if_missing(conn, "submissions", "latest_eval_id", "INTEGER")
+        _add_column_if_missing(conn, "submissions", "best_eval_id", "INTEGER")
+        _add_column_if_missing(conn, "submissions", "finished_at", "TIMESTAMPTZ")
+        _add_column_if_missing(conn, "submissions", "duration_seconds", "DOUBLE PRECISION")
+        _add_column_if_missing(conn, "submissions", "cost_usd", "DOUBLE PRECISION")
+        _add_column_if_missing(
+            conn, "competition_runtime_config", "default_eval_execution_mode", "VARCHAR(32)"
         )
-        conn.exec_driver_sql(
-            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS benchmark_names_json JSON"
+        _add_column_if_missing(
+            conn, "competition_runtime_config", "default_eval_batch_size", "INTEGER"
         )
-        conn.exec_driver_sql(
-            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS submission_artifact_id VARCHAR(36)"
-        )
-        conn.exec_driver_sql(
-            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS latest_train_id INTEGER"
-        )
-        conn.exec_driver_sql(
-            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS latest_eval_id INTEGER"
-        )
-        conn.exec_driver_sql(
-            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS best_eval_id INTEGER"
-        )
-        conn.exec_driver_sql(
-            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ"
-        )
-        conn.exec_driver_sql(
-            "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS duration_seconds DOUBLE PRECISION"
-        )
-        conn.exec_driver_sql("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS cost_usd DOUBLE PRECISION")
-        conn.exec_driver_sql(
-            "ALTER TABLE competition_runtime_config ADD COLUMN IF NOT EXISTS default_eval_execution_mode VARCHAR(32)"
-        )
-        conn.exec_driver_sql(
-            "ALTER TABLE competition_runtime_config ADD COLUMN IF NOT EXISTS default_eval_batch_size INTEGER"
-        )
-        conn.exec_driver_sql(
-            "ALTER TABLE competition_runtime_config ADD COLUMN IF NOT EXISTS king_score DOUBLE PRECISION"
-        )
-        conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN artifact_name DROP NOT NULL")
-        conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN artifact_path DROP NOT NULL")
-        conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN artifact_sha256 DROP NOT NULL")
-        conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN checkpoint_path DROP NOT NULL")
-        conn.exec_driver_sql("ALTER TABLE submissions ALTER COLUMN benchmark DROP NOT NULL")
+        _add_column_if_missing(conn, "competition_runtime_config", "king_score", "DOUBLE PRECISION")
+        _drop_not_null_if_needed(conn, "submissions", "artifact_name")
+        _drop_not_null_if_needed(conn, "submissions", "artifact_path")
+        _drop_not_null_if_needed(conn, "submissions", "artifact_sha256")
+        _drop_not_null_if_needed(conn, "submissions", "checkpoint_path")
+        _drop_not_null_if_needed(conn, "submissions", "benchmark")
         conn.exec_driver_sql(
             "UPDATE submissions SET miner_id = COALESCE(miner_id, team_name) "
             "WHERE miner_id IS NULL AND team_name IS NOT NULL"
