@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react'
 import logoUrl from '../assets/mini-router.jpg'
 
 const links = [
-  { to: '/', label: 'Home' },
-  { to: '/leaderboard', label: 'Leaderboard' },
+  { to: '/', label: 'Overview' },
+  { to: '/leaderboard', label: 'Performance' },
   { to: '/rules', label: 'Rules' },
   { to: '/submit', label: 'Submit' },
 ]
@@ -30,7 +30,7 @@ export default function Navbar() {
           <span className="leading-tight">
             <span className="block text-sm font-semibold text-text">MiniRouter</span>
             <span className="block text-xs uppercase tracking-[0.22em] text-text-dim">
-              Challenge
+              Routing
             </span>
           </span>
         </Link>
@@ -64,7 +64,7 @@ export default function Navbar() {
               {link.label}
             </Link>
           ))}
-          <span className="ml-2 ui-chip">Open 2026</span>
+          <span className="ml-2 ui-chip">MiniBridge ready</span>
         </div>
       </div>
 

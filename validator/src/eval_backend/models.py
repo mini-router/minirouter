@@ -320,6 +320,8 @@ class CompetitionRuntimeConfig(Base):
     default_eval_execution_mode: Mapped[str] = mapped_column(
         String(32), nullable=False, default="remote_gpu"
     )
+    default_eval_batch_size: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    king_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.8)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False

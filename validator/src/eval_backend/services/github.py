@@ -227,6 +227,13 @@ def build_submission_summary_markdown(
     return "\n".join(parts)
 
 
+def should_promote_submission(score: float | None, threshold: float, king_score: float | None) -> bool:
+    if score is None:
+        return False
+    current_king = threshold if king_score is None else king_score
+    return score >= threshold and score > current_king
+
+
 async def _github_request(
     settings: Settings,
     method: str,
@@ -327,6 +334,8 @@ async def publish_submission_result(
     settings: Settings,
     submission: Submission,
     evaluation: EvaluationResult | EvaluationRun,
+    *,
+    accepted: bool | None = None,
 ) -> None:
     if submission.source != "github_pr" or not settings.github_access_token:
         return
@@ -357,17 +366,16 @@ async def publish_submission_result(
         # Comment failures should not break the evaluation pipeline.
         pass
 
-    should_merge = (
-        submission.source == "github_pr"
-        and run.status == "completed"
-        and run.score is not None
-        and run.score > settings.github_review_score_threshold
-        and submission.latest_eval_id == run.id
-    )
+    if accepted is None:
+        accepted = should_promote_submission(
+            run.score,
+            settings.github_review_score_threshold,
+            settings.github_review_score_threshold,
+        )
     commit_state = "pending"
     commit_description = "Evaluation queued"
     if run.status == "completed":
-        if should_merge:
+        if accepted:
             commit_state = "success"
             commit_description = "Evaluation passed"
         else:
@@ -387,12 +395,3 @@ async def publish_submission_result(
         )
     except Exception:
         pass
-
-    if submission.source == "github_pr":
-        try:
-            if should_merge:
-                await merge_pull_request(settings, submission)
-            else:
-                await close_pull_request(settings, submission)
-        except Exception:
-            pass

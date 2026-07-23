@@ -1,0 +1,47 @@
+# Combined OpenRouter + Chutes pool config for route-level provider tests.
+# Use with:
+#   --provider compatible --models configs/models.openrouter-chutes.yaml
+
+providers:
+  openrouter:
+    base_url: "https://openrouter.ai/api/v1"
+    api_key_env: "OPENROUTER_API_KEY"
+    timeout_s: 60
+    max_retries: 3
+    max_concurrency: 8
+    reasoning_param: "reasoning_effort"
+    extra_headers:
+      HTTP-Referer: "https://github.com/tmimmanuel/tiny-router-works"
+      X-OpenRouter-Title: "minirouter"
+  chutes:
+    base_url: "https://llm.chutes.ai/v1"
+    api_key_env: "CHUTES_API_KEY"
+    timeout_s: 60
+    max_retries: 3
+    max_concurrency: 8
+    reasoning_param: null
+
+pool:
+  - name: openrouter-deepseek-v4-pro
+    provider: openrouter
+    id: "deepseek/deepseek-v4-pro"
+  - name: openrouter-glm-5
+    provider: openrouter
+    id: "z-ai/glm-5.2"
+  - name: openrouter-kimi-k2p6
+    provider: openrouter
+    id: "moonshotai/kimi-k2.6"
+  - name: chutes-deepseek-v3p2
+    provider: chutes
+    id: "deepseek-ai/DeepSeek-V3.2-TEE"
+  - name: chutes-glm-5
+    provider: chutes
+    id: "zai-org/GLM-5-TEE"
+  - name: chutes-kimi-k2p5
+    provider: chutes
+    id: "moonshotai/Kimi-K2.5-TEE"
+
+decoding:
+  thinker:   { temperature: 0.7, top_p: 0.95, max_tokens: 4096 }
+  worker:    { temperature: 0.2, top_p: 0.95, max_tokens: 4096 }
+  verifier:  { temperature: 0.0, top_p: 1.0,  max_tokens: 2048 }

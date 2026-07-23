@@ -26,8 +26,11 @@ COST_PRICES: dict[str, tuple[float, float]] = {
     "openrouter:nvidia/nemotron-3-ultra-550b-a55b": (0.50, 2.20),
     # Older OpenRouter models kept for backward-compatible ledgers.
     "openrouter:deepseek-v4-pro": (0.435, 0.87),
+    "openrouter:deepseek/deepseek-v4-pro": (0.435, 0.87),
     "openrouter:kimi-k2p6": (0.66, 3.50),
+    "openrouter:moonshotai/kimi-k2.6": (0.66, 3.50),
     "openrouter:glm-5p2": (1.40, 4.40),
+    "openrouter:z-ai/glm-5.2": (1.40, 4.40),
     "openrouter:nvidia/nemotron-3-super-120b-a12b:free": (0.0, 0.0),
     "openrouter:google/gemma-4-31b-it:free": (0.0, 0.0),
     "openrouter:openai/gpt-oss-120b:free": (0.0, 0.0),

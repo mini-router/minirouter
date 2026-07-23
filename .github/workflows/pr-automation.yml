@@ -83,7 +83,7 @@ jobs:
             })
 
             const names = files.map((file) => file.filename)
-            const labels = new Set()
+            const labels = new Set((pr.labels || []).map((item) => String(item.name || '').toLowerCase()))
             const any = (predicate) => names.some(predicate)
 
             if (any((path) => path.startsWith('web/'))) {
@@ -124,20 +124,8 @@ jobs:
               labels.add('miner')
             }
 
-            const submissionArtifacts = [
-              'submissions/final_model/best_theta.npy',
-              'submissions/final_model/summary.json',
-              'submissions/final_model/history.json',
-              'submissions/final_model/eval.json',
-            ]
-            const touchedSubmissionArtifact = any((path) =>
-              submissionArtifacts.includes(path)
-            )
-            if (touchedSubmissionArtifact) {
+            if (names.includes('submissions/final_model/best_theta.npy')) {
               labels.add('submission')
-              labels.add('miner')
-            } else if (any((path) => path.startsWith('submissions/final_model/'))) {
-              labels.add('docs')
             }
 
             if (labels.size > 0) {
@@ -154,6 +142,7 @@ jobs:
               labels.has('submission') &&
               names.includes('submissions/final_model/best_theta.npy')
             core.setOutput('should_queue', String(shouldQueue))
+            core.setOutput('labels_json', JSON.stringify([...labels]))
             core.setOutput('repo_full_name', `${owner}/${repo}`)
             core.setOutput('pr_number', String(pr.number))
             core.setOutput('head_sha', pr.head.sha)
@@ -176,9 +165,11 @@ jobs:
 
             const payload = {
               repository: { full_name: '${{ steps.classify.outputs.repo_full_name }}' },
+              labels: JSON.parse('${{ steps.classify.outputs.labels_json }}'),
               pull_request: {
                 number: Number('${{ steps.classify.outputs.pr_number }}'),
                 head: { sha: '${{ steps.classify.outputs.head_sha }}' },
+                labels: JSON.parse('${{ steps.classify.outputs.labels_json }}').map((name) => ({ name })),
               },
               sender: { login: '${{ steps.classify.outputs.team_name }}' },
             }
@@ -295,7 +286,7 @@ jobs:
             })
 
             const names = files.map((file) => file.filename)
-            const labels = new Set()
+            const labels = new Set((pr.labels || []).map((item) => String(item.name || '').toLowerCase()))
             const any = (predicate) => names.some(predicate)
 
             if (any((path) => path.startsWith('web/'))) {
@@ -336,20 +327,8 @@ jobs:
               labels.add('miner')
             }
 
-            const submissionArtifacts = [
-              'submissions/final_model/best_theta.npy',
-              'submissions/final_model/summary.json',
-              'submissions/final_model/history.json',
-              'submissions/final_model/eval.json',
-            ]
-            const touchedSubmissionArtifact = any((path) =>
-              submissionArtifacts.includes(path)
-            )
-            if (touchedSubmissionArtifact) {
+            if (names.includes('submissions/final_model/best_theta.npy')) {
               labels.add('submission')
-              labels.add('miner')
-            } else if (any((path) => path.startsWith('submissions/final_model/'))) {
-              labels.add('docs')
             }
 
             if (labels.size > 0) {
@@ -366,6 +345,7 @@ jobs:
               labels.has('submission') &&
               names.includes('submissions/final_model/best_theta.npy')
             core.setOutput('should_queue', String(shouldQueue))
+            core.setOutput('labels_json', JSON.stringify([...labels]))
             core.setOutput('repo_full_name', `${owner}/${repo}`)
             core.setOutput('pr_number', String(pr.number))
             core.setOutput('head_sha', pr.head.sha)
@@ -388,9 +368,11 @@ jobs:
 
             const payload = {
               repository: { full_name: '${{ steps.classify.outputs.repo_full_name }}' },
+              labels: JSON.parse('${{ steps.classify.outputs.labels_json }}'),
               pull_request: {
                 number: Number('${{ steps.classify.outputs.pr_number }}'),
                 head: { sha: '${{ steps.classify.outputs.head_sha }}' },
+                labels: JSON.parse('${{ steps.classify.outputs.labels_json }}').map((name) => ({ name })),
               },
               sender: { login: '${{ steps.classify.outputs.team_name }}' },
             }

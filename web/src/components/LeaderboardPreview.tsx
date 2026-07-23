@@ -15,7 +15,7 @@ export default function LeaderboardPreview() {
           viewport={{ once: true, margin: '-100px' }}
           transition={{ duration: 0.5 }}
         >
-          Leaderboard preview
+          Performance leaderboard
         </motion.h2>
 
         <motion.div
