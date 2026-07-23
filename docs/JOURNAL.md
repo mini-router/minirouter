@@ -18,6 +18,27 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-12 — rlpr / ifeval / bfcl_simple load() all raised TypeError (same bug as #86)  #mistake #gotcha
+**Context:** the three OOD benchmark facades added in #102/#103/#104, called via their documented
+`load(split, **kw)` entrypoint (named as `loader:` in configs/benchmarks.yaml).
+**Expected:** `benchmarks.rlpr.load("test", max_items=1)` returns a `list[Task]`.
+**Actual:** `TypeError: load_tasks() takes 1 positional argument but 2 positional arguments
+(and 2 keyword-only arguments) were given`, on every call, for all three facades.
+**Root cause:** each `load()` passed `("rlpr", split)` positionally to its sibling
+`load_tasks(split, *, ...)` (one positional) instead of the imported `_load_tasks(benchmark, split, ...)`
+— the exact defect fixed for `livecodebench` in #86/#90. The three newer facades were copied from
+the pre-fix livecodebench template and regressed it.
+**Root cause of the miss (the real lesson):** all three facade tests monkeypatch the sibling
+`load_tasks` (the function whose signature is the bug) with a *four*-positional stub, so the
+two-positional miscall type-checks against the fake and CI stays green. #90 already documented this
+and fixed livecodebench's test the same way — but the fix was not propagated to the sibling facades
+that share the template. When a bug is a template defect, grep the whole repo for the template, not
+just the file in the report.
+**Fix / decision:** `load()` now delegates to `load_tasks(split, ...)` in all three; each facade
+test patches the real `_load_tasks` boundary and gains a `load_is_callable` regression test.
+**Follow-up:** none. Row parsing / scoring for these benchmarks is unchanged.
+
+---
 ## 2026-07-12 — code grader: add resource limits on top of the HOME/secrets fix  #security #decision
 **Context:** issue #71 — the code grader (`run_pass_at_1`) runs untrusted miner/LLM candidate code. The core secret-leak fix (isolated throwaway HOME/cwd, scrubbed env, `python -I`) already landed on main.
 **Finding:** main's sandbox closes the HOME/secrets exfiltration vector but has **no resource limits** — an untrusted candidate can still exhaust host memory or fork-bomb the eval box within its wall-clock timeout (verified: a 4 GiB `bytearray` allocation runs to completion and "passes" on main).

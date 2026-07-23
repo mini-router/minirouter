@@ -8,16 +8,28 @@ import trinity.orchestration.reward as R
 def test_rlpr_facade_delegates(monkeypatch):
     seen = {}
 
+    # Patch the real delegation boundary (``_load_tasks``). Patching
+    # ``RLPR.load_tasks`` instead swaps the one-positional facade function for a
+    # four-positional stub, which silently accepts a miscall the real signature
+    # rejects — that is exactly what hid the load() TypeError.
     def fake_load_tasks(benchmark, split, max_items, seed):
         seen["args"] = (benchmark, split, max_items, seed)
         return ["ok"]
 
-    monkeypatch.setattr(RLPR, "load_tasks", fake_load_tasks)
+    monkeypatch.setattr(RLPR, "_load_tasks", fake_load_tasks)
 
     out = RLPR.load("test", max_items=3, seed=7)
 
     assert out == ["ok"]
     assert seen["args"] == ("rlpr", "test", 3, 7)
+
+
+def test_rlpr_load_is_callable(monkeypatch):
+    """``load()`` must actually be callable — it used to raise TypeError."""
+    monkeypatch.setattr(RLPR, "_load_tasks", lambda *a, **k: ["ok"])
+
+    assert RLPR.load("test", max_items=2) == ["ok"]
+    assert RLPR.load_tasks("test", max_items=2) == ["ok"]
 
 
 def test_rlpr_hf_rows_parse_to_tasks(monkeypatch):
