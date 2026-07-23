@@ -829,6 +829,14 @@ def normalize_math_answer(ans: str | None) -> str:
     # leaving set/tuple/interval answers like "(1,2)" untouched.
     s = re.sub(r"(?<=\d),(?=\d{3}(?:\D|$))", "", s)
     s = s.lower()
+    # Drop a leading single-variable assignment ("x=5" -> "5"). MATH answers are
+    # often stated as ``variable = value``; the value is what we grade. Guarded to
+    # a bare identifier on the left so inequalities ("x<=5") and expressions with
+    # an embedded ``=`` are left intact.
+    s = re.sub(r"^[a-z][a-z0-9_]*=(?=[^=])", "", s)
+    # Scientific notation ``a*10^{b}`` / ``a*10^b`` (``\times``/``\cdot`` already
+    # became ``*``) -> ``aeb`` so it parses as a plain float downstream.
+    s = re.sub(r"(?<=\d)\*?10\^\{?(-?\d+)\}?$", r"e\1", s)
     # Canonicalize a pure integer ratio a/b.
     m = re.fullmatch(r"\(?(-?\d+)\)?/\(?(-?\d+)\)?", s)
     if m:
@@ -917,7 +925,9 @@ def _sympy_equal(a: str, b: str) -> bool:
 def _check_math(candidate: str, reference: object) -> bool:
     """True iff the candidate's extracted answer equals the reference."""
     extracted = extract_boxed(candidate)
-    if extracted is None:
+    # An empty/whitespace ``\boxed{}`` carries no answer; fall back to the last
+    # number just as we do when no box is present (an empty box is not an answer).
+    if not extracted or not extracted.strip():
         extracted = extract_last_number(candidate)
     if extracted is None:
         # Last resort: compare the whole (normalized) candidate.

@@ -18,6 +18,22 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-11 — Math grader missed common MATH-500 answer forms  #mistake #repro
+**Context:** auditing `normalize_math_answer` / `_check_math` for false negatives on realistic
+MATH-500 answer strings.
+**Expected:** `\boxed{x=5}` vs `5`, `\boxed{5\times10^{3}}` vs `5000`, and an empty `\boxed{}`
+with the answer stated in prose should all score 1.0.
+**Actual:** all scored **0.0**. `"x=5"` never reduced to its value; `"5*10^{3}"` (after
+`\times`->`*`) hit neither `float()` nor the fraction path and sympy read `^` as XOR; an empty
+`\boxed{}` was committed as the (blank) answer instead of falling back to the last number.
+**Fix / decision:** in `normalize_math_answer`, (1) drop a leading single-variable assignment
+`^[a-z]\w*=` (guarded with a `(?=[^=])` lookahead and an identifier-only LHS so `x<=5` / `==`
+are untouched) and (2) rewrite trailing scientific notation `a*10^{b}` -> `aeb` so it parses as
+a float; in `_check_math`, treat an empty/whitespace `\boxed{}` like a missing box and fall back
+to `extract_last_number`. Added `tests/test_reward_math_forms.py` (22 cases) covering the wins
+plus guards that wrong values, inequalities, and empty-with-no-number still score 0.
+**Follow-up:** unit-bearing answers (`\boxed{5\text{ cm}}` vs `5`) are still missed; deferred
+because stripping `\text{...}` risks false positives on textual answers like `\text{Monday}`.
 ## 2026-07-12 — Validator Postgres tests no longer silently skip in CI  #decision #repro
 **Context:** issue #118 flagged that validator DB-backed tests could ``pytest.skip`` whenever Postgres
 was unreachable, including on CI where no database service was provisioned.
