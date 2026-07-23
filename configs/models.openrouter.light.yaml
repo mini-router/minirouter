@@ -6,7 +6,7 @@ providers:
   openrouter:
     base_url: "https://openrouter.ai/api/v1"
     api_key_env: "OPENROUTER_API_KEY"
-    timeout_s: 60
+    timeout_s: 20
     max_retries: 3
     max_concurrency: 8
     reasoning_param: "reasoning_effort"

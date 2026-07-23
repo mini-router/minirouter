@@ -65,6 +65,25 @@ The runner does not duplicate evaluation logic. It shells out to the submission-
 `python -m trinity.eval` path from the copied `minirouter` repository, so the benchmark
 code stays in one place.
 
+## MiniBridge provider
+
+Set `EVAL_PROVIDER=minibridge` and
+`EVAL_MODELS_CONFIG=configs/models.minibridge.light.yaml` to send LLM calls through
+the MiniBridge TEE runner instead of calling OpenRouter directly. The upstream API
+key stays in MiniBridge. MiniRouter only sends the configured policy identities:
+
+```bash
+MINIBRIDGE_URL=https://4f4ea5780387d1611e5231be1efe7c883f3f5102-18081.dstack-pha-prod9.phala.network
+MINIBRIDGE_PROVIDER_ID=openrouter-prod
+MINIBRIDGE_CALLER_ID=minirouter-maintainer
+MINIBRIDGE_OWNER_ID=minirouter-miners
+MINIBRIDGE_KEY_ID=minirouter-miners-openrouter-key
+```
+
+For small local smoke checks, use `EVAL_EXECUTION_MODE=local_cpu` and
+`EVAL_MAX_ITEMS=1`. For production review, switch back to `remote_gpu` once the
+remote SSH host is reachable.
+
 ## Local run
 
 ```bash
