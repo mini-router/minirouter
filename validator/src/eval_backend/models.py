@@ -38,6 +38,7 @@ class Submission(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
     )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     submission_artifact = relationship("Artifact", foreign_keys=[submission_artifact_id])
     trains = relationship("TrainRun", back_populates="submission", cascade="all, delete-orphan")
@@ -219,6 +220,7 @@ class EvaluationRun(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     submission = relationship("Submission", back_populates="evaluations")
     train = relationship("TrainRun", foreign_keys=[train_id])

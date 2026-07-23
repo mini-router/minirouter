@@ -43,6 +43,7 @@ class EvaluationOut(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     created_at: datetime
+    deleted_at: datetime | None = None
 
 
 class TrainOut(BaseModel):
@@ -123,6 +124,7 @@ class SubmissionOut(BaseModel):
     submission_artifact_id: str | None = None
     created_at: datetime
     updated_at: datetime
+    deleted_at: datetime | None = None
     evaluations: list[EvaluationOut] = Field(default_factory=list)
     trains: list[TrainOut] = Field(default_factory=list)
 
@@ -147,6 +149,7 @@ class LeaderboardEntry(BaseModel):
     submitted: datetime
     report: str
     status: str
+    deleted_at: datetime | None = None
 
 
 class LeaderboardResponse(BaseModel):

@@ -8,13 +8,12 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..core.config import Settings
 from ..models import (
     AdminUser,
-    Artifact,
     CompetitionRuntimeConfig,
     EvaluationRun,
     JobQueue,
@@ -137,6 +136,7 @@ def _submission_to_schema(submission: Submission) -> SubmissionOut:
             started_at=run.started_at,
             finished_at=run.finished_at,
             created_at=run.created_at,
+            deleted_at=run.deleted_at,
         )
         for run in submission.evaluations
     ]
@@ -191,6 +191,7 @@ def _submission_to_schema(submission: Submission) -> SubmissionOut:
         submission_artifact_id=submission.submission_artifact_id,
         created_at=submission.created_at,
         updated_at=submission.updated_at,
+        deleted_at=submission.deleted_at,
         evaluations=evaluations,
         trains=trains,
     )
@@ -232,6 +233,7 @@ def _evaluation_to_schema(run: EvaluationRun) -> EvaluationOut:
         started_at=run.started_at,
         finished_at=run.finished_at,
         created_at=run.created_at,
+        deleted_at=run.deleted_at,
     )
 
 
@@ -806,15 +808,18 @@ def get_evaluation(request: Request, evaluation_id: int) -> EvaluationOut:
 
 
 @router.get("/api/leaderboard", response_model=LeaderboardResponse)
-def leaderboard(request: Request, limit: int = 100) -> LeaderboardResponse:
+def leaderboard(request: Request, limit: int = 100, include_deleted: bool = False) -> LeaderboardResponse:
     session = get_session(request)
     try:
+        filters = [
+            Submission.status == "completed",
+            Submission.latest_score.isnot(None),
+        ]
+        if not include_deleted:
+            filters.append(Submission.deleted_at.is_(None))
         stmt = (
             select(Submission)
-            .where(
-                Submission.status == "completed",
-                Submission.latest_score.isnot(None),
-            )
+            .where(*filters)
             .order_by(Submission.latest_score.desc(), Submission.created_at.asc())
             .limit(max(1, min(limit, 500)))
         )
@@ -842,6 +847,7 @@ def leaderboard(request: Request, limit: int = 100) -> LeaderboardResponse:
                     submitted=submission.created_at,
                     report=f"/api/submissions/{submission.id}",
                     status=submission.status,
+                    deleted_at=submission.deleted_at,
                 )
             )
         return LeaderboardResponse(items=board)
@@ -1020,7 +1026,7 @@ def admin_leaderboard(
     limit: int = 100,
     user: AdminUser = Depends(_require_admin_user),
 ) -> LeaderboardResponse:
-    return leaderboard(request, limit=limit)
+    return leaderboard(request, limit=limit, include_deleted=True)
 
 
 @admin_router.get("/jobs", response_model=JobQueueResponse)
@@ -1149,12 +1155,12 @@ def admin_create_provider_evaluations(
         session.close()
 
 
-@admin_router.delete("/evaluations/{evaluation_id}", status_code=204)
+@admin_router.delete("/evaluations/{evaluation_id}", response_model=EvaluationOut)
 def admin_delete_evaluation(
     request: Request,
     evaluation_id: int,
     user: AdminUser = Depends(_require_admin_user),
-) -> None:
+) -> EvaluationOut:
     session = get_session(request)
     try:
         run = session.get(EvaluationRun, evaluation_id)
@@ -1165,11 +1171,9 @@ def admin_delete_evaluation(
                 status_code=400,
                 detail="only standalone provider evaluations can be deleted here",
             )
-        session.execute(
-            Artifact.__table__.delete().where(Artifact.evaluation_id == evaluation_id)
-        )
-        session.delete(run)
+        run.deleted_at = _utcnow()
         session.commit()
+        return _evaluation_to_schema(run)
     except HTTPException:
         session.rollback()
         raise
@@ -1180,46 +1184,69 @@ def admin_delete_evaluation(
         session.close()
 
 
-@admin_router.delete("/submissions/{submission_id}", status_code=204)
+@admin_router.post("/evaluations/{evaluation_id}/revoke", response_model=EvaluationOut)
+def admin_revoke_evaluation(
+    request: Request,
+    evaluation_id: int,
+    user: AdminUser = Depends(_require_admin_user),
+) -> EvaluationOut:
+    session = get_session(request)
+    try:
+        run = session.get(EvaluationRun, evaluation_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="evaluation not found")
+        run.deleted_at = None
+        session.commit()
+        return _evaluation_to_schema(run)
+    except HTTPException:
+        session.rollback()
+        raise
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        session.close()
+
+
+@admin_router.delete("/submissions/{submission_id}", response_model=SubmissionOut)
 def admin_delete_submission(
     request: Request,
     submission_id: str,
     user: AdminUser = Depends(_require_admin_user),
-) -> None:
+) -> SubmissionOut:
     session = get_session(request)
     try:
         submission = session.get(Submission, submission_id)
         if submission is None:
             raise HTTPException(status_code=404, detail="submission not found")
-
-        train_ids = [
-            row[0]
-            for row in session.execute(
-                select(TrainRun.id).where(TrainRun.submission_id == submission_id)
-            )
-        ]
-        evaluation_ids = [
-            row[0]
-            for row in session.execute(
-                select(EvaluationRun.id).where(EvaluationRun.submission_id == submission_id)
-            )
-        ]
-
-        session.execute(JobQueue.__table__.delete().where(JobQueue.submission_id == submission_id))
-
-        artifact_filters = [Artifact.submission_id == submission_id]
-        if train_ids:
-            artifact_filters.append(Artifact.train_id.in_(train_ids))
-        if evaluation_ids:
-            artifact_filters.append(Artifact.evaluation_id.in_(evaluation_ids))
-        if submission.submission_artifact_id is not None:
-            artifact_filters.append(Artifact.id == submission.submission_artifact_id)
-        session.execute(Artifact.__table__.delete().where(or_(*artifact_filters)))
-
-        submission.submission_artifact_id = None
-        session.flush()
-        session.delete(submission)
+        submission.deleted_at = _utcnow()
+        cancel_submission_jobs(session, submission_id, reason="submission deleted")
         session.commit()
+        return get_submission(request, submission_id)
+    except HTTPException:
+        session.rollback()
+        raise
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        session.close()
+
+
+@admin_router.post("/submissions/{submission_id}/revoke", response_model=SubmissionOut)
+def admin_revoke_submission(
+    request: Request,
+    submission_id: str,
+    user: AdminUser = Depends(_require_admin_user),
+) -> SubmissionOut:
+    session = get_session(request)
+    try:
+        submission = session.get(Submission, submission_id)
+        if submission is None:
+            raise HTTPException(status_code=404, detail="submission not found")
+        submission.deleted_at = None
+        session.commit()
+        return get_submission(request, submission_id)
     except HTTPException:
         session.rollback()
         raise
