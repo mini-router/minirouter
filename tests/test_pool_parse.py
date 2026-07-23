@@ -7,7 +7,8 @@ No live API calls / no network.
 """
 from __future__ import annotations
 
-from trinity.llm.openai_compatible_pool import ChatResult, _parse_completion
+from trinity.costing import ledger_cost_report
+from trinity.llm.openai_compatible_pool import ChatResult, _ledger_append, _parse_completion
 
 
 def test_normal_completion_is_parsed():
@@ -64,3 +65,16 @@ def test_non_string_content_is_stringified():
     data = {"choices": [{"message": {"content": 42}, "finish_reason": "stop"}]}
     res = _parse_completion(data, "m")
     assert res.text == "42"
+
+
+def test_cost_ledger_escapes_model_ids(monkeypatch, tmp_path):
+    ledger = tmp_path / "ledger.jsonl"
+    monkeypatch.setenv("TRINITY_COST_LEDGER", str(ledger))
+
+    _ledger_append("openrouter", 'weird"model\\id', 1000, 2000)
+
+    report = ledger_cost_report(ledger)
+    assert report["cost_calls"] == 1
+    assert report["cost_prompt_tokens"] == 1000
+    assert report["cost_completion_tokens"] == 2000
+    assert "openrouter:weird\"model\\id" in report["cost_per_model"]

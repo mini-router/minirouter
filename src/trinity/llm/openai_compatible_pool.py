@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 import time
@@ -75,10 +76,13 @@ def _ledger_append(
         return
     try:
         with open(path, "a") as f:
-            f.write(
-                f'{{"provider":"{provider}","m":"{model}","p":{int(prompt_tokens)},'
-                f'"c":{int(completion_tokens)}}}\n'
-            )
+            row = {
+                "provider": provider,
+                "m": model,
+                "p": int(prompt_tokens),
+                "c": int(completion_tokens),
+            }
+            f.write(json.dumps(row, separators=(",", ":")) + "\n")
     except Exception:
         pass
 
