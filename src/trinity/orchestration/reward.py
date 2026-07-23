@@ -126,6 +126,12 @@ def _committed_answer(benchmark: str, traj: Trajectory) -> str:
     ``final_answer``. This applies equally to TRINITY and the random baseline (the
     single-model baseline is one turn, so it is unaffected) — a fair fix, not a thumb
     on the scale. See JOURNAL 2026-06-23 (MMLU extraction diagnosis).
+
+    Verifier turns are skipped in the scan, mirroring ``_final_answer``
+    (session.py): the Verifier is a critic, not a solver, and it routinely quotes
+    the gold answer while returning ``VERDICT: REVISE``. Scoring that quote would
+    credit a trajectory the Verifier explicitly rejected — marking a run whose
+    Worker never produced the answer as correct.
     """
     key = (benchmark or "").strip().lower()
     final = traj.final_answer or ""
@@ -134,6 +140,8 @@ def _committed_answer(benchmark: str, traj: Trajectory) -> str:
     if has_answer(key, final):
         return final
     for tr in reversed(turns):
+        if getattr(tr, "role", None) == Role.VERIFIER:
+            continue
         txt = getattr(tr, "processed_output", "") or ""
         if has_answer(key, txt):
             return txt
