@@ -18,6 +18,30 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-23 — hand-built cost-ledger JSON silently under-reported API spend  #mistake #fix #gotcha
+**Context:** issue #165 — `_ledger_append` in `src/trinity/llm/openai_compatible_pool.py` writes one
+token-usage record per call to the JSONL cost ledger (`TRINITY_COST_LEDGER`).
+**Expected:** every recorded call is counted by `costing.ledger_cost_report`.
+**Actual:** the record was hand-formatted with an f-string interpolating `provider` and `model`
+straight into a JSON literal:
+```python
+f'{{"provider":"{provider}","m":"{model}","p":{int(prompt_tokens)},"c":{int(completion_tokens)}}}\n'
+```
+so any id containing a `"`, a backslash, or a control character emitted a **structurally invalid**
+line. The reader skips unparseable lines rather than raising, so the failure was silent: affected
+calls simply vanished from the spend total.
+**Root cause:** string interpolation into JSON with no escaping — the classic injection shape, here
+producing corruption rather than a security issue. Provider/model ids come from config and remote
+API responses, so they are not guaranteed to be JSON-safe.
+**Fix / decision:** build a `dict` and serialize with `json.dumps(..., ensure_ascii=False)`, which
+escapes quotes, backslashes, and control characters correctly by construction. `ensure_ascii=False`
+keeps non-ASCII model names readable rather than `\uXXXX`-escaped; the output is still valid JSON
+since the file is read back as UTF-8. The `except Exception: pass` guard is retained — ledger
+writes must never take down a run. Added `tests/test_cost_ledger_json.py` (14 cases, offline):
+adversarial ids (embedded quote, backslash, newline, unicode) round-trip through `json.loads`, and
+the totals `ledger_cost_report` computes are unchanged for ordinary ids.
+**Follow-up:** none. Worth a grep for other hand-built JSON writers if any remain.
+
 ## 2026-07-12 — code grader: add resource limits on top of the HOME/secrets fix  #security #decision
 **Context:** issue #71 — the code grader (`run_pass_at_1`) runs untrusted miner/LLM candidate code. The core secret-leak fix (isolated throwaway HOME/cwd, scrubbed env, `python -I`) already landed on main.
 **Finding:** main's sandbox closes the HOME/secrets exfiltration vector but has **no resource limits** — an untrusted candidate can still exhaust host memory or fork-bomb the eval box within its wall-clock timeout (verified: a 4 GiB `bytearray` allocation runs to completion and "passes" on main).
