@@ -33,6 +33,8 @@ from ..schemas import (
     JobQueueResponse,
     LeaderboardEntry,
     LeaderboardResponse,
+    ProviderBenchmarkEntry,
+    ProviderBenchmarkResponse,
     ProviderEvaluationCreateRequest,
     ProviderEvaluationCreateResponse,
     ReviewControlOut,
@@ -851,6 +853,43 @@ def leaderboard(request: Request, limit: int = 100, include_deleted: bool = Fals
                 )
             )
         return LeaderboardResponse(items=board)
+    finally:
+        session.close()
+
+
+@router.get("/api/provider-benchmarks", response_model=ProviderBenchmarkResponse)
+def provider_benchmarks(request: Request, limit: int = 200) -> ProviderBenchmarkResponse:
+    session = get_session(request)
+    try:
+        stmt = (
+            select(EvaluationRun)
+            .where(
+                EvaluationRun.submission_id.is_(None),
+                EvaluationRun.status == "completed",
+                EvaluationRun.deleted_at.is_(None),
+            )
+            .order_by(EvaluationRun.created_at.desc())
+            .limit(max(1, min(limit, 500)))
+        )
+        runs = session.execute(stmt).scalars().all()
+        items: list[ProviderBenchmarkEntry] = []
+        for run in runs:
+            metrics = json.loads(run.metrics_json) if run.metrics_json else {}
+            route = metrics.get("provider_route") or metrics.get("pool_model") or "unknown"
+            repeat = metrics.get("repeat")
+            items.append(
+                ProviderBenchmarkEntry(
+                    id=run.id,
+                    route=str(route),
+                    benchmark=run.benchmark,
+                    score=run.score,
+                    repeat=int(repeat) if isinstance(repeat, (int, float)) else None,
+                    cost_usd=run.cost_usd,
+                    duration_seconds=run.duration_seconds,
+                    finished_at=run.finished_at,
+                )
+            )
+        return ProviderBenchmarkResponse(items=items)
     finally:
         session.close()
 

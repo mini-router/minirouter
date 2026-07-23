@@ -156,6 +156,21 @@ class LeaderboardResponse(BaseModel):
     items: list[LeaderboardEntry]
 
 
+class ProviderBenchmarkEntry(BaseModel):
+    id: int
+    route: str
+    benchmark: str
+    score: float | None = None
+    repeat: int | None = None
+    cost_usd: float | None = None
+    duration_seconds: float | None = None
+    finished_at: datetime | None = None
+
+
+class ProviderBenchmarkResponse(BaseModel):
+    items: list[ProviderBenchmarkEntry]
+
+
 class JobQueueOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
