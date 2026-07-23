@@ -18,6 +18,27 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-13 — /submit sync-eval ran on checkpoint-less PRs, failing them (#143)  #mistake #gotcha
+**Context:** infra/bugfix PRs (no `submissions/final_model/best_theta.npy`) were being marked
+`failed` with `missing_checkpoint`, which closes them before a maintainer can merge (#143). One of
+my own PRs (#117) was auto-closed exactly this way.
+**Expected:** a submission with no uploaded model bundle is never evaluated.
+**Actual:** the async paths already skip such submissions — the pipeline enqueue in `/submit`
+(`routes.py`) and `queue.py` both gate on `submission.submission_artifact_id is not None` — but the
+**synchronous** branch (`if settings.sync_eval_on_submit and not settings.uses_train_pipeline:`) did
+not, so `evaluate_submission` ran on a checkpoint-less submission and hit the
+`does not have a checkpoint to evaluate` failure in `eval_runner.py`.
+**Root cause:** the artifact gate was added to the async paths but the synchronous path was missed —
+the invariant "never evaluate a submission without an artifact" was enforced in two of three places.
+**Fix / decision:** extracted `_should_sync_eval(settings, submission)` and added the same
+`submission_artifact_id is not None` clause, so the sync path matches the async ones. Deliberately
+did **not** touch `eval_runner`'s `missing_checkpoint` failure — that is a legitimate safety net for a
+submission that *has* an artifact row whose checkpoint file is genuinely missing.
+**Follow-up:** this only stops the validator from *generating* the failure; a maintainer still has to
+deploy it, and it cannot reopen already-closed PRs (#117 was re-opened as a fresh PR). Testable
+offline via the pure `_should_sync_eval` helper (no Postgres needed).
+
+---
 ## 2026-07-12 — code grader: add resource limits on top of the HOME/secrets fix  #security #decision
 **Context:** issue #71 — the code grader (`run_pass_at_1`) runs untrusted miner/LLM candidate code. The core secret-leak fix (isolated throwaway HOME/cwd, scrubbed env, `python -I`) already landed on main.
 **Finding:** main's sandbox closes the HOME/secrets exfiltration vector but has **no resource limits** — an untrusted candidate can still exhaust host memory or fork-bomb the eval box within its wall-clock timeout (verified: a 4 GiB `bytearray` allocation runs to completion and "passes" on main).
