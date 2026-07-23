@@ -555,7 +555,7 @@ def main() -> None:
     ap.add_argument("--config", default=str(_REPO / "configs" / "trinity.yaml"))
     ap.add_argument("--models", default=str(_REPO / "configs" / "models.yaml"))
     ap.add_argument("--provider", default="fireworks",
-                    choices=["fireworks", "openrouter", "chutes", "compatible", "openai-compatible"])
+                    choices=["fireworks", "openrouter", "chutes", "minibridge", "compatible", "openai-compatible"])
     ap.add_argument(
         "--pool-models",
         default="",
