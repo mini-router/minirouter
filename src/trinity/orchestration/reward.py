@@ -21,9 +21,10 @@ Supported benchmarks
     Parse a JSON function-call payload and compare it against the ground-truth
     call schema stored in ``task.answer``.
 * ``mmlu`` / ``gpqa``
-    Extract a single multiple-choice letter ``A-D`` (robust to phrasings such
-    as ``"the answer is (B)"``, ``"B)"``, ``"B."``) and compare to
-    ``task.answer``.
+    Extract a single multiple-choice letter (robust to phrasings such as
+    ``"the answer is (B)"``, ``"B)"``, ``"B."``) and compare to ``task.answer``.
+    The alphabet spans ``A-J`` so RLPR's ten-option MMLU-Pro items are gradeable;
+    4-option benchmarks only ever use ``A-D``.
 * ``livecodebench`` / ``bigcodebench``
     Execute candidate code against the task's tests in a subprocess sandbox
     with a timeout (``run_pass_at_1``). Never ``exec`` untrusted code in
@@ -942,26 +943,41 @@ def _ref_to_str(reference: object) -> str:
 # Multiple choice: MMLU / GPQA
 # ---------------------------------------------------------------------------
 # Match in priority order. Earlier patterns are more explicit / trustworthy.
+# Choice alphabet for the multiple-choice grading path. MMLU/GPQA are 4-option
+# (A-D), but RLPR routes MMLU-Pro (`MMLUPro-1000_Avg2`) here and MMLU-Pro has up
+# to TEN options (A-J) — capping at A-D silently scored every correct E-J answer
+# 0.0. Widening is safe for the 4-option benchmarks: their gold answer is always
+# A-D, so extracting a stray higher letter still cannot match a 4-option gold.
+_CHOICE_ALPHABET: str = "ABCDEFGHIJ"
+_CHOICE_LETTER_CLASS: str = f"[{_CHOICE_ALPHABET[0]}-{_CHOICE_ALPHABET[-1]}]"
+
 _CHOICE_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Require the captured letter to be followed by a delimiter or end-of-word,
     # so "the answer Beats..." does NOT match "B" (P2 review fix).
-    re.compile(r"answer\s*(?:is|:)?\s*\(?\s*([A-D])\s*(?:[\).:]|\b)(?![A-Za-z])", re.I),
-    re.compile(r"\\boxed\s*\{\s*\(?\s*([A-D])\s*\)?\s*\}", re.I),
-    re.compile(r"\bfinal\s+answer\s*[:=]?\s*\(?\s*([A-D])(?![A-Za-z])", re.I),
-    re.compile(r"\boption\s*\(?\s*([A-D])(?![A-Za-z])", re.I),
-    re.compile(r"^\s*\(?\s*([A-D])\s*[\).:]", re.M),
+    re.compile(
+        rf"answer\s*(?:is|:)?\s*\(?\s*({_CHOICE_LETTER_CLASS})\s*(?:[\).:]|\b)(?![A-Za-z])",
+        re.I,
+    ),
+    re.compile(rf"\\boxed\s*\{{\s*\(?\s*({_CHOICE_LETTER_CLASS})\s*\)?\s*\}}", re.I),
+    re.compile(rf"\bfinal\s+answer\s*[:=]?\s*\(?\s*({_CHOICE_LETTER_CLASS})(?![A-Za-z])", re.I),
+    re.compile(rf"\boption\s*\(?\s*({_CHOICE_LETTER_CLASS})(?![A-Za-z])", re.I),
+    re.compile(rf"^\s*\(?\s*({_CHOICE_LETTER_CLASS})\s*[\).:]", re.M),
 )
 
 
 def extract_choice_letter(text: str) -> str | None:
-    """Extract a single multiple-choice letter ``A``-``D`` from ``text``.
+    """Extract a single multiple-choice letter ``A``-``J`` from ``text``.
 
     Robust to common phrasings: ``"the answer is (B)"``, ``"Answer: C"``,
     ``"B)"``, ``"B."``, ``"\\boxed{D}"``, ``"Option A"``. Tries explicit
     answer-bearing patterns first; if none match, falls back to the **last**
-    standalone capital ``A``-``D`` token in the text (final answers usually come
+    standalone capital ``A``-``J`` token in the text (final answers usually come
     last). Letters embedded in words (e.g. the ``A`` in ``"And"``) are excluded
     by requiring word boundaries / delimiters.
+
+    The alphabet spans ``A``-``J`` (not just ``A``-``D``) because RLPR's MMLU-Pro
+    subset has up to ten options; 4-option benchmarks are unaffected since their
+    gold answer is always ``A``-``D``.
 
     Args:
         text: Arbitrary model output.
@@ -979,7 +995,7 @@ def extract_choice_letter(text: str) -> str | None:
     # it is essentially just the letter (e.g. "B", "(C)", "D."). This avoids the
     # English article "A" in prose like "A nice approach" being read as a choice.
     for line in reversed([ln.strip() for ln in text.splitlines() if ln.strip()]):
-        m = re.fullmatch(r"\(?\s*([A-D])\s*\)?[.:]?", line, re.I)
+        m = re.fullmatch(rf"\(?\s*({_CHOICE_LETTER_CLASS})\s*\)?[.:]?", line, re.I)
         if m:
             return m.group(1).upper()
         break  # only inspect the final non-empty line
@@ -998,11 +1014,14 @@ def _check_choice(candidate: str, reference: object) -> bool:
 
 
 def _normalize_reference_letter(reference: object) -> str | None:
-    """Coerce a reference answer to a single ``A``-``D`` letter.
+    """Coerce a reference answer to a single ``A``-``J`` letter.
 
     Accepts a letter string (``"B"``, ``"(B)"``) or a 0-based / 1-based integer
     index (``1`` -> ``"B"`` under 0-based; datasets vary, so a bare letter is
     preferred). Returns ``None`` if it cannot be resolved.
+
+    The alphabet spans ``A``-``J`` so RLPR's MMLU-Pro gold answers (up to ten
+    options) are representable; 4-option benchmarks only ever use ``A``-``D``.
     """
     if reference is None:
         return None
@@ -1011,12 +1030,12 @@ def _normalize_reference_letter(reference: object) -> str | None:
         if letter is not None:
             return letter
         s = reference.strip().upper()
-        return s if s in {"A", "B", "C", "D"} else None
+        return s if s in set(_CHOICE_ALPHABET) else None
     if isinstance(reference, bool):
         return None
     if isinstance(reference, int):
-        if 0 <= reference <= 3:
-            return "ABCD"[reference]
+        if 0 <= reference < len(_CHOICE_ALPHABET):
+            return _CHOICE_ALPHABET[reference]
         return None
     return None
 
