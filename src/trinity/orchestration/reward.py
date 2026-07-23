@@ -972,9 +972,14 @@ def extract_choice_letter(text: str) -> str | None:
     if not text:
         return None
     for pat in _CHOICE_PATTERNS:
-        m = pat.search(text)
-        if m:
-            return m.group(1).upper()
+        # Take the LAST occurrence of the highest-priority matching pattern:
+        # when a model self-corrects ("The answer is A. Actually, the answer is
+        # C.") the final stated letter is the real answer, matching the "final
+        # answer comes last" convention used by extract_boxed/last_number/code
+        # and this function's own fallback below.
+        matches = list(pat.finditer(text))
+        if matches:
+            return matches[-1].group(1).upper()
     # Fallback (P2 review fix): only trust the LAST non-empty line, and only when
     # it is essentially just the letter (e.g. "B", "(C)", "D."). This avoids the
     # English article "A" in prose like "A nice approach" being read as a choice.
