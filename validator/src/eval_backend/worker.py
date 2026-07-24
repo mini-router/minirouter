@@ -84,7 +84,13 @@ def process_once(session_factory, settings: Settings) -> int:
         now = datetime.now(timezone.utc)
         job.claimed_at = now
         job.heartbeat_at = now
-        session.flush()
+        # Commit the claim before the (long) job body runs. A flush kept the claim
+        # inside this transaction, which stays open for the whole evaluation, so
+        # /api/jobs reported the job as "queued" and the submission as un-started
+        # for hours. Committing also makes the claim durable and releases the
+        # SELECT ... FOR UPDATE row lock; the status is now "queued" -> "running"
+        # in the database, which is what keeps other workers off this row.
+        session.commit()
         payload = job.payload_json or {}
         job_id = job.id
         submission_id = job.submission_id

@@ -18,6 +18,15 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-24 — live evaluation progress was computed and then thrown away  #mistake #gotcha
+**Context:** `eval_runner` parses the `[submission] item i/N ...` lines the harness prints and stores them on the run (`phase`, `message`, `progress_current/total`); `/api/submissions/{id}` exposes them as `current_phase`/`current_message`/`current_progress_*` and the public submission page renders them.
+**Expected:** the progress fields advance while an evaluation is running.
+**Actual:** they stayed empty for the entire run and only appeared once it had already finished — the progress bar was always either blank or complete, never moving. `/api/jobs` likewise reported a job as `queued` for hours after a worker had claimed it.
+**Root cause:** `_touch_progress()` ended in `session.flush()`, and the worker claimed its job with `session.flush()` too. A flush writes into the *worker's own* transaction — and `process_once()` holds that single transaction open across the whole job body, up to `EVAL_TIMEOUT_SECONDS` (2h by default). Under Postgres READ COMMITTED the API process cannot see uncommitted rows, so every progress update was invisible until the final `session.commit()`, by which point it was worthless.
+**Fix / decision:** commit instead of flush in both places. Committing the claim also makes it durable and releases the `SELECT ... FOR UPDATE` row lock early; the `status = 'queued' -> 'running'` transition is what actually keeps other workers off the row, so `skip_locked` claiming is unaffected. Regression tests in `validator/tests/test_progress_visibility.py` assert that `_touch_progress` commits and that the worker has committed at least once before the job body starts.
+**Gotcha for the test suite:** the `validator_session` fixture binds the Session to a Connection that already has an open transaction, so SQLAlchemy 2.0 joins it via SAVEPOINT — an inner `session.commit()` is still undone by the fixture's outer `transaction.rollback()`. Verified before relying on it; tests stay isolated.
+**Follow-up:** `_local_attempt()` still does not forward an `on_line` callback to `_run_bash_stream()`, so local / local-fallback runs parse no progress lines at all even now that the updates are durable. Left out of this change to keep it reviewable.
+
 ## 2026-07-12 — code grader: add resource limits on top of the HOME/secrets fix  #security #decision
 **Context:** issue #71 — the code grader (`run_pass_at_1`) runs untrusted miner/LLM candidate code. The core secret-leak fix (isolated throwaway HOME/cwd, scrubbed env, `python -I`) already landed on main.
 **Finding:** main's sandbox closes the HOME/secrets exfiltration vector but has **no resource limits** — an untrusted candidate can still exhaust host memory or fork-bomb the eval box within its wall-clock timeout (verified: a 4 GiB `bytearray` allocation runs to completion and "passes" on main).
