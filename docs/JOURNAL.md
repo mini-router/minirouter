@@ -18,6 +18,30 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-23 — CMA-ES shipped the noisy xbest instead of the distribution mean  #mistake #decision
+**Context:** issue #69 — `SepCMAES.best()` in `src/trinity/optim/sep_cmaes.py` returns the vector
+that gets written out as `best_theta.npy`, i.e. the coordinator we actually ship and evaluate.
+**Expected:** the recommended solution under a noisy objective is the search distribution mean.
+**Actual:** `best()` preferred pycma's `result.xbest` — the single best-*evaluated* candidate —
+falling back to a locally tracked best.
+**Root cause:** TRINITY's fitness `J(theta) = E[R(tau)]` is a **stochastic** signal: every candidate
+is scored on a freshly sampled minibatch with a *sampled* policy (`sample=True` during training).
+Under a noisy objective `xbest` is selection-on-noise — the luckiest single evaluation of the run,
+not the policy with the best *expected* reward — so shipping it overfits sampling noise. The bug is
+invisible on a deterministic objective, which is why it survived: only the noise makes the two
+diverge.
+**Fix / decision:** return `result.xfavorite` (the distribution mean) as the solution vector, with
+the locally tracked best kept only as a fallback for a backend that doesn't expose `xfavorite`.
+pycma documents `xfavorite` as the recommended estimate of the optimum for noisy problems, and in
+CMA-ES theory the mean is the maximum-likelihood point of the search distribution. Deliberately
+**kept** `self._best_f` as the returned fitness and documented the asymmetry in the docstring: it is
+the best *observed* training fitness, a noisy upper estimate for logging only — it is the score of
+the luckiest evaluated candidate, **not** a re-evaluation of the returned mean, and must not be
+trusted as the mean's true score without a held-out re-eval.
+**Follow-up:** the returned fitness and the returned vector now describe different things by design.
+If a caller ever needs an honest score for the shipped mean, it has to re-evaluate it on held-out
+data rather than read `best()[1]`.
+
 ## 2026-07-12 — code grader: add resource limits on top of the HOME/secrets fix  #security #decision
 **Context:** issue #71 — the code grader (`run_pass_at_1`) runs untrusted miner/LLM candidate code. The core secret-leak fix (isolated throwaway HOME/cwd, scrubbed env, `python -I`) already landed on main.
 **Finding:** main's sandbox closes the HOME/secrets exfiltration vector but has **no resource limits** — an untrusted candidate can still exhaust host memory or fork-bomb the eval box within its wall-clock timeout (verified: a 4 GiB `bytearray` allocation runs to completion and "passes" on main).
