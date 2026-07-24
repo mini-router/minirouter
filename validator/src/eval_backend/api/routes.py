@@ -101,7 +101,6 @@ def _submission_to_schema(submission: Submission) -> SubmissionOut:
         submission.trains,
         key=lambda run: (run.created_at or _utcnow(), run.id),
     )
-    latest = ordered_evaluations[-1] if ordered_evaluations else None
     evaluations = [
         EvaluationOut(
             id=run.id,
@@ -140,7 +139,7 @@ def _submission_to_schema(submission: Submission) -> SubmissionOut:
             created_at=run.created_at,
             deleted_at=run.deleted_at,
         )
-        for run in submission.evaluations
+        for run in ordered_evaluations
     ]
     trains = [
         TrainOut(
