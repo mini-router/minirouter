@@ -69,3 +69,59 @@ def test_rlimits_do_not_break_ordinary_grading():
     code = "import sys\nprint(int(sys.stdin.read()) + 1)"
     tests = [{"input": "41\n", "output": "42"}]
     assert R.run_pass_at_1(code, tests, timeout_s=5) is True
+
+
+# ---------------------------------------------------------------------------
+# Early-exit reward hack: a candidate must not short-circuit the appended
+# checker by terminating the process with a zero exit status before the
+# asserts run. Pass now requires the checker to run to completion.
+# ---------------------------------------------------------------------------
+_WRONG_ADD = "def add(a, b):\n    return 999\n"
+_ADD_ASSERT = ["assert add(2, 3) == 5"]
+
+
+def test_assert_rejects_sys_exit_before_checker():
+    hack = _WRONG_ADD + "import sys\nsys.exit(0)\n"
+    assert R.run_pass_at_1(hack, _ADD_ASSERT, timeout_s=5) is False
+
+
+def test_assert_rejects_exit_builtin_before_checker():
+    hack = _WRONG_ADD + "exit()\n"
+    assert R.run_pass_at_1(hack, _ADD_ASSERT, timeout_s=5) is False
+
+
+def test_assert_rejects_os_exit_before_checker():
+    # os._exit is a hard exit that bypasses SystemExit handling; the missing
+    # success sentinel still fails it.
+    hack = _WRONG_ADD + "import os\nos._exit(0)\n"
+    assert R.run_pass_at_1(hack, _ADD_ASSERT, timeout_s=5) is False
+
+
+def test_assert_rejects_raise_systemexit_before_checker():
+    hack = _WRONG_ADD + "raise SystemExit(0)\n"
+    assert R.run_pass_at_1(hack, _ADD_ASSERT, timeout_s=5) is False
+
+
+def test_assert_correct_code_still_passes():
+    good = "def add(a, b):\n    return a + b\n"
+    assert R.run_pass_at_1(good, _ADD_ASSERT, timeout_s=5) is True
+
+
+def test_assert_rejects_forged_success_string():
+    # A candidate cannot fake a pass by printing a plausible marker; the real
+    # sentinel is random per run.
+    hack = _WRONG_ADD + "print('__TRINITY_PASS__')\nimport sys\nsys.exit(0)\n"
+    assert R.run_pass_at_1(hack, _ADD_ASSERT, timeout_s=5) is False
+
+
+def test_functional_rejects_sys_exit_before_checker():
+    # LiveCodeBench call-based path: wrong Solution that exits before the harness.
+    bad = (
+        "class Solution:\n"
+        "    def twoSum(self, nums, target):\n"
+        "        return [9, 9]\n"
+        "import sys\n"
+        "sys.exit(0)\n"
+    )
+    spec = {"tests": [{"input": "[2,7,11,15]\n9", "output": "[0,1]", "testtype": "functional"}], "fn_name": "twoSum"}
+    assert R.score_text("livecodebench", "```python\n" + bad + "```", spec) == 0.0
