@@ -18,6 +18,15 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-24 — eval_runner scored a failed re-run from the previous run's results.json  #mistake #gotcha
+**Context:** `evaluate_submission` writes every run of a submission into `data/workspaces/submissions/<submission_id>/`. Submission rows are reused, not recreated — `create_pr_submission` updates the existing row when a miner pushes a new commit to the same PR, so every re-evaluation lands in the same workspace directory.
+**Expected:** an evaluation that produces no `results.json` is reported as failed (that is what `_is_missing_results_payload` and the two `rc != 0 and not results_path.exists()` guards are for).
+**Actual:** the second evaluation of a submission whose run crashed without writing anything was marked `completed` and carried the **first** run's score. The stale `cost_ledger.jsonl` was billed to it too.
+**Root cause:** nothing cleared the workspace between runs. `results.json` from the previous evaluation was still on disk, so `not local_results_path.exists()` was False (no raise), and `_prepare_results` parsed the old payload. The remote path had the same hole one level up: `_remote_attempt` rsyncs the remote workspace back **without `--delete`**, so a stale remote `results.json` would be copied over a freshly cleared local one.
+**Impact:** a wrong score propagates all the way through — `submission.latest_score`, `best_eval_id`, the public leaderboard, `update_king_score`, and the worker's `should_promote_submission` merge/close decision. A miner could bank one good score and have any later broken checkpoint inherit it.
+**Fix / decision:** `_clear_previous_run_files()` unlinks `results.json` and `cost_ledger.jsonl` at the top of `evaluate_submission`, and the remote command prologue now `rm -f`s the remote `results.json` alongside the ledger truncation it already did. Both existing "missing results" guards then work as written. Regression test: evaluate once with a scoring stub, then again with a stub that writes nothing — the second run must fail with `score is None`.
+**Follow-up:** provider-route evaluations are keyed by a unique `EvaluationRun.id`, so their workspace is never reused; left alone.
+
 ## 2026-07-12 — code grader: add resource limits on top of the HOME/secrets fix  #security #decision
 **Context:** issue #71 — the code grader (`run_pass_at_1`) runs untrusted miner/LLM candidate code. The core secret-leak fix (isolated throwaway HOME/cwd, scrubbed env, `python -I`) already landed on main.
 **Finding:** main's sandbox closes the HOME/secrets exfiltration vector but has **no resource limits** — an untrusted candidate can still exhaust host memory or fork-bomb the eval box within its wall-clock timeout (verified: a 4 GiB `bytearray` allocation runs to completion and "passes" on main).
