@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 
 from eval_backend.core.config import Settings
@@ -135,6 +136,65 @@ def test_nonzero_exit_with_results_still_completes(validator_session, tmp_path, 
     assert result.run.status == "completed"
     assert submission.status == "completed"
     assert result.score == 0.88
+
+
+def test_reevaluation_does_not_reuse_previous_results(validator_session, tmp_path, monkeypatch):
+    """A re-run that produces no results must fail, not inherit the old score."""
+    session = validator_session
+    settings = _build_settings(tmp_path)
+    checkpoint_path = tmp_path / "theta.npy"
+    checkpoint_path.write_bytes(b"theta")
+    submission = _add_submission(session, checkpoint_path)
+
+    def _scoring_local_attempt(
+        settings,
+        checkpoint_path,
+        local_results_path,
+        local_ledger_path,
+        submission_id,
+        env,
+    ):
+        local_results_path.write_text(
+            json.dumps({"results": {"TRINITY": {"accuracy": 0.91}}}),
+            encoding="utf-8",
+        )
+        local_ledger_path.write_text(
+            json.dumps({"provider": "chutes", "m": "google/gemma-4-31B-turbo-TEE", "p": 100, "c": 50})
+            + "\n",
+            encoding="utf-8",
+        )
+        return ("fake-eval-command", 0, "stdout", "")
+
+    monkeypatch.setattr(eval_runner, "_local_attempt", _scoring_local_attempt)
+    first = eval_runner.evaluate_submission(session, submission, settings)
+    assert first.score == 0.91
+
+    # The miner pushes a new commit: the same submission row (and therefore the
+    # same workspace) is evaluated again, but this run writes nothing at all.
+    def _crashing_local_attempt(*args, **kwargs):
+        return ("fake-eval-command", 1, "stdout", "boom")
+
+    monkeypatch.setattr(eval_runner, "_local_attempt", _crashing_local_attempt)
+    second = eval_runner.evaluate_submission(session, submission, settings)
+
+    assert second.run.status == "failed"
+    assert second.score is None
+    assert submission.status == "failed"
+    assert submission.latest_score is None
+    assert second.metrics["cost_usd"] == 0.0
+
+
+def test_remote_command_clears_stale_remote_results(tmp_path):
+    settings = _build_settings(tmp_path)
+    results_path = tmp_path / "workspace" / "results.json"
+    command = eval_runner._build_remote_command(
+        settings,
+        tmp_path / "theta.npy",
+        results_path,
+        tmp_path / "workspace" / "ledger.jsonl",
+        tmp_path / "workspace",
+    )
+    assert f"rm -f {shlex.quote(str(results_path))}" in command
 
 
 def test_ledger_cost_report_prices_current_openrouter_models(tmp_path):

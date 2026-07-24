@@ -460,6 +460,21 @@ def _provider_eval_workspace(settings: Settings, evaluation_id: int) -> Path:
     return settings.workspace_root.expanduser() / "provider_evaluations" / str(evaluation_id)
 
 
+def _clear_previous_run_files(*paths: Path) -> None:
+    """Delete run outputs left behind by an earlier evaluation of the same submission.
+
+    Submission workspaces are keyed by submission id and reused on every
+    re-evaluation (pushing a new commit to a submission PR updates the existing
+    row instead of creating a new one). Nothing truncated the previous
+    ``results.json``, so a re-run that produced no results at all still found the
+    old file: the ``rc != 0 and not results_path.exists()`` guards did not fire
+    and ``_prepare_results`` happily parsed the stale payload, reporting the
+    previous run's score for the new checkpoint.
+    """
+    for path in paths:
+        path.unlink(missing_ok=True)
+
+
 def _prepare_results(
     results_path: Path,
     *,
@@ -590,6 +605,10 @@ def _build_remote_command(
     )
     return (
         f"mkdir -p {shlex.quote(str(ledger_path.parent))} && : > {shlex.quote(str(ledger_path))} && "
+        # The remote workspace is reused across evaluations of the same submission
+        # and is rsynced back without --delete, so a stale results.json would be
+        # copied over the freshly cleared local one when this run produces none.
+        f"rm -f {shlex.quote(str(results_path))} && "
         f"export TRINITY_COST_LEDGER={shlex.quote(str(ledger_path))}; "
         f"export TRINITY_REMOTE_DIR={repo_dir}; "
         f"export TRINITY_GPU_INDEX={shlex.quote(str(getattr(settings, 'trinity_gpu_index', 5)))}; "
@@ -876,6 +895,7 @@ def evaluate_submission(
     local_workspace.mkdir(parents=True, exist_ok=True)
     local_results_path = local_workspace / "results.json"
     local_cost_ledger_path = local_workspace / "cost_ledger.jsonl"
+    _clear_previous_run_files(local_results_path, local_cost_ledger_path)
 
     effective_allow_local_fallback = (
         settings.eval_allow_local_fallback if allow_local_fallback is None else allow_local_fallback
