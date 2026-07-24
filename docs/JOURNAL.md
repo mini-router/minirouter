@@ -18,6 +18,31 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-23 — workflow parser rejected a bare-int access index  #mistake #fix #repro
+**Context:** issue #225 — `_normalize_access` in `src/trinity/fugu/workflow.py` validates one
+`access_list` entry of a Conductor workflow proposal ("which earlier steps may this step read").
+**Expected:** `access_list=[[], 0]` parses like the semantically identical `[[], "0"]` / `[[], [0]]`.
+**Actual:** the two spellings disagreed purely on notation — the bare int dropped the **whole**
+workflow:
+```python
+parse_workflow('model_id=[0,1]\nsubtasks=["solve","answer"]\naccess_list=[[], 0]',   3)  # (None, False)
+parse_workflow('model_id=[0,1]\nsubtasks=["solve","answer"]\naccess_list=[[], "0"]', 3)  # parses fine
+```
+**Root cause:** the function handled a scalar **string** digit (`"0"` -> `[0]`), `None`/`""` (-> `[]`),
+and **lists** of indices, but a bare scalar **int** matched no branch and fell through to
+`return None` — and `None` from `_normalize_access` rejects the entire proposal, not just that entry.
+**Fix / decision:** add a bare-`int` branch returning `[acc]` when `0 <= acc < step_index`, matching
+the already-accepted `"0"`/`[0]` forms, and document the form in the docstring. `bool` is rejected
+**first**, since it subclasses `int` and is never a step index. A bare integer is the most natural
+thing a model emits for "read step N", and the parser's stated design goal is to avoid false
+negatives; rejecting it depressed parse-rate on otherwise-valid workflows, and a rejected workflow
+means `parsed_ok=False`, `training_reward=0.0`, `is_correct=0`. Added
+`tests/test_fugu_workflow_bare_int_access.py` (offline): the three equivalent forms produce an
+identical workflow, plus guards that the rejections that matter still hold — `True`/`False`
+(bool-before-int ordering), negatives, forward references (`>= step_index`), and self-reference at
+step 0.
+**Follow-up:** none. Note #226 proposes the same one-line fix independently.
+
 ## 2026-07-12 — code grader: add resource limits on top of the HOME/secrets fix  #security #decision
 **Context:** issue #71 — the code grader (`run_pass_at_1`) runs untrusted miner/LLM candidate code. The core secret-leak fix (isolated throwaway HOME/cwd, scrubbed env, `python -I`) already landed on main.
 **Finding:** main's sandbox closes the HOME/secrets exfiltration vector but has **no resource limits** — an untrusted candidate can still exhaust host memory or fork-bomb the eval box within its wall-clock timeout (verified: a 4 GiB `bytearray` allocation runs to completion and "passes" on main).
