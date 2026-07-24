@@ -60,6 +60,7 @@ from ..services.eval_runner import evaluate_submission
 from ..services.github import create_pr_submission
 from ..services.github import set_commit_status
 from ..services.artifacts import persist_stored_artifact
+from ..services.queue import cancel_evaluation_jobs
 from ..services.queue import cancel_submission_jobs
 from ..services.queue import enqueue_provider_eval_job
 from ..services.queue import enqueue_submission_job
@@ -1211,6 +1212,7 @@ def admin_delete_evaluation(
                 detail="only standalone provider evaluations can be deleted here",
             )
         run.deleted_at = _utcnow()
+        cancel_evaluation_jobs(session, evaluation_id, reason="evaluation deleted")
         session.commit()
         return _evaluation_to_schema(run)
     except HTTPException:
