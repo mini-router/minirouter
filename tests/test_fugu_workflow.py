@@ -101,6 +101,23 @@ access_list = ["none", "0", ["1"]]
     assert [s.access for s in wf.steps] == [[], [0], [1]]
 
 
+def test_parse_accepts_bare_int_access_index():
+    # A bare integer access entry (0) is the natural shorthand for [0] and must
+    # be accepted just like the string "0" and the list [0] already are.
+    txt = """
+model_id = [0, 1, 2]
+subtasks = ["solve", "check", "answer"]
+access_list = ["none", 0, 1]
+"""
+    wf, ok = parse_workflow(txt, n_workers=3)
+    assert ok and wf is not None
+    assert [s.access for s in wf.steps] == [[], [0], [1]]
+
+    # A bare-int forward reference is still an invalid DAG.
+    fwd = "model_id=[0,1]\nsubtasks=['a','b']\naccess_list=[0, 1]"
+    assert parse_workflow(fwd, 3)[1] is False
+
+
 def test_parse_gate_rejects_bad_workflows():
     # missing a list
     assert parse_workflow("model_id=[0]\nsubtasks=['x']", 3)[1] is False
