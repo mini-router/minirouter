@@ -240,7 +240,13 @@ def _touch_progress(
         run.status = status
         submission.status = status
     submission.updated_at = _utcnow()
-    session.flush()
+    # Commit, not flush: the whole point of these updates is that another process
+    # (the API serving /api/submissions/{id}) can observe them *while* the
+    # evaluation is still running. A flush only makes them visible inside this
+    # transaction, and the worker holds that transaction open for the entire run
+    # (up to EVAL_TIMEOUT_SECONDS, 2h by default), so every progress line was
+    # discarded until the run was already over.
+    session.commit()
 
 
 def _consume_progress_line(
