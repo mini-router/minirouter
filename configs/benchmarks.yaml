@@ -16,6 +16,12 @@ train:
     loader: "benchmarks.reasoning"
     split: "train"
     max_items: 256
+  - name: gsm8k
+    loader: "benchmarks.gsm8k"
+    split: "train"
+    max_items: 256
+  # HumanEval ships a single (test) split, so it is eval-only below — including it
+  # in `train` would reuse the same items and make the eval score non-disjoint.
 
 # Held-in evaluation (same distribution as train, disjoint items).
 eval:
@@ -31,6 +37,14 @@ eval:
     loader: "benchmarks.reasoning"
     split: "test"
     metric: "accuracy"
+  - name: gsm8k
+    loader: "benchmarks.gsm8k"
+    split: "test"
+    metric: "accuracy"
+  - name: humaneval
+    loader: "benchmarks.humaneval"
+    split: "test"
+    metric: "pass@1"
 
 # Out-of-distribution tasks to test generalization (never seen during evolution).
 ood:
@@ -48,6 +62,10 @@ ood:
     metric: "accuracy"
   - name: bfcl_simple
     loader: "benchmarks.bfcl_simple"
+    split: "test"
+    metric: "accuracy"
+  - name: bbh
+    loader: "benchmarks.bbh"
     split: "test"
     metric: "accuracy"
 
