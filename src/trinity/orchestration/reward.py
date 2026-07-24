@@ -45,6 +45,7 @@ import collections
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -1189,6 +1190,36 @@ def _functional_harness(fn_name: str, stdin_data: str, expected_output: str) -> 
     return "\n".join(lines) + "\n"
 
 
+def _run_checked_script(candidate_code: str, checker: str, *, timeout_s: int) -> bool:
+    """Run ``candidate_code`` then ``checker``, requiring the checker to run to
+    completion — not merely a zero exit status.
+
+    The assert- and call-based flavors append verification code *after* the
+    untrusted candidate. Judging a pass by exit code alone let a candidate that
+    terminates the process early — ``sys.exit(0)``, ``exit()``/``quit()``,
+    ``raise SystemExit(0)``, or even a hard ``os._exit(0)`` — short-circuit the
+    appended checks and score correct regardless of correctness.
+
+    We append a write of a per-run random sentinel *after* the checker. A pass
+    requires exit code 0 AND the sentinel present in stdout, so any early
+    termination before the checker's asserts run fails: the sentinel is never
+    emitted. The token is unguessable per run, so a candidate cannot forge it by
+    printing a fixed string.
+    """
+    sentinel = "__TRINITY_PASS_" + secrets.token_hex(16) + "__"
+    script = (
+        candidate_code
+        + "\n\n"
+        + checker
+        + "\n"
+        + "import sys as _trinity_sys\n"
+        + f"_trinity_sys.stdout.write({sentinel!r})\n"
+        + "_trinity_sys.stdout.flush()\n"
+    )
+    ok, stdout = _exec_script_capture(script, stdin_data="", timeout_s=timeout_s)
+    return ok and sentinel in stdout
+
+
 def _run_one_test(
     code: str, test: object, timeout_s: int, fn_name: str | None = None
 ) -> bool:
@@ -1211,8 +1242,8 @@ def _run_one_test(
         if ttype == "functional" and has_io:
             stdin_data = str(test.get("stdin", test.get("input", "")))
             expected = str(test.get("expected_stdout", test.get("output", "")))
-            script = code + "\n\n" + _functional_harness(fn_name or "", stdin_data, expected)
-            return _exec_script(script, stdin_data="", timeout_s=timeout_s)
+            checker = _functional_harness(fn_name or "", stdin_data, expected)
+            return _run_checked_script(code, checker, timeout_s=timeout_s)
 
     stdin_data: str | None = None
     expected_stdout: str | None = None
@@ -1245,8 +1276,7 @@ def _run_one_test(
         return False
 
     if assert_block is not None:
-        script = code + "\n\n" + assert_block + "\n"
-        return _exec_script(script, stdin_data="", timeout_s=timeout_s)
+        return _run_checked_script(code, assert_block, timeout_s=timeout_s)
 
     # stdin/stdout test.
     ok, stdout = _exec_script_capture(
@@ -1310,12 +1340,6 @@ def _rlimit_preexec():
                 pass
 
     return _apply
-
-
-def _exec_script(script: str, *, stdin_data: str, timeout_s: int) -> bool:
-    """Run a script; pass iff it exits 0 within the timeout. No output check."""
-    ok, _ = _exec_script_capture(script, stdin_data=stdin_data, timeout_s=timeout_s)
-    return ok
 
 
 def _exec_script_capture(
