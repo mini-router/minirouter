@@ -208,6 +208,14 @@ def _normalize_access(acc: object, step_index: int) -> object | None:
             j = int(s)
             return [j] if j < step_index else None
         return None
+    if isinstance(acc, bool):
+        # bool is a subclass of int; a boolean is not a valid step index.
+        return None
+    if isinstance(acc, int):
+        # A bare int index is the most natural model output and is semantically
+        # identical to the already-accepted "0" / [0] forms — accept it too rather
+        # than reject the whole workflow (the parser aims to avoid false negatives).
+        return [acc] if 0 <= acc < step_index else None
     if isinstance(acc, (list, tuple)):
         if len(acc) == 1 and isinstance(acc[0], str) and acc[0].strip().lower() == "all":
             return "all"
