@@ -18,6 +18,40 @@ protocol. **Newest entries at the top.** Tag each entry with one or more of:
 
 ---
 
+## 2026-07-24 — RLPR WebInstruct math grader ignored \boxed{...}, scoring correct answers 0  #mistake #fix #repro
+**Context:** issue #170 — `_check_rlpr_webinstruct` in `src/trinity/orchestration/reward.py` scores
+WebInstruct-verified RLPR items (`WebInstruct-verified-val_Avg2`).
+**Expected:** a math item answered in the requested `\boxed{...}` format grades 1.0 when correct.
+**Actual:** it scored 0.0. The choice-letter branch aside, the checker fed the **raw candidate
+prose** straight into `math_equal` / `normalize_math_answer`, neither of which strips `\boxed{...}`:
+```python
+from trinity.orchestration import reward as R
+ref = {"ground_truth": "15", "source": "WebInstruct-verified-val_Avg2"}
+R.score_text("rlpr", r"The area is \boxed{15}.", ref)   # -> 0.0  (should be 1.0)
+R.score_text("rlpr", "The answer is 15", ref)           # -> 1.0  (plain number worked)
+R.score_text("math500", r"The area is \boxed{15}.", "15")  # -> 1.0 (math path extracts the box)
+```
+**Root cause:** unlike `_check_math`, which calls `extract_boxed` / `extract_last_number` before
+comparing, this path skipped extraction. `normalize_math_answer` only strips a leading "answer is"
+prefix, so a plain trailing number happened to match but a boxed one never did — even though
+`format_hint("rlpr")` explicitly tells the worker to "use a boxed final answer for math items". So
+the *requested* output format was the one graded wrong: every boxed WebInstruct math answer was a
+false negative, understating that benchmark's accuracy and corrupting its reward signal.
+**Fix / decision:** extract before the compare, mirroring `_check_math` exactly:
+`cand_math = extract_boxed(cand) or extract_last_number(cand) or cand` and
+`gold_math = extract_boxed(gold) or gold`, then `math_equal(cand_math, gold_math)`. The `or cand`
+fallback is load-bearing: when the candidate has neither a box nor a number (a free-text answer),
+`cand_math` is the full candidate, so non-math text answers grade exactly as before — the behaviour
+only diverges when an answer is actually extracted. Distinct from #116/#122, which is the RLPR
+**MMLU-Pro choice** path (letters E–J); this is the **WebInstruct math** branch. Added
+`tests/test_reward_rlpr_webinstruct_boxed.py` (offline): the boxed repro, a boxed value winning over
+a stray earlier number, the number-in-prose fallback, a boxed LaTeX fraction, a boxed gold, plus
+guards that the plain-number, free-text, and letter-choice paths are unchanged (5 of the cases fail
+on the old code; the 10 guards pass either way). Full root suite: 261 passed.
+**Follow-up:** the number-extraction tradeoff is inherited from `_check_math` — an unboxed text gold
+with a trailing number (e.g. `"15 apples"` restated verbatim) can lose its unit; boxing the answer,
+which is what the format hint asks for, sidesteps it.
+
 ## 2026-07-12 — code grader: add resource limits on top of the HOME/secrets fix  #security #decision
 **Context:** issue #71 — the code grader (`run_pass_at_1`) runs untrusted miner/LLM candidate code. The core secret-leak fix (isolated throwaway HOME/cwd, scrubbed env, `python -I`) already landed on main.
 **Finding:** main's sandbox closes the HOME/secrets exfiltration vector but has **no resource limits** — an untrusted candidate can still exhaust host memory or fork-bomb the eval box within its wall-clock timeout (verified: a 4 GiB `bytearray` allocation runs to completion and "passes" on main).
