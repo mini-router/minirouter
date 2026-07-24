@@ -99,6 +99,32 @@ def cancel_submission_jobs(
     return jobs
 
 
+def cancel_evaluation_jobs(
+    session: Session,
+    evaluation_id: int,
+    *,
+    reason: str = "evaluation deleted",
+) -> list[JobQueue]:
+    jobs = session.execute(
+        select(JobQueue).where(
+            JobQueue.job_type == "provider_eval",
+            JobQueue.job_id == str(evaluation_id),
+            JobQueue.status == "queued",
+        )
+    ).scalars().all()
+    now = _utcnow()
+    for job in jobs:
+        job.status = "cancelled"
+        job.claimed_by = None
+        job.claimed_at = None
+        job.heartbeat_at = None
+        job.last_error = reason
+        job.updated_at = now
+    if jobs:
+        session.flush()
+    return jobs
+
+
 def enqueue_train_job(
     session: Session,
     train: TrainRun,
