@@ -344,7 +344,10 @@ def main() -> None:
     session_factory = build_session_factory(engine)
 
     if not args.loop:
-        raise SystemExit(process_once(session_factory, settings))
+        # process_once returns a "did work" signal (1/0), not an exit status.
+        # One-shot success must exit 0 whether or not the queue had a job (#168).
+        process_once(session_factory, settings)
+        raise SystemExit(0)
 
     while True:
         processed = process_once(session_factory, settings)
