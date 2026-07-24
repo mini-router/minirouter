@@ -192,9 +192,10 @@ def _list_candidates(text: str, names: tuple[str, ...]) -> list[tuple[int, list]
 def _normalize_access(acc: object, step_index: int) -> object | None:
     """Validate/normalize one access entry. Returns ``None`` if invalid.
 
-    Valid forms: ``"all"``, ``[]``/``None`` (query only), or a list of integer
-    indices that strictly precede ``step_index`` (a forward reference is an
-    invalid DAG and rejects the whole workflow).
+    Valid forms: ``"all"``, ``[]``/``None`` (query only), a bare integer index,
+    or a list of integer indices, each of which must strictly precede
+    ``step_index`` (a forward reference is an invalid DAG and rejects the whole
+    workflow).
     """
     if acc is None:
         return []
@@ -208,6 +209,10 @@ def _normalize_access(acc: object, step_index: int) -> object | None:
             j = int(s)
             return [j] if j < step_index else None
         return None
+    if isinstance(acc, bool):
+        return None
+    if isinstance(acc, int):
+        return [acc] if 0 <= acc < step_index else None
     if isinstance(acc, (list, tuple)):
         if len(acc) == 1 and isinstance(acc[0], str) and acc[0].strip().lower() == "all":
             return "all"
